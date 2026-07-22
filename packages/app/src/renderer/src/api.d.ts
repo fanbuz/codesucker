@@ -28,6 +28,7 @@ declare global {
       offProgress: () => void;
       saveConfig: (root: string, config: unknown) => Promise<boolean>;
       showItem: (p: string) => Promise<void>;
+      openExternal: (url: string) => Promise<void>;
     };
   }
 }

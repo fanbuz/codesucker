@@ -27,6 +27,11 @@
 
 CodeSucker 把《计算机软件著作权登记办法》和版权保护中心的实际审查口径**内置成规则引擎**：导入项目 → 五步向导 → 导出即合规，并在导出前自动跑一遍合规校验，把"退回风险"消灭在提交前。
 
+> [!NOTE]
+> **这个项目如何被推进**
+>
+> CodeSucker 的需求拆解、Issue 协作、阶段验收与交付回填，基于作者维护的 [Mochi Issue Flow](https://github.com/fanbuz/mochi-issue-flow-skill) 持续推进，让每一次开发都有清晰上下文和可追溯结果。
+
 ## 功能特性
 
 - 🗂 **智能文件发现** — 递归扫描项目，自动排除 `node_modules`/`build`/`.git` 等目录，尊重 `.gitignore`，自动识别 GBK/UTF-8 编码

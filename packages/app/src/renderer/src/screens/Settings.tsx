@@ -1,6 +1,11 @@
 import { toast, useStore } from '../store';
 
 const EXCLUDE_RULES = ['node_modules/', 'build/', '.git/', 'dist/', '.gradle/', 'vendor/', '*.min.js', '*.lock'];
+const LINKS = {
+  author: 'https://github.com/fanbuz',
+  repository: 'https://github.com/fanbuz/codesucker',
+  license: 'https://github.com/fanbuz/codesucker/blob/main/LICENSE',
+} as const;
 
 export default function Settings() {
   const s = useStore();
@@ -40,6 +45,46 @@ export default function Settings() {
             CodeSucker 在本机完成全部处理：扫描、清洗、脱敏、排版、导出均不产生任何网络请求。您的源代码<span style={{ color: 'var(--text)', fontWeight: 600 }}>永远不会离开这台电脑</span>。
           </div>
         </div>
+        <section className="about-card" aria-labelledby="about-codesucker">
+          <div className="about-card__header">
+            <div className="about-card__mark" aria-hidden="true">{'</>'}</div>
+            <div style={{ minWidth: 0 }}>
+              <div className="about-card__eyebrow">ABOUT · 关于</div>
+              <div id="about-codesucker" className="about-card__title">CodeSucker</div>
+            </div>
+            <span className="about-card__version">v{__APP_VERSION__}</span>
+          </div>
+
+          <p className="about-card__summary">
+            一款免费、离线的软著代码整理工具。希望把繁琐的申报准备，变成一段安心而清晰的本地流程。
+          </p>
+
+          <div className="about-card__meta">
+            <span className="about-card__free"><span aria-hidden="true" />免费软件</span>
+            <button type="button" className="about-card__text-link"
+              onClick={() => window.cs.openExternal(LINKS.license)} aria-label="查看 Apache 2.0 许可证">
+              Apache-2.0 许可
+              <span aria-hidden="true">↗</span>
+            </button>
+          </div>
+
+          <div className="about-card__footer">
+            <div className="about-card__byline">
+              构建与维护者
+              <button type="button" className="about-card__author"
+                onClick={() => window.cs.openExternal(LINKS.author)} aria-label="查看 fanbuz 的 GitHub 主页">
+                @fanbuz
+              </button>
+            </div>
+            <button type="button" className="about-card__github"
+              onClick={() => window.cs.openExternal(LINKS.repository)} aria-label="在 GitHub 查看 CodeSucker 项目">
+              在 GitHub 查看项目
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3 8h9M8.5 3.5 13 8l-4.5 4.5" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   );

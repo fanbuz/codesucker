@@ -26,6 +26,7 @@ const api = {
   offProgress: () => ipcRenderer.removeAllListeners('project:progress'),
   saveConfig: (root: string, config: unknown) => ipcRenderer.invoke('project:saveConfig', root, config),
   showItem: (p: string) => ipcRenderer.invoke('shell:showItem', p),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
 };
 
 contextBridge.exposeInMainWorld('cs', api);
