@@ -116,10 +116,13 @@ export default function Step1Import() {
     if (root) doScan(root);
   };
 
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
-    const f = e.dataTransfer.files[0] as (File & { path?: string }) | undefined;
-    if (f?.path) doScan(f.path);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const result = await window.cs.resolveDroppedPath(file);
+    if (result.path) doScan(result.path);
+    else toast(result.error ?? '无法读取拖入的项目文件夹');
   };
 
   return (

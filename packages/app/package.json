@@ -2,39 +2,65 @@
   "name": "@codesucker/app",
   "version": "0.1.0",
   "private": true,
+  "description": "离线生成符合软件著作权申报规范的源程序文档",
+  "author": {
+    "name": "fanbuz",
+    "url": "https://github.com/fanbuz"
+  },
   "license": "Apache-2.0",
   "main": "out/main/index.js",
   "build": {
     "appId": "com.fanbuz.codesucker",
     "productName": "CodeSucker",
     "directories": {
-      "buildResources": "build"
+      "buildResources": "build",
+      "output": "release"
     },
+    "asar": true,
+    "npmRebuild": false,
     "files": [
       "out/**"
     ],
+    "extraResources": [
+      {
+        "from": "../../LICENSE",
+        "to": "LICENSE.txt"
+      },
+      {
+        "from": "../../NOTICE",
+        "to": "NOTICE.txt"
+      }
+    ],
     "mac": {
       "icon": "build/icon.icns",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "target": "dmg",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "win": {
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "target": "nsis",
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
-    "linux": {
-      "icon": "build/icon.png",
-      "category": "Development"
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
-    "test": "tsx test/job-controller.ts && tsx test/worker-pool.ts",
+    "test": "tsx test/job-controller.ts && tsx test/worker-pool.ts && tsx test/export-guard.ts && tsx test/drop-path.ts",
     "test:workers": "tsx test/worker-integration.ts",
     "perf": "tsx test/performance.ts",
+    "dist:mac:x64": "npm run build && electron-builder --mac dmg --x64 --publish never",
+    "dist:mac:arm64": "npm run build && electron-builder --mac dmg --arm64 --publish never",
+    "dist:win:x64": "npm run build && electron-builder --win nsis --x64 --publish never",
     "start": "electron-vite preview"
   },
   "dependencies": {
-    "@codesucker/core": "*",
     "chardet": "^2.0.0",
     "docx": "^8.5.0",
     "fast-glob": "^3.3.2",
@@ -43,10 +69,12 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@codesucker/core": "*",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "electron": "^43.2.0",
+    "electron": "43.2.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

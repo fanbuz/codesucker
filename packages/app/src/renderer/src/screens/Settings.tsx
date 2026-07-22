@@ -5,6 +5,7 @@ const LINKS = {
   author: 'https://github.com/fanbuz',
   repository: 'https://github.com/fanbuz/codesucker',
   license: 'https://github.com/fanbuz/codesucker/blob/main/LICENSE',
+  mochi: 'https://github.com/fanbuz/mochi-issue-flow-skill',
 } as const;
 
 export default function Settings() {
@@ -64,6 +65,15 @@ export default function Settings() {
             <button type="button" className="about-card__text-link"
               onClick={() => window.cs.openExternal(LINKS.license)} aria-label="查看 Apache 2.0 许可证">
               Apache-2.0 许可
+              <span aria-hidden="true">↗</span>
+            </button>
+          </div>
+
+          <div className="about-card__craft">
+            需求拆解与开发推进基于
+            <button type="button" className="about-card__text-link"
+              onClick={() => window.cs.openExternal(LINKS.mochi)} aria-label="查看 Mochi Issue Flow skill">
+              Mochi Issue Flow
               <span aria-hidden="true">↗</span>
             </button>
           </div>

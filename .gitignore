@@ -6,3 +6,4 @@ out/
 *.local
 .codesucker.json
 packages/app/dist-electron/
+packages/app/release/

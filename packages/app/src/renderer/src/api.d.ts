@@ -19,6 +19,7 @@ declare global {
       win: (action: 'minimize' | 'maximize' | 'close') => void;
       pickFolder: () => Promise<string | null>;
       pickOutDir: () => Promise<string | null>;
+      resolveDroppedPath: (file: File) => Promise<{ path: string | null; error: string | null }>;
       recentList: () => Promise<unknown>;
       scan: (root: string, jobId: string) => Promise<unknown>;
       process: (payload: unknown, jobId: string) => Promise<unknown>;

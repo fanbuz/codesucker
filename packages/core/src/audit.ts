@@ -34,24 +34,35 @@ export function audit(
     items.push({ status: 'pass', name: '页眉与软件名称一致', detail: `页眉「${config.title}」将逐页出现，与申请表保持一致即可` });
   }
 
-  // 2. 每页行数
-  const shortPages = pages.filter((p, i) => i < pages.length - 1 && p.lines.length < lpp);
-  if (shortPages.length > 0) {
-    items.push({ status: 'fail', name: `${shortPages.length} 页行数不足 ${lpp} 行`, detail: `第 ${shortPages.map((p) => p.no).join('、')} 页行数不足（仅末页允许不满）` });
+  const hasCodeContent = files.some((file) => file.lines.length > 0)
+    && selection.totalLines > 0
+    && selection.pickedLines > 0
+    && pages.length > 0;
+
+  if (!hasCodeContent) {
+    items.push({
+      status: 'fail',
+      name: '没有可用于申报的代码内容',
+      detail: '所选文件在清洗后为 0 行、0 页，请调整文件选择或关闭部分清洗规则后重新校验',
+    });
   } else {
-    items.push({ status: 'pass', name: `每页行数均 ≥ ${lpp} 行`, detail: `共 ${pages.length} 页，${selection.truncated ? '每页恰好' : '除末页外每页'} ${lpp} 行` });
-  }
+    // 2. 每页行数
+    const shortPages = pages.filter((p, i) => i < pages.length - 1 && p.lines.length < lpp);
+    if (shortPages.length > 0) {
+      items.push({ status: 'fail', name: `${shortPages.length} 页行数不足 ${lpp} 行`, detail: `第 ${shortPages.map((p) => p.no).join('、')} 页行数不足（仅末页允许不满）` });
+    } else {
+      items.push({ status: 'pass', name: `每页行数均 ≥ ${lpp} 行`, detail: `共 ${pages.length} 页，${selection.truncated ? '每页恰好' : '除末页外每页'} ${lpp} 行` });
+    }
 
-  // 3. 末页 2/3
-  const last = pages[pages.length - 1];
-  if (last && last.lines.length < Math.ceil((lpp * 2) / 3)) {
-    items.push({ status: 'warn', name: `末页仅 ${last.lines.length} 行，不足页面 2/3`, detail: '建议补充或调整截取点，避免末页过短被认定为凑页' });
-  } else if (last) {
-    items.push({ status: 'pass', name: '末页行数满足 2/3 要求', detail: `末页 ${last.lines.length} 行` });
-  }
+    // 3. 末页 2/3
+    const last = pages[pages.length - 1];
+    if (last.lines.length < Math.ceil((lpp * 2) / 3)) {
+      items.push({ status: 'warn', name: `末页仅 ${last.lines.length} 行，不足页面 2/3`, detail: '建议补充或调整截取点，避免末页过短被认定为凑页' });
+    } else {
+      items.push({ status: 'pass', name: '末页行数满足 2/3 要求', detail: `末页 ${last.lines.length} 行` });
+    }
 
-  // 4. 首末页模块边界（由截取策略保证，明示给用户）
-  if (pages.length > 0) {
+    // 4. 首末页模块边界（由截取策略保证，明示给用户）
     items.push({
       status: 'pass', name: '首页为模块开头、末页为模块结尾',
       detail: `第 1 页起于 ${pages[0].startFile}，第 ${pages.length} 页止于 ${last.endFile}` +

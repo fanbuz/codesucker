@@ -126,9 +126,9 @@ tag 校验会拒绝缺少对应版本日期标题的发布。
 6. 提交 `chore(release): v<version>`
 7. 创建 annotated tag：`git tag -a v<version> -m "CodeSucker v<version>"`
 8. 推送 main 与 tag；CI 再次校验 tag、版本和 CHANGELOG 一致
-9. 由发布工作流生成安装包、校验和与 GitHub Release
+9. `Package and Release` 工作流生成 macOS x64、macOS arm64、Windows x64 安装包与 SHA-256 校验文件，并创建 GitHub Release
 
-在三平台打包流程落地前，第 9 步保持人工执行，不添加无法产出有效安装包的自动发布工作流。
+MVP 暂不产出 Linux 安装包；macOS 安装包未签名、未公证，必须在 Release 说明和 README 中保留 Gatekeeper 指引。正式签名凭据只能存放在 GitHub Secrets，不得写入仓库或构建日志。
 
 ## 当前版本
 

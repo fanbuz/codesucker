@@ -8,8 +8,9 @@ import {
 import type {
   CleanedFile, CleanOptions, FileCandidate, FileEntry, PipelineProgress, ProjectConfig,
 } from '@codesucker/core';
-import appPackage from '../../package.json';
 import { JobController, type JobHandle, type JobKind } from './job-controller';
+import { assertExportableSelection } from './export-guard';
+import { validateDroppedDirectory } from './drop-path';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
 import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, RenderWorkerRequest,
@@ -79,7 +80,7 @@ interface LanguageStat {
 
 function versionMeta(): VersionMeta {
   return {
-    appVersion: appPackage.version,
+    appVersion: app.getVersion(),
     configSchemaVersion: CONFIG_SCHEMA_VERSION,
     rulesVersion: RULES_VERSION,
   };
@@ -297,6 +298,8 @@ export function registerPipelineIpc() {
     return result.canceled ? null : result.filePaths[0];
   });
 
+  ipcMain.handle('path:validateDroppedDirectory', (_event, inputPath: string) => validateDroppedDirectory(inputPath));
+
   ipcMain.handle('recent:list', () => loadRecent());
   ipcMain.handle('project:cancel', (_event, jobId: string) => jobs.cancel(jobId));
 
@@ -356,7 +359,7 @@ export function registerPipelineIpc() {
       const entries = orderedEntries(request.payload);
       const result = await processWithWorkers(entries, request.payload, job, event.sender);
       const pages = result.selection.pages;
-      if (pages.length === 0) throw new Error('没有可导出的代码内容');
+      assertExportableSelection(result.selection);
       const renderOptions = {
         title: request.payload.title,
         fontName: 'SimSun',
@@ -379,7 +382,7 @@ export function registerPipelineIpc() {
         size: 0,
         pages: pages.length,
         lines: result.selection.pickedLines,
-        appVersion: appPackage.version,
+        appVersion: app.getVersion(),
         rulesVersion: RULES_VERSION,
         errors: result.errors,
       };
@@ -416,7 +419,7 @@ export function registerPipelineIpc() {
     const persisted = {
       ...values,
       schemaVersion: CONFIG_SCHEMA_VERSION,
-      appVersion: appPackage.version,
+      appVersion: app.getVersion(),
       rulesVersion: RULES_VERSION,
     };
     fs.writeFileSync(path.join(root, '.codesucker.json'), `${JSON.stringify(persisted, null, 2)}\n`);

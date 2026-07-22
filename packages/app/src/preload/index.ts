@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 interface ProgressEvent {
   jobId: string;
@@ -15,6 +15,10 @@ const api = {
   win: (action: 'minimize' | 'maximize' | 'close') => ipcRenderer.send(`win:${action}`),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickFolder'),
   pickOutDir: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickOutDir'),
+  resolveDroppedPath: (file: File): Promise<{ path: string | null; error: string | null }> => {
+    const inputPath = webUtils.getPathForFile(file);
+    return ipcRenderer.invoke('path:validateDroppedDirectory', inputPath);
+  },
   recentList: () => ipcRenderer.invoke('recent:list'),
   scan: (root: string, jobId: string) => ipcRenderer.invoke('project:scan', { root, jobId }),
   process: (payload: unknown, jobId: string) => ipcRenderer.invoke('project:process', { payload, jobId }),
