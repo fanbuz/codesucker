@@ -2,6 +2,13 @@ name: Package and Release
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'packages/app/**'
+      - 'packages/core/**'
   push:
     tags: ['v*']
 
