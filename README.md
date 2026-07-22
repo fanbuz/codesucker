@@ -13,6 +13,10 @@
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#参与贡献)
 
+<br/>
+
+<img src="docs/screenshots/step2-files.png" alt="CodeSucker — 文件与排序：勾选纳入、拖拽调序、实时统计与页数预估" width="920" />
+
 </div>
 
 ---
