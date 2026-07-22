@@ -61,6 +61,22 @@ jobs:
       - name: Build installer
         run: npm run ${{ matrix.script }}
 
+      - name: Smoke test Windows application
+        if: matrix.label == 'Windows x64'
+        shell: pwsh
+        run: |
+          $executable = Resolve-Path 'packages/app/release/win-unpacked/CodeSucker.exe'
+          try {
+            $process = Start-Process -FilePath $executable.Path -PassThru
+            Start-Sleep -Seconds 5
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "CodeSucker exited during the startup smoke test with code $($process.ExitCode)"
+            }
+          } finally {
+            Get-Process CodeSucker -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+
       - name: Upload installer
         uses: actions/upload-artifact@v7
         with:
