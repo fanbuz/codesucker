@@ -4,6 +4,12 @@ import { registerPipelineIpc, shutdownPipeline } from './pipeline';
 
 let win: BrowserWindow | null = null;
 
+const TRUSTED_EXTERNAL_URLS = new Set([
+  'https://github.com/fanbuz',
+  'https://github.com/fanbuz/codesucker',
+  'https://github.com/fanbuz/codesucker/blob/main/LICENSE',
+]);
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -38,6 +44,10 @@ app.whenReady().then(() => {
   ipcMain.on('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()));
   ipcMain.on('win:close', () => win?.close());
   ipcMain.handle('shell:showItem', (_e, p: string) => shell.showItemInFolder(p));
+  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+    if (!TRUSTED_EXTERNAL_URLS.has(url)) throw new Error('不允许打开未受信任的外部链接');
+    await shell.openExternal(url);
+  });
 
   createWindow();
   app.on('activate', () => {
