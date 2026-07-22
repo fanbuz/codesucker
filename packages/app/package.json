@@ -27,7 +27,10 @@
   },
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "tsc --noEmit && electron-vite build",
+    "test": "tsx test/job-controller.ts && tsx test/worker-pool.ts",
+    "test:workers": "tsx test/worker-integration.ts",
+    "perf": "tsx test/performance.ts",
     "start": "electron-vite preview"
   },
   "dependencies": {

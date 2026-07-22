@@ -77,6 +77,14 @@ export function renderTxt(pages: Page[], opts: RenderOptions): string {
   return file;
 }
 
+export async function renderTxtAsync(pages: Page[], opts: RenderOptions): Promise<string> {
+  await fs.promises.mkdir(opts.outDir, { recursive: true });
+  const file = path.join(opts.outDir, `${opts.baseName ?? '源程序_' + sanitize(opts.title)}.txt`);
+  const text = pages.map((p) => p.lines.join('\n')).join('\n');
+  await fs.promises.writeFile(file, text, 'utf8');
+  return file;
+}
+
 function sanitize(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || '未命名';
 }

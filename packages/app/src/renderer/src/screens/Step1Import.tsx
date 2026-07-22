@@ -1,8 +1,13 @@
-import { useRef, useState } from 'react';
-import { useStore, toast, type FileRow, type RecentProject } from '../store';
+import {
+  createJobId, isCancellation, useStore, toast,
+  type FileRow, type FileTaskError, type RecentProject,
+} from '../store';
 
 interface ScanResult {
+  jobId: string;
   files: FileRow[];
+  errors: FileTaskError[];
+  workerCount: number;
   langCounts: Record<string, number>;
   entryOrder: string[];
   mtimeOrder: string[];
@@ -16,22 +21,50 @@ interface ScanResult {
   };
 }
 
+function scanPercent(progress: JobProgress | null): number {
+  if (!progress) return 2;
+  if (progress.stage === 'discovering') return progress.total > 0 ? 8 : 3;
+  if (progress.stage === 'scanning') {
+    return 8 + (progress.total > 0 ? (progress.completed / progress.total) * 92 : 0);
+  }
+  return 100;
+}
+
+function formatBytes(bytes = 0): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export default function Step1Import() {
   const s = useStore();
-  const [pct, setPct] = useState(0);
-  const timer = useRef<ReturnType<typeof setInterval>>();
+  const progress = s.jobProgress?.jobKind === 'scan' ? s.jobProgress : null;
+  const pct = scanPercent(progress);
 
   const doScan = async (root: string) => {
-    s.set({ scanPhase: 'scanning', root, projName: root.split('/').pop() ?? root });
-    setPct(0);
-    clearInterval(timer.current);
-    timer.current = setInterval(() => setPct((p) => Math.min(92, p + 4 + Math.random() * 6)), 90);
+    const jobId = createJobId('scan');
+    s.set({
+      scanPhase: 'scanning',
+      scanError: null,
+      scanErrors: [],
+      activeJobId: jobId,
+      jobProgress: null,
+      processing: false,
+      exporting: false,
+      root,
+      projName: root.split('/').pop() ?? root,
+    });
     try {
-      const r = (await window.cs.scan(root)) as ScanResult;
-      clearInterval(timer.current);
-      setPct(100);
+      const r = (await window.cs.scan(root, jobId)) as ScanResult;
+      if (useStore.getState().activeJobId !== jobId) return;
       if (r.files.length === 0) {
-        s.set({ scanPhase: 'error' });
+        s.set({
+          scanPhase: 'error',
+          scanError: r.errors.length > 0 ? `扫描失败 ${r.errors.length} 个文件，未发现可用源码` : '未发现可用源代码文件',
+          scanErrors: r.errors,
+          activeJobId: null,
+          jobProgress: null,
+        });
         return;
       }
       const cfg = r.savedConfig;
@@ -40,25 +73,41 @@ export default function Step1Import() {
       const known = new Set(files.map((f) => f.relPath));
       const order = (cfg?.order ?? []).filter((p) => known.has(p));
       for (const p of (cfg?.sortMode === 'mtime' ? r.mtimeOrder : r.entryOrder)) if (!order.includes(p)) order.push(p);
-      setTimeout(() => {
-        s.set({
-          scanPhase: 'idle', loaded: true, step: 2,
-          files, entryOrder: r.entryOrder, mtimeOrder: r.mtimeOrder, order,
-          sortMode: cfg?.sortMode ?? 'entry',
-          swName: cfg?.title ?? s.swName,
-          owner: cfg?.owner ?? s.owner,
-          clean: cfg?.clean ?? s.clean,
-          fmtDocx: cfg?.fmtDocx ?? true, fmtTxt: cfg?.fmtTxt ?? false,
-          outDir: cfg?.outDir ?? '',
-          processData: null, page: 1,
-        });
-        if (r.savedConfigWarning) toast(r.savedConfigWarning);
-        else if (cfg) toast('已恢复项目配置（.codesucker.json）');
-      }, 350);
+      s.set({
+        scanPhase: 'idle', loaded: true, step: 2,
+        scanErrors: r.errors,
+        activeJobId: null,
+        jobProgress: null,
+        files, entryOrder: r.entryOrder, mtimeOrder: r.mtimeOrder, order,
+        sortMode: cfg?.sortMode ?? 'entry',
+        swName: cfg?.title ?? s.swName,
+        owner: cfg?.owner ?? s.owner,
+        clean: cfg?.clean ?? s.clean,
+        fmtDocx: cfg?.fmtDocx ?? true, fmtTxt: cfg?.fmtTxt ?? false,
+        outDir: cfg?.outDir ?? '',
+        processData: null, page: 1,
+      });
+      if (r.errors.length > 0) toast(`${r.errors.length} 个文件扫描失败，已跳过`);
+      else if (r.savedConfigWarning) toast(r.savedConfigWarning);
+      else if (cfg) toast('已恢复项目配置（.codesucker.json）');
     } catch (e) {
-      clearInterval(timer.current);
-      s.set({ scanPhase: 'error' });
-      toast('扫描失败：' + (e instanceof Error ? e.message : String(e)));
+      if (useStore.getState().activeJobId !== jobId) return;
+      if (isCancellation(e)) {
+        s.set({ scanPhase: 'idle', activeJobId: null, jobProgress: null });
+        return;
+      }
+      const message = e instanceof Error ? e.message : String(e);
+      s.set({ scanPhase: 'error', scanError: message, activeJobId: null, jobProgress: null });
+      toast('扫描失败：' + message);
+    }
+  };
+
+  const cancelScan = async () => {
+    const jobId = s.activeJobId;
+    if (!jobId) return;
+    await window.cs.cancel(jobId);
+    if (useStore.getState().activeJobId === jobId) {
+      s.set({ scanPhase: 'idle', activeJobId: null, jobProgress: null });
     }
   };
 
@@ -72,10 +121,6 @@ export default function Step1Import() {
     const f = e.dataTransfer.files[0] as (File & { path?: string }) | undefined;
     if (f?.path) doScan(f.path);
   };
-
-  const langSummary = Object.entries(
-    s.files.reduce<Record<string, number>>((m, f) => { m[f.lang] = (m[f.lang] ?? 0) + 1; return m; }, {}),
-  ).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(' / ');
 
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '32px 40px', animation: 'cs-fade .18s ease-out' }}>
@@ -96,7 +141,9 @@ export default function Step1Import() {
       {s.scanPhase === 'scanning' && (
         <div style={{ border: '1.5px solid var(--border)', borderRadius: 14, background: 'var(--panel)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
           <svg width="30" height="30" viewBox="0 0 30 30" style={{ animation: 'cs-spin 1s linear infinite' }}><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" strokeWidth="3" /><path d="M15 3a12 12 0 0 1 12 12" fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" /></svg>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>正在扫描项目…</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>
+            {progress?.stage === 'discovering' ? '正在发现源代码文件…' : '正在并发扫描项目…'}
+          </div>
           <div style={{ width: 360, height: 6, borderRadius: 3, background: 'var(--border2)', overflow: 'hidden' }}>
             <div style={{ height: '100%', borderRadius: 3, background: 'var(--accent)', width: `${pct}%`, transition: 'width .12s', position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', inset: 0, width: '40%', background: 'linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent)', animation: 'cs-shimmer 1.1s linear infinite' }} />
@@ -105,18 +152,25 @@ export default function Step1Import() {
           <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
             <span style={{ animation: 'cs-blink 1s ease-in-out infinite', display: 'inline-block', marginRight: 6 }}>▸</span>{s.root}
           </div>
-          {langSummary && <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'var(--mono)' }}>已识别 {langSummary}</div>}
+          {progress?.stage === 'scanning' && (
+            <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'var(--mono)' }}>
+              {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} 个文件
+              {' · '}{formatBytes(progress.bytes)}
+              {' · '}{progress.workerCount} workers
+            </div>
+          )}
+          <button className="btn-ghost" style={{ height: 28, padding: '0 12px', fontSize: 11.5 }} onClick={cancelScan}>取消扫描</button>
         </div>
       )}
 
       {s.scanPhase === 'error' && (
         <div style={{ border: '1.5px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 14, background: 'var(--red-soft)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, animation: 'cs-fade .18s ease-out' }}>
           <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--red)', boxShadow: 'var(--shadow)' }}>✕</div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>未发现可用源代码文件</div>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{s.scanError ?? '未发现可用源代码文件'}</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', lineHeight: 1.7 }}>
             该文件夹内没有可识别的源码。建议检查：<br />① 是否选错了目录（应选择包含 src/ 的项目根目录）　② 源码是否在压缩包内，需先解压
           </div>
-          <button className="btn-primary" style={{ marginTop: 6, height: 32, padding: '0 16px', fontSize: 13 }} onClick={() => s.set({ scanPhase: 'idle' })}>重新选择文件夹</button>
+          <button className="btn-primary" style={{ marginTop: 6, height: 32, padding: '0 16px', fontSize: 13 }} onClick={() => s.set({ scanPhase: 'idle', scanError: null })}>重新选择文件夹</button>
         </div>
       )}
 

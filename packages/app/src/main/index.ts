@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'node:path';
-import { registerPipelineIpc } from './pipeline';
+import { registerPipelineIpc, shutdownPipeline } from './pipeline';
 
 let win: BrowserWindow | null = null;
 
@@ -47,4 +47,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  void shutdownPipeline();
 });

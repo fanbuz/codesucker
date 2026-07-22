@@ -2,18 +2,21 @@ import { create } from 'zustand';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
-  rawLines: number; mtimeMs: number; included: boolean; entryScore: number;
+  sizeBytes: number; rawLines: number; mtimeMs: number; included: boolean; entryScore: number;
 }
+export interface FileTaskError { stage: 'scanning' | 'cleaning' | 'rendering'; file: string; message: string }
 export interface AuditRow {
   status: 'pass' | 'warn' | 'fail'; name: string; detail: string;
   file?: string; line?: number; context?: string[];
 }
 export interface PageData { no: number; lines: string[]; startFile: string; endFile: string }
 export interface ProcessData {
+  jobId: string;
   meta: { appVersion: string; configSchemaVersion: number; rulesVersion: string };
   stats: { totalFiles: number; includedFiles: number; cleanedLines: number; estimatedPages: number; htmlCssRatio: number; langCounts: Record<string, number> };
-  selection: { pages: PageData[]; totalLines: number; pickedLines: number; truncated: boolean; splitAfterPage: number | null; frontEndFile: string | null; backStartFile: string | null };
+  selection: { pages: PageData[]; totalLines: number; pickedLines: number; truncated: boolean; selectedRelPaths: string[]; splitAfterPage: number | null; frontEndFile: string | null; backStartFile: string | null };
   audit: AuditRow[];
+  errors: FileTaskError[];
   perFile: Array<{ relPath: string; name: string; lines: number; removedComments: number; removedBlanks: number; masked: number }>;
   preview: null | {
     file: string;
@@ -34,6 +37,10 @@ interface State {
   root: string | null;
   projName: string;
   scanPhase: 'idle' | 'scanning' | 'error';
+  scanError: string | null;
+  scanErrors: FileTaskError[];
+  activeJobId: string | null;
+  jobProgress: JobProgress | null;
   recent: RecentProject[];
   files: FileRow[];
   entryOrder: string[];
@@ -51,7 +58,7 @@ interface State {
   fmtTxt: boolean;
   outDir: string;
   exporting: boolean;
-  exportResult: null | { docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string };
+  exportResult: null | { docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
   toast: string | null;
   set: (p: Partial<State>) => void;
 }
@@ -64,6 +71,10 @@ export const useStore = create<State>((set) => ({
   root: null,
   projName: '未打开项目',
   scanPhase: 'idle',
+  scanError: null,
+  scanErrors: [],
+  activeJobId: null,
+  jobProgress: null,
   recent: [],
   files: [],
   entryOrder: [],
@@ -103,10 +114,20 @@ export function cleanOptions(t: CleanToggles) {
   return { ...t, maxLineWidth: 78, tabWidth: 4 };
 }
 
+export function createJobId(kind: 'scan' | 'process' | 'export'): string {
+  return `${kind}-${crypto.randomUUID()}`;
+}
+
+export function isCancellation(error: unknown): boolean {
+  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /AbortError|任务已取消|已由新任务替代/.test(text);
+}
+
 export async function runProcess() {
   const s = useStore.getState();
   if (!s.root) return;
-  s.set({ processing: true });
+  const jobId = createJobId('process');
+  s.set({ processing: true, activeJobId: jobId, jobProgress: null });
   try {
     const data = (await window.cs.process({
       root: s.root,
@@ -114,10 +135,13 @@ export async function runProcess() {
       title: s.swName,
       owner: s.owner || undefined,
       clean: cleanOptions(s.clean),
-    })) as ProcessData;
-    useStore.getState().set({ processData: data, processing: false });
+    }, jobId)) as ProcessData;
+    if (useStore.getState().activeJobId !== jobId) return;
+    useStore.getState().set({ processData: data, processing: false, activeJobId: null, jobProgress: null });
+    if (data.errors.length > 0) toast(`${data.errors.length} 个文件处理失败，已跳过`);
   } catch (e) {
-    useStore.getState().set({ processing: false });
-    toast('处理失败：' + (e instanceof Error ? e.message : String(e)));
+    if (useStore.getState().activeJobId !== jobId) return;
+    useStore.getState().set({ processing: false, activeJobId: null, jobProgress: null });
+    if (!isCancellation(e)) toast('处理失败：' + (e instanceof Error ? e.message : String(e)));
   }
 }

@@ -30,6 +30,7 @@ export interface FileEntry {
   name: string;
   ext: string;
   lang: string;
+  sizeBytes: number;
   rawLines: number;
   mtimeMs: number;
   encoding: string;
@@ -50,9 +51,25 @@ export interface AnnotatedLine {
 export interface CleanedFile {
   entry: FileEntry;
   lines: string[];
+  /** 注释删除前从原始源码提取出的署名审计证据 */
+  attributions: AttributionEvidence[];
   removedComments: number;
   removedBlanks: number;
   maskedCount: number;
+}
+
+export type AttributionKind = 'author' | 'copyright';
+
+export interface AttributionEvidence {
+  kind: AttributionKind;
+  /** 识别出的署名主体，不包含年份和注释符号 */
+  subject: string;
+  /** 相对于项目根目录的文件路径 */
+  file: string;
+  /** 原始源码中的 1-based 行号 */
+  line: number;
+  /** 未经清洗的原始行文本 */
+  text: string;
 }
 
 export interface Page {
@@ -68,6 +85,8 @@ export interface Selection {
   totalLines: number;
   pickedLines: number;
   truncated: boolean;
+  /** 实际为最终分页贡献代码行的文件，按首次出现顺序排列 */
+  selectedRelPaths: string[];
   /** 前段最后一页页码（截断时为 30） */
   splitAfterPage: number | null;
   frontEndFile: string | null;
@@ -92,6 +111,23 @@ export interface ProjectStats {
   estimatedPages: number;
   htmlCssRatio: number;
   langCounts: Record<string, number>;
+}
+
+export type PipelineStage = 'discovering' | 'scanning' | 'cleaning' | 'selecting' | 'auditing' | 'rendering';
+
+export interface PipelineProgress {
+  stage: PipelineStage;
+  completed: number;
+  total: number;
+  /** 已处理的源码字节数；不适用的阶段省略 */
+  bytes?: number;
+  message?: string;
+}
+
+export interface FileTaskError {
+  stage: 'scanning' | 'cleaning' | 'rendering';
+  file: string;
+  message: string;
 }
 
 export const DEFAULT_EXCLUDES = [
