@@ -80,9 +80,9 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <button onClick="{{ saveConfig }}" style="height:30px;padding:0 12px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit" style-hover="color:var(--text);background:var(--panel2)">保存配置</button>
-      <button onClick="{{ toggleTheme }}" title="切换主题" style="width:30px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="color:var(--text)">{{ themeIcon }}</button>
+      <button onClick="{{ toggleTheme }}" title="切换主题" style="width:30px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="color:var(--text)"><sc-if value="{{ isLight }}" hint-placeholder-val="{{ true }}"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M13.2 9.4A5 5 0 0 1 6.6 2.8a5.2 5.2 0 1 0 6.6 6.6Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg></sc-if><sc-if value="{{ isDark }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.3"></circle><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M3.5 12.5l1-1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"></path></svg></sc-if></button>
       <button onClick="{{ openSettings }}" title="设置" style="width:30px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative" style-hover="color:var(--text)">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.3"></circle><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3 3.6 12.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"></path></svg>
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.3"></circle><path d="M8 1.4l1 1.5a5.6 5.6 0 0 1 1.3.55l1.75-.35.9 1.55-1 1.45c.06.24.09.49.09.75s-.03.51-.09.75l1 1.45-.9 1.55-1.75-.35c-.4.24-.83.42-1.3.55l-1 1.5-1-1.5a5.6 5.6 0 0 1-1.3-.55l-1.75.35-.9-1.55 1-1.45A4 4 0 0 1 4 8c0-.26.03-.51.09-.75l-1-1.45.9-1.55 1.75.35c.4-.24.83-.42 1.3-.55l1-1.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"></path></svg>
         <span style="position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#e5484d;border:1.5px solid var(--panel)"></span>
       </button>
     </div>
@@ -223,9 +223,27 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
             <div><div style="font-size:11px;color:var(--text3)">预计页数</div><div style="font-size:12px;font-weight:600;color:var(--green);margin-top:2px">恰好满足 60 页 ✓</div></div>
           </div>
           <div style="background:var(--panel2);border:1px solid var(--border2);border-radius:9px;padding:12px">
-            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)"><span>HTML + CSS 占比</span><span style="font-family:var(--mono);color:var(--text)">12%</span></div>
-            <div style="height:6px;border-radius:3px;background:var(--border2);margin-top:8px;overflow:hidden"><div style="width:12%;height:100%;background:var(--accent);border-radius:3px"></div></div>
-            <div style="font-size:10.5px;color:var(--text3);margin-top:6px">建议 ≤20%，避免被认定为非核心代码</div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:11px;color:var(--text3);margin-bottom:9px"><span>按文件类型统计 <span style="color:var(--text2)">· 点选参与清洗的后缀</span></span><span style="font-family:var(--mono);color:var(--text)">{{ selLinesLabel }} 行</span></div>
+            <!-- 电池格 -->
+            <div style="display:flex;align-items:center;gap:3px">
+              <div style="flex:1;display:flex;gap:2px;padding:3px;border:1.5px solid var(--border);border-radius:5px;background:var(--panel)">
+                <sc-for list="{{ langCells }}" as="c" hint-placeholder-count="20">
+                  <div style="flex:1;height:16px;border-radius:2px;background:{{ c.color }}"></div>
+                </sc-for>
+              </div>
+              <div style="width:4px;height:11px;border-radius:0 2px 2px 0;background:var(--border)"></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;margin-top:11px">
+              <sc-for list="{{ langStats }}" as="l" hint-placeholder-count="4">
+                <div onClick="{{ l.toggle }}" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 6px;margin:0 -6px;border-radius:7px;opacity:{{ l.opacity }};background:{{ l.rowBg }}" style-hover="background:var(--panel2)">
+                  <span style="width:15px;height:15px;flex:none;border-radius:4px;border:1.5px solid {{ l.checkBorder }};background:{{ l.checkBg }};display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:700">{{ l.check }}</span>
+                  <span style="width:18px;height:18px;flex:none;border-radius:5px;display:flex;align-items:center;justify-content:center;background:{{ l.iconBg }};filter:{{ l.iconFilter }}">{{ l.icon }}</span>
+                  <span style="flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25"><span style="font-size:12px;font-weight:500">{{ l.name }}</span><span style="font-size:10.5px;color:var(--text3);font-family:var(--mono)">{{ l.files }} 个文件</span></span>
+                  <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">{{ l.lines }} 行</span>
+                  <span style="width:34px;text-align:right;font-size:11.5px;font-family:var(--mono);font-weight:600;color:{{ l.pctColor }}">{{ l.pct }}%</span>
+                </div>
+              </sc-for>
+            </div>
           </div>
           <div style="flex:1"></div>
           <button onClick="{{ goStep3 }}" style="height:36px;border:none;border-radius:9px;background:var(--accent);color:#fff;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit" style-hover="filter:brightness(1.08)">下一步：清洗与排版</button>
@@ -394,36 +412,73 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 
     <!-- ============ 设置页 ============ -->
     <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
-      <div style="flex:1;overflow:auto;padding:22px 32px;animation:cs-fade .18s ease-out">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+      <div style="flex:1;overflow:auto;animation:cs-fade .18s ease-out">
+        <div style="max-width:920px;margin:0 auto;padding:26px 32px 36px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:22px">
           <button onClick="{{ closeSettings }}" style="width:28px;height:28px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text2);cursor:pointer;font-size:13px" style-hover="color:var(--text)">←</button>
           <div style="font-size:16px;font-weight:600">设置</div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:12px;max-width:640px">
-          <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;box-shadow:var(--shadow)">
-            <div style="display:flex;align-items:center;justify-content:space-between">
-              <div><div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px">软件更新 <span style="width:7px;height:7px;border-radius:50%;background:#e5484d"></span></div><div style="font-size:12px;color:var(--text2);margin-top:4px">当前 v1.2.0，检测到新版本 <span style="color:var(--accent);font-weight:600">v1.3.0</span></div></div>
-              <button onClick="{{ noop }}" style="height:32px;padding:0 16px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:12.5px;font-weight:500;cursor:pointer;font-family:inherit" style-hover="filter:brightness(1.08)">下载更新</button>
-            </div>
-            <div style="margin-top:12px;padding:11px 13px;background:var(--panel2);border:1px solid var(--border2);border-radius:9px;font-size:11.5px;color:var(--text2);line-height:1.8">
-              <div style="font-weight:600;color:var(--text);margin-bottom:2px">v1.3.0 更新日志</div>
-              · 新增 Python / Go 项目入口自动识别<br>· 脱敏规则支持自定义正则<br>· 修复超长行折行后页行数统计偏差
+
+        <!-- App 身份 + 更新 hero -->
+        <div style="display:flex;align-items:center;gap:20px;background:linear-gradient(120deg,var(--accent-soft),var(--panel));border:1px solid var(--accent-line);border-radius:16px;padding:22px 24px;margin-bottom:16px">
+          <div style="width:56px;height:56px;flex:none;border-radius:15px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:20px;font-weight:600;box-shadow:0 6px 18px color-mix(in srgb, var(--accent) 40%, transparent)">&lt;/&gt;</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:16px;font-weight:700">CodeSucker · 软著代码抽取器</div>
+            <div style="font-size:12.5px;color:var(--text2);margin-top:3px;display:flex;align-items:center;gap:8px">
+              <span style="font-family:var(--mono)">当前 v1.2.0</span>
+              <span style="width:1px;height:11px;background:var(--border)"></span>
+              <span style="display:inline-flex;align-items:center;gap:5px;color:var(--accent);font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:#e5484d;animation:cs-blink 1.3s ease-in-out infinite"></span>检测到新版本 v1.3.0</span>
             </div>
           </div>
-          <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;box-shadow:var(--shadow)">
-            <div style="font-size:13.5px;font-weight:600">默认排除规则</div>
-            <div style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:10px">匹配的目录与文件在导入时自动排除</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">
-              <sc-for list="{{ excludeRules }}" as="e" hint-placeholder-count="7">
-                <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:4px 8px">{{ e }}<span style="color:var(--text3);cursor:pointer;font-size:10px" style-hover="color:var(--red)">✕</span></span>
+          <button onClick="{{ noop }}" style="height:38px;padding:0 20px;border:none;border-radius:9px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px color-mix(in srgb, var(--accent) 35%, transparent)" style-hover="filter:brightness(1.08)">下载更新</button>
+        </div>
+
+        <!-- 两栏布局 -->
+        <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:16px;align-items:start">
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--shadow)">
+              <div style="font-size:13.5px;font-weight:600;margin-bottom:12px">v1.3.0 更新日志</div>
+              <div style="display:flex;flex-direction:column;gap:11px">
+                <sc-for list="{{ changelog }}" as="c" hint-placeholder-count="3">
+                  <div style="display:flex;gap:11px;align-items:flex-start">
+                    <span style="width:22px;height:22px;flex:none;border-radius:6px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px">{{ c.icon }}</span>
+                    <div style="min-width:0"><div style="font-size:12.5px;font-weight:500">{{ c.title }}</div><div style="font-size:11.5px;color:var(--text3);margin-top:1px;line-height:1.5">{{ c.desc }}</div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--shadow)">
+              <div style="font-size:13.5px;font-weight:600">默认排除规则</div>
+              <div style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:12px">匹配的目录与文件在导入时自动排除，不计入统计与文档</div>
+              <div style="display:flex;flex-wrap:wrap;gap:7px">
+                <sc-for list="{{ excludeRules }}" as="e" hint-placeholder-count="7">
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:5px 9px">{{ e }}<span style="color:var(--text3);cursor:pointer;font-size:10px" style-hover="color:var(--red)">✕</span></span>
+                </sc-for>
+                <span style="display:inline-flex;align-items:center;font-size:11.5px;color:var(--accent);border:1px dashed var(--accent-line);border-radius:7px;padding:5px 11px;cursor:pointer" style-hover="background:var(--accent-soft)">+ 添加规则</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div style="background:linear-gradient(160deg,var(--green-soft),var(--panel));border:1px solid color-mix(in srgb, var(--green) 25%, transparent);border-radius:14px;padding:20px;box-shadow:var(--shadow)">
+              <div style="display:flex;align-items:center;gap:9px">
+                <div style="width:34px;height:34px;flex:none;border-radius:9px;background:var(--panel);display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow)"><svg width="17" height="17" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" stroke-width="1.4"></rect><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" stroke-width="1.4"></path></svg></div>
+                <div><div style="font-size:13.5px;font-weight:600">隐私说明</div><div style="font-size:11px;color:var(--green);font-weight:600;margin-top:1px">✓ 零网络请求 · 全程离线</div></div>
+              </div>
+              <div style="font-size:12px;color:var(--text2);margin-top:12px;line-height:1.9">CodeSucker 在本机完成全部处理：扫描、清洗、脱敏、排版、导出均不产生任何网络请求。您的源代码<span style="color:var(--text);font-weight:600">永远不会离开这台电脑</span>。更新检查仅在您手动点击时访问版本号文件，不上传任何数据。</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
+                <div style="background:var(--panel);border:1px solid var(--border2);border-radius:9px;padding:10px 12px"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--green)">0</div><div style="font-size:10.5px;color:var(--text3);margin-top:1px">出站网络请求</div></div>
+                <div style="background:var(--panel);border:1px solid var(--border2);border-radius:9px;padding:10px 12px"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--green)">100%</div><div style="font-size:10.5px;color:var(--text3);margin-top:1px">本地处理</div></div>
+              </div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--shadow)">
+              <div style="font-size:13.5px;font-weight:600;margin-bottom:12px">关于</div>
+              <sc-for list="{{ aboutRows }}" as="a" hint-placeholder-count="3">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--text2)">{{ a.k }}</span><span style="font-size:12px;font-family:var(--mono);color:var(--text)">{{ a.v }}</span></div>
               </sc-for>
-              <span style="display:inline-flex;align-items:center;font-size:11.5px;color:var(--accent);border:1px dashed var(--accent-line);border-radius:6px;padding:4px 10px;cursor:pointer" style-hover="background:var(--accent-soft)">+ 添加规则</span>
             </div>
           </div>
-          <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;box-shadow:var(--shadow)">
-            <div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" stroke-width="1.4"></rect><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" stroke-width="1.4"></path></svg>隐私说明</div>
-            <div style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.9">CodeSucker 在本机完成全部处理：扫描、清洗、脱敏、排版、导出均不产生任何网络请求。您的源代码<span style="color:var(--text);font-weight:600">永远不会离开这台电脑</span>。更新检查仅在您手动点击时访问版本号文件，不上传任何数据。</div>
-          </div>
+        </div>
         </div>
       </div>
     </sc-if>
@@ -470,7 +525,8 @@ class Component extends DCLogic {
     page: 3,
     ruleExpanded: false, authorFixed: false,
     fmtDocx: true, fmtTxt: false,
-    exportModal: false, exporting: false, toast: false, toastText: '', scanFileIdx: 0
+    exportModal: false, exporting: false, toast: false, toastText: '', scanFileIdx: 0,
+    langSel: { Kotlin: true, Java: true, 'HTML+CSS': true, XML: true }
   };
 
   componentDidMount() {
@@ -633,6 +689,54 @@ class Component extends DCLogic {
       toggle: t.key ? (() => this.setState(st => ({ treeChecked: { ...st.treeChecked, [t.key]: !(st.treeChecked[t.key] ?? !t.off) } }))) : undefined
     }));
 
+    // language breakdown (by file extension)
+    const h = React.createElement;
+    const svg = (children, vb) => h('svg', { width: 12, height: 12, viewBox: vb || '0 0 16 16', fill: 'none' }, children);
+    const langMeta = [
+      { name: 'Kotlin', ext: '.kt', color: '#7c5cff', iconBg: 'rgba(124,92,255,.15)', lines: 5182, files: 28,
+        icon: h('svg', { width: 12, height: 12, viewBox: '0 0 16 16' }, [
+          h('path', { key: 1, d: 'M2 2h12L8 8l6 6H2V2Z', fill: '#7c5cff' }) ]) },
+      { name: 'Java', ext: '.java', color: '#b07219', iconBg: 'rgba(176,114,25,.15)', lines: 1556, files: 9,
+        icon: h('svg', { width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none' }, [
+          h('path', { key: 1, d: 'M3.5 8h7v3a2.5 2.5 0 0 1-2.5 2.5H6A2.5 2.5 0 0 1 3.5 11V8Z', stroke: '#b07219', 'strokeWidth': 1.3 }),
+          h('path', { key: 2, d: 'M10.5 8.5h1a1.5 1.5 0 0 1 0 3h-1', stroke: '#b07219', 'strokeWidth': 1.3 }),
+          h('path', { key: 3, d: 'M6 5.2c1-.8-.4-1.5 0-2.4M8.4 5.2c1-.8-.4-1.5 0-2.4', stroke: '#b07219', 'strokeWidth': 1.2, 'strokeLinecap': 'round' }) ]) },
+      { name: 'HTML+CSS', ext: '.html/.css', color: '#e34c26', iconBg: 'rgba(227,76,38,.15)', lines: 1037, files: 5,
+        icon: h('svg', { width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none' }, [
+          h('path', { key: 1, d: 'M6 4.5 3 8l3 3.5M10 4.5 13 8l-3 3.5', stroke: '#e34c26', 'strokeWidth': 1.4, 'strokeLinecap': 'round', 'strokeLinejoin': 'round' }) ]) },
+      { name: 'XML', ext: '.xml', color: '#d97706', iconBg: 'rgba(217,119,6,.15)', lines: 867, files: 4,
+        icon: h('svg', { width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none' }, [
+          h('path', { key: 1, d: 'M6.5 4 4.5 8l2 4M9.5 4l2 4-2 4', stroke: '#d97706', 'strokeWidth': 1.3, 'strokeLinecap': 'round', 'strokeLinejoin': 'round' }) ]) }
+    ];
+    const totalLines = langMeta.reduce((a, l) => a + l.lines, 0);
+    const sel = s.langSel || {};
+    const isSel = (n) => sel[n] !== false;
+    const selLines = langMeta.reduce((a, l) => a + (isSel(l.name) ? l.lines : 0), 0);
+    const langStats = langMeta.map(l => {
+      const on = isSel(l.name);
+      return {
+        ...l, pct: Math.round(l.lines / totalLines * 100), lines: l.lines.toLocaleString(),
+        opacity: on ? 1 : 0.5, iconFilter: on ? 'none' : 'grayscale(1)',
+        rowBg: on ? 'transparent' : 'transparent',
+        check: on ? '✓' : '', checkBg: on ? l.color : 'transparent',
+        checkBorder: on ? l.color : 'var(--border)',
+        pctColor: on ? l.color : 'var(--text3)',
+        toggle: () => this.setState(st => ({ langSel: { ...st.langSel, [l.name]: !(st.langSel?.[l.name] !== false) } }))
+      };
+    });
+    // battery cells: 22 segments colored by cumulative share (unselected → gray)
+    const CELLS = 22;
+    let acc = 0; const bounds = langMeta.map(l => { acc += l.lines / totalLines; return acc; });
+    const langCells = Array.from({ length: CELLS }, (_, i) => {
+      const frac = (i + 0.5) / CELLS;
+      const idx = bounds.findIndex(b => frac <= b);
+      const lm = langMeta[Math.max(0, idx)];
+      return { color: isSel(lm.name) ? lm.color : 'var(--border2)' };
+    });
+    const webMeta = langMeta.find(l => l.name === 'HTML+CSS');
+    const webPct = Math.round(webMeta.lines / totalLines * 100);
+    const selLinesLabel = selLines.toLocaleString();
+
     const sortModes = [
       { id: 'entry', label: '入口优先（推荐）' },
       { id: 'time', label: '修改时间' },
@@ -754,6 +858,7 @@ class Component extends DCLogic {
       toggleProjMenu: set(st => ({ projMenuOpen: !st.projMenuOpen })),
       saveConfig: () => this._toast('配置已保存到项目'),
       themeIcon: themeLight ? '☾' : '☀',
+      isLight: themeLight, isDark: !themeLight,
       toggleTheme: () => {
         const t = themeLight ? 'dark' : 'light';
         this.setState({ theme: t }); this._applyTheme(t);
@@ -781,7 +886,7 @@ class Component extends DCLogic {
       resetError: () => this.setState({ scanPhase: 'idle' }),
       recentProjects,
       // step2
-      tree, sortModes, orderItems,
+      tree, sortModes, orderItems, langStats, langCells, webPct, webColor: webMeta.color, selLinesLabel,
       goStep3: () => this.setState({ step: 3 }),
       // step3
       swName: s.swName,
