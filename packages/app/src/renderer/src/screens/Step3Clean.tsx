@@ -11,6 +11,7 @@ const TOGGLES: Array<{ key: keyof CleanToggles; label: string; sub?: string }> =
 export default function Step3Clean() {
   const s = useStore();
   const p = s.processData;
+  const progress = s.jobProgress?.jobKind === 'process' ? s.jobProgress : null;
 
   useEffect(() => { runProcess(); }, [s.clean]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -75,7 +76,15 @@ export default function Step3Clean() {
         <div style={{ flex: 1 }} />
         <button className="btn-primary" style={{ height: 36, fontSize: 13 }} disabled={!s.swName.trim() || s.processing}
           onClick={async () => { if (!s.processData) await runProcess(); s.set({ step: 4, page: 1 }); }}>
-          {s.processing ? '正在清洗…' : '下一步：分页预览'}
+          {s.processing
+            ? progress?.stage === 'cleaning' && progress.total > 0
+              ? `正在清洗 ${progress.completed}/${progress.total}…`
+              : progress?.stage === 'selecting'
+                ? '正在分页…'
+                : progress?.stage === 'auditing'
+                  ? '正在校验…'
+                  : '正在准备…'
+            : '下一步：分页预览'}
         </button>
       </div>
 

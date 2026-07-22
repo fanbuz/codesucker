@@ -124,6 +124,14 @@ export default function Step2Files() {
       {/* 统计 */}
       <div style={{ width: 252, flex: 'none', borderLeft: '1px solid var(--border2)', background: 'var(--panel)', padding: 16, display: 'flex', flexDirection: 'column', gap: 14, overflow: 'auto' }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)' }}>统计</div>
+        {s.scanErrors.length > 0 && (
+          <div style={{ background: 'var(--orange-soft)', border: '1px solid color-mix(in srgb, var(--orange) 35%, transparent)', borderRadius: 9, padding: 10 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--orange)' }}>{s.scanErrors.length} 个文件扫描失败，已跳过</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text2)', marginTop: 4, fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
+              {s.scanErrors[0].file} · {s.scanErrors[0].message}
+            </div>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <StatCard label="总文件" value={String(s.files.length)} />
           <StatCard label="已纳入" value={String(included.length)} accent />

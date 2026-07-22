@@ -7,7 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "tsx test/smoke.ts"
+    "test": "tsx test/smoke.ts && tsx test/attribution.ts && tsx test/async-pipeline.ts"
   },
   "dependencies": {
     "chardet": "^2.0.0",

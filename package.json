@@ -14,10 +14,12 @@
   "scripts": {
     "dev": "npm run dev -w @codesucker/app",
     "build": "npm run build -w @codesucker/core && npm run build -w @codesucker/app",
-    "test": "npm run test -w @codesucker/core",
+    "test": "npm run test -w @codesucker/core && npm run test -w @codesucker/app",
+    "test:integration": "npm run test:workers -w @codesucker/app",
+    "perf": "npm run build && npm run perf -w @codesucker/app",
     "version:check": "node scripts/check-version.mjs",
     "version:set": "node scripts/set-version.mjs",
-    "verify": "npm run version:check && npm test && npm run build"
+    "verify": "npm run version:check && npm test && npm run build && npm run test:integration"
   },
   "engines": {
     "node": ">=18"

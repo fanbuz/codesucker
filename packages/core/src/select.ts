@@ -3,6 +3,7 @@ import type { CleanedFile, Page, Selection } from './types.ts';
 interface StreamLine {
   text: string;
   file: string;
+  relPath: string;
 }
 
 /**
@@ -16,7 +17,7 @@ interface StreamLine {
 export function select(files: CleanedFile[], linesPerPage: number, maxPages: number): Selection {
   const stream: StreamLine[] = [];
   for (const f of files) {
-    for (const line of f.lines) stream.push({ text: line, file: f.entry.name });
+    for (const line of f.lines) stream.push({ text: line, file: f.entry.name, relPath: f.entry.relPath });
   }
   const totalLines = stream.length;
   const limit = linesPerPage * maxPages;
@@ -25,6 +26,7 @@ export function select(files: CleanedFile[], linesPerPage: number, maxPages: num
     const pages = paginate(stream, linesPerPage, 1);
     return {
       pages, totalLines, pickedLines: totalLines, truncated: false,
+      selectedRelPaths: uniqueRelPaths(stream),
       splitAfterPage: null, frontEndFile: null, backStartFile: null,
     };
   }
@@ -39,10 +41,22 @@ export function select(files: CleanedFile[], linesPerPage: number, maxPages: num
     totalLines,
     pickedLines: limit,
     truncated: true,
+    selectedRelPaths: uniqueRelPaths([...front, ...back]),
     splitAfterPage: frontPages.length,
     frontEndFile: front[front.length - 1].file,
     backStartFile: back[0].file,
   };
+}
+
+function uniqueRelPaths(stream: StreamLine[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const line of stream) {
+    if (seen.has(line.relPath)) continue;
+    seen.add(line.relPath);
+    result.push(line.relPath);
+  }
+  return result;
 }
 
 function paginate(stream: StreamLine[], linesPerPage: number, startNo: number): Page[] {

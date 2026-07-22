@@ -21,6 +21,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    window.cs.onProgress((progress) => {
+      const current = useStore.getState();
+      if (current.activeJobId === progress.jobId) current.set({ jobProgress: progress });
+    });
+    return () => window.cs.offProgress();
+  }, []);
+
   const saveConfig = async () => {
     if (!s.root) { toast('请先导入项目'); return; }
     await window.cs.saveConfig(s.root, {

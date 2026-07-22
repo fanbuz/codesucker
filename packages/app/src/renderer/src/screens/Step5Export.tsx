@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { cleanOptions, orderedIncluded, runProcess, toast, useStore } from '../store';
+import {
+  cleanOptions, createJobId, isCancellation, orderedIncluded, runProcess, toast, useStore,
+} from '../store';
 
 export default function Step5Export() {
   const s = useStore();
@@ -18,7 +20,10 @@ export default function Step5Export() {
     if (s.exporting || !s.root) return;
     if (!s.swName.trim()) { toast('请先在「清洗与排版」填写软件全称+版本号'); s.set({ step: 3 }); return; }
     if (!s.fmtDocx && !s.fmtTxt) { toast('请至少选择一种输出格式'); return; }
-    s.set({ exporting: true });
+    const jobId = createJobId('export');
+    // export 会在主进程重新处理一次；若进入本页时的校验仍未结束，
+    // 新 job 会替代它，因此同步清理旧 processing 状态。
+    s.set({ exporting: true, processing: false, activeJobId: jobId, jobProgress: null });
     try {
       const r = await window.cs.export({
         root: s.root,
@@ -28,12 +33,23 @@ export default function Step5Export() {
         clean: cleanOptions(s.clean),
         outDir: s.outDir || `${s.root}/软著申报`,
         formats: { docx: s.fmtDocx, txt: s.fmtTxt },
-      });
-      s.set({ exporting: false, exportResult: r as typeof s.exportResult });
+      }, jobId);
+      if (useStore.getState().activeJobId !== jobId) return;
+      s.set({ exporting: false, exportResult: r as typeof s.exportResult, activeJobId: null, jobProgress: null });
       window.cs.recentList().then((list) => s.set({ recent: list as typeof s.recent }));
     } catch (e) {
-      s.set({ exporting: false });
-      toast('导出失败：' + (e instanceof Error ? e.message : String(e)));
+      if (useStore.getState().activeJobId !== jobId) return;
+      s.set({ exporting: false, activeJobId: null, jobProgress: null });
+      if (!isCancellation(e)) toast('导出失败：' + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const cancelExport = async () => {
+    const jobId = s.activeJobId;
+    if (!jobId) return;
+    await window.cs.cancel(jobId);
+    if (useStore.getState().activeJobId === jobId) {
+      s.set({ exporting: false, activeJobId: null, jobProgress: null });
     }
   };
 
@@ -41,6 +57,16 @@ export default function Step5Export() {
     st === 'pass' ? ['var(--green-soft)', 'var(--green)', '✓'] : st === 'warn' ? ['var(--orange-soft)', 'var(--orange)', '!'] : ['var(--red-soft)', 'var(--red)', '✕'];
 
   const r = s.exportResult;
+  const exportProgress = s.jobProgress?.jobKind === 'export' ? s.jobProgress : null;
+  const exportLabel = exportProgress?.stage === 'cleaning' && exportProgress.total > 0
+    ? `正在清洗 ${exportProgress.completed}/${exportProgress.total}`
+    : exportProgress?.stage === 'selecting'
+      ? '正在分页'
+      : exportProgress?.stage === 'auditing'
+        ? '正在校验'
+        : exportProgress?.stage === 'rendering'
+          ? `正在生成 ${exportProgress.completed}/${exportProgress.total}`
+          : '正在准备';
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, animation: 'cs-fade .18s ease-out' }}>
@@ -70,7 +96,7 @@ export default function Step5Export() {
                 </div>
                 {expanded === i && a.context && (
                   <div style={{ borderTop: '1px solid var(--border2)', background: 'var(--panel2)', padding: '12px 16px' }}>
-                    {a.file && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8, fontFamily: 'var(--mono)' }}>{a.file}</div>}
+                    {a.file && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8, fontFamily: 'var(--mono)' }}>{a.file}{a.line ? `:${a.line}` : ''}</div>}
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8, background: 'var(--panel)', border: '1px solid var(--border2)', borderRadius: 8, padding: '10px 12px' }}>
                       {a.context.map((c, j) => (
                         <div key={j} style={{ color: 'var(--red)' }}>{c}</div>
@@ -113,10 +139,10 @@ export default function Step5Export() {
             <span>⚠</span><span>存在 {failN} 项退回风险，建议先处理再导出</span>
           </div>
         )}
-        <button className="btn-primary" onClick={doExport}
+        <button className="btn-primary" onClick={s.exporting ? cancelExport : doExport}
           style={{ height: 44, borderRadius: 10, fontSize: 14, fontWeight: 600, boxShadow: '0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, opacity: s.exporting ? 0.85 : 1 }}>
           {s.exporting && <svg width="15" height="15" viewBox="0 0 30 30" style={{ animation: 'cs-spin .8s linear infinite' }}><circle cx="15" cy="15" r="12" fill="none" stroke="rgba(255,255,255,.3)" strokeWidth="4" /><path d="M15 3a12 12 0 0 1 12 12" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" /></svg>}
-          {s.exporting ? '正在生成…' : '生成申报文档'}
+          {s.exporting ? `${exportLabel} · 点击取消` : '生成申报文档'}
         </button>
       </div>
 
@@ -130,6 +156,7 @@ export default function Step5Export() {
               {(r.docx ?? r.txt ?? '').split('/').pop()}<br />
               <span style={{ color: 'var(--text3)' }}>{r.pages} 页 · {r.lines.toLocaleString()} 行{r.size > 0 && ` · ${Math.round(r.size / 1024)} KB`}</span>
               <br /><span style={{ color: 'var(--text3)', fontSize: 10.5 }}>CodeSucker {r.appVersion} · 规则 {r.rulesVersion}</span>
+              {r.errors.length > 0 && <><br /><span style={{ color: 'var(--orange)', fontSize: 10.5 }}>已跳过 {r.errors.length} 个处理失败文件</span></>}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
               <button className="btn-primary" style={{ flex: 1, height: 38, fontSize: 13 }}

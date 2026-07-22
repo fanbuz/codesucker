@@ -1,4 +1,6 @@
-import type { AnnotatedLine, CleanOptions, CleanedFile, FileEntry } from './types.ts';
+import type {
+  AnnotatedLine, AttributionEvidence, AttributionKind, CleanOptions, CleanedFile, FileEntry,
+} from './types.ts';
 
 interface CommentSyntax {
   line: string[];
@@ -52,6 +54,164 @@ const MASK_RULES: Array<{ re: RegExp; replace: (m: RegExpExecArray) => string }>
     replace: (m) => m[0].slice(0, 3) + '********',
   },
 ];
+
+const ATTRIBUTION_PATTERNS: Array<{ kind: AttributionKind; re: RegExp }> = [
+  { kind: 'author', re: /@author\b\s*[:：]?\s*([^*\r\n]+)/gi },
+  {
+    kind: 'copyright',
+    re: /\bcopyright\b\s*(?:\(c\)|©)?\s*(?:\d{4}(?:\s*[-–—,]\s*\d{2,4})?\s*)?([^*\r\n]+)/gi,
+  },
+  {
+    kind: 'copyright',
+    re: /©\s*(?:\d{4}(?:\s*[-–—,]\s*\d{2,4})?\s*)?([^*\r\n]+)/g,
+  },
+];
+
+function cleanAttributionSubject(value: string): string {
+  return value
+    .replace(/\s+@(?:since|version|see|param|return|throws?)\b.*$/i, '')
+    .replace(/\ball\s+rights\s+reserved\.?\s*$/i, '')
+    .replace(/(?:-->|\*\/|\*|#|\/\/)+\s*$/g, '')
+    .replace(/^[\s:：,，;；-]+|[\s:：,，;；-]+$/g, '')
+    .trim();
+}
+
+interface CommentFragment {
+  line: number;
+  text: string;
+  rawLine: string;
+}
+
+/**
+ * 只返回真正位于注释语法中的片段。署名关键字可能出现在字符串、HTML 文案或
+ * 测试数据里；直接扫描整行会把这些普通内容误判为源码署名。
+ */
+function extractCommentFragments(rawText: string, ext: string): CommentFragment[] {
+  const syntax = SYNTAX_BY_EXT[ext.toLowerCase()] ?? C_LIKE;
+  const rawLines = rawText.split(/\r\n|\r|\n/);
+  const fragments: CommentFragment[] = [];
+  let blockClose: string | null = null;
+  let tripleClose: string | null = null;
+
+  rawLines.forEach((rawLine, lineIndex) => {
+    let index = 0;
+    let codeBefore = '';
+    let inString: string | null = null;
+
+    while (index < rawLine.length) {
+      if (blockClose) {
+        const closeIndex = rawLine.indexOf(blockClose, index);
+        const end = closeIndex === -1 ? rawLine.length : closeIndex + blockClose.length;
+        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
+        if (closeIndex === -1) return;
+        index = end;
+        blockClose = null;
+        continue;
+      }
+
+      if (tripleClose) {
+        const closeIndex = rawLine.indexOf(tripleClose, index);
+        const end = closeIndex === -1 ? rawLine.length : closeIndex + tripleClose.length;
+        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
+        if (closeIndex === -1) return;
+        index = end;
+        tripleClose = null;
+        continue;
+      }
+
+      const char = rawLine[index];
+      if (inString) {
+        if (char === '\\') {
+          index += Math.min(2, rawLine.length - index);
+          continue;
+        }
+        if (char === inString) inString = null;
+        index++;
+        continue;
+      }
+
+      if (syntax.triple && codeBefore.trim() === '') {
+        const triple = syntax.triple.find((token) => rawLine.startsWith(token, index));
+        if (triple) {
+          const closeIndex = rawLine.indexOf(triple, index + triple.length);
+          const end = closeIndex === -1 ? rawLine.length : closeIndex + triple.length;
+          fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
+          if (closeIndex === -1) {
+            tripleClose = triple;
+            return;
+          }
+          index = end;
+          continue;
+        }
+      }
+
+      const block = syntax.block.find(([open]) => rawLine.startsWith(open, index));
+      if (block) {
+        const [open, close] = block;
+        const closeIndex = rawLine.indexOf(close, index + open.length);
+        const end = closeIndex === -1 ? rawLine.length : closeIndex + close.length;
+        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
+        if (closeIndex === -1) {
+          blockClose = close;
+          return;
+        }
+        index = end;
+        continue;
+      }
+
+      const lineMarker = syntax.line.find((marker) => rawLine.startsWith(marker, index));
+      if (lineMarker) {
+        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index), rawLine });
+        return;
+      }
+
+      if (syntax.quotes.includes(char)) inString = char;
+      codeBefore += char;
+      index++;
+    }
+  });
+
+  return fragments;
+}
+
+/**
+ * 在任何清洗发生前提取署名证据。这里保留原始行与行号，
+ * 后续审计再根据最终分页涉及的文件决定证据是否进入报告。
+ */
+export function extractAttributions(rawText: string, relPath: string, ext = relPath.split('.').pop() ?? ''): AttributionEvidence[] {
+  const evidence: AttributionEvidence[] = [];
+  const seen = new Set<string>();
+
+  extractCommentFragments(rawText, ext).forEach((fragment) => {
+    for (const pattern of ATTRIBUTION_PATTERNS) {
+      pattern.re.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.re.exec(fragment.text)) !== null) {
+        const subject = cleanAttributionSubject(match[1] ?? '');
+        if (subject && !/^\d{2,4}$/.test(subject)) {
+          const key = `${pattern.kind}\0${fragment.line}\0${normalizeEvidenceSubject(subject)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            evidence.push({
+              kind: pattern.kind,
+              subject,
+              file: relPath,
+              line: fragment.line,
+              text: fragment.rawLine,
+            });
+          }
+        }
+        if (match[0].length === 0) pattern.re.lastIndex++;
+      }
+    }
+  });
+
+  return evidence;
+}
+
+function normalizeEvidenceSubject(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
 
 function maskLine(line: string): { text: string; masked: boolean } {
   let out = line;
@@ -208,6 +368,7 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
 }
 
 export function cleanFile(entry: FileEntry, rawText: string, opts: CleanOptions): CleanedFile {
+  const attributions = extractAttributions(rawText, entry.relPath, entry.ext);
   const annotated = annotate(rawText, entry.ext, opts);
   const lines: string[] = [];
   let removedComments = 0;
@@ -219,5 +380,5 @@ export function cleanFile(entry: FileEntry, rawText: string, opts: CleanOptions)
     if (a.masked) maskedCount++;
     lines.push(...a.out);
   }
-  return { entry, lines, removedComments, removedBlanks, maskedCount };
+  return { entry, lines, attributions, removedComments, removedBlanks, maskedCount };
 }

@@ -2,6 +2,20 @@ import type { AuditItem, CleanedFile, ProjectConfig, Selection } from './types.t
 
 const MARKUP_LANGS = new Set(['html', 'htm', 'css', 'scss', 'less']);
 
+function normalizeParty(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/<[^>]+>/g, '')
+    .replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function isSameParty(owner: string, subject: string): boolean {
+  const ownerKey = normalizeParty(owner);
+  const subjectKey = normalizeParty(subject);
+  return !!ownerKey && !!subjectKey && (ownerKey.includes(subjectKey) || subjectKey.includes(ownerKey));
+}
+
 export function audit(
   files: CleanedFile[],
   selection: Selection,
@@ -64,27 +78,21 @@ export function audit(
     items.push({ status: 'pass', name: `HTML/CSS 占比 ${(ratio * 100).toFixed(0)}%`, detail: '处于建议范围（≤20%）内' });
   }
 
-  // 7. 署名/版权冲突扫描（在最终入选的行上扫描）
+  // 7. 署名/版权冲突扫描：证据在清洗前提取，只检查最终分页涉及的文件。
   if (config.owner) {
-    const hits: Array<{ file: string; page: number; text: string }> = [];
-    const authorRe = /@author\s+([^\s*/]+)|Copyright\s*(?:\(c\)|©)?\s*(?:\d{4}[-,\s]*)*([^\s*/,;]+)/i;
-    for (const p of pages) {
-      for (const l of p.lines) {
-        const m = authorRe.exec(l);
-        if (m) {
-          const who = (m[1] || m[2] || '').trim();
-          if (who && !config.owner.includes(who) && !who.includes(config.owner)) {
-            hits.push({ file: p.startFile, page: p.no, text: l.trim() });
-          }
-        }
-      }
-    }
+    const selected = new Set(selection.selectedRelPaths);
+    const hits = files
+      .filter((file) => selected.has(file.entry.relPath))
+      .flatMap((file) => file.attributions)
+      .filter((evidence) => !isSameParty(config.owner!, evidence.subject));
     if (hits.length > 0) {
       const h = hits[0];
       items.push({
         status: 'fail', name: '检测到疑似他人署名',
-        detail: `第 ${h.page} 页（${h.file}）检测到「${h.text.slice(0, 40)}」，与著作权人「${config.owner}」不一致，共 ${hits.length} 处`,
-        file: h.file, context: hits.slice(0, 5).map((x) => x.text),
+        detail: `${h.file}:${h.line} 检测到署名主体「${h.subject}」，与著作权人「${config.owner}」不一致，共 ${hits.length} 处`,
+        file: h.file,
+        line: h.line,
+        context: hits.slice(0, 5).map((x) => `${x.file}:${x.line} · ${x.text.trim()}`),
       });
     } else {
       items.push({ status: 'pass', name: '未检测到他人署名', detail: `入选代码中没有与著作权人「${config.owner}」冲突的 @author / Copyright 声明` });
