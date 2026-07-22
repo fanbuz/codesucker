@@ -1,0 +1,23 @@
+{
+  "name": "@codesucker/core",
+  "version": "0.1.0",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "tsx test/smoke.ts"
+  },
+  "dependencies": {
+    "chardet": "^2.0.0",
+    "docx": "^8.5.0",
+    "fast-glob": "^3.3.2",
+    "iconv-lite": "^0.6.3",
+    "ignore": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "codesucker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "软著代码抽取器 —— 离线生成符合软件著作权申报规范的源程序文档",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fanbuz/codesucker.git"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @codesucker/app",
+    "build": "npm run build -w @codesucker/core && npm run build -w @codesucker/app",
+    "test": "npm run test -w @codesucker/core"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "png2icons": "^2.0.1",
+    "sharp": "^0.35.3",
+    "tsx": "^4.23.1"
+  }
+}

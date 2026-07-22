@@ -1,0 +1,37 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="55%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#3730a3"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景圆角方块（macOS 全出血风格，留 8% 边距） -->
+  <rect x="82" y="82" width="860" height="860" rx="196" fill="url(#bg)"/>
+  <rect x="82" y="82" width="860" height="860" rx="196" fill="url(#sheen)"/>
+
+  <!-- 隐喻"文档页"：右上角折角页面轮廓 -->
+  <g opacity="0.22">
+    <path d="M 300 250 h 300 l 124 124 v 400 a 28 28 0 0 1 -28 28 h -396 a 28 28 0 0 1 -28 -28 v -496 a 28 28 0 0 1 28 -28 z"
+          fill="none" stroke="#ffffff" stroke-width="30"/>
+    <path d="M 600 250 v 96 a 28 28 0 0 0 28 28 h 96" fill="none" stroke="#ffffff" stroke-width="30" stroke-linejoin="round"/>
+  </g>
+
+  <!-- 代码行（每页 50 行的隐喻） -->
+  <g stroke="#ffffff" stroke-width="26" stroke-linecap="round" opacity="0.38">
+    <line x1="360" y1="680" x2="560" y2="680"/>
+    <line x1="360" y1="740" x2="640" y2="740"/>
+  </g>
+
+  <!-- 主体 </> 徽标 -->
+  <g stroke="#ffffff" stroke-width="56" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <polyline points="404,404 306,512 404,620"/>
+    <polyline points="620,404 718,512 620,620"/>
+    <line x1="558" y1="382" x2="466" y2="642"/>
+  </g>
+</svg>
