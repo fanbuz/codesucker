@@ -9,7 +9,7 @@
 全程离线 · 代码不出本机 · 规范内置 · 导出前自动校验
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#快速开始)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](#下载)
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#参与贡献)
 
@@ -31,6 +31,20 @@ CodeSucker 把《计算机软件著作权登记办法》和版权保护中心的
 > **这个项目如何被推进**
 >
 > CodeSucker 的需求拆解、Issue 协作、阶段验收与交付回填，基于作者维护的 [Mochi Issue Flow](https://github.com/fanbuz/mochi-issue-flow-skill) 持续推进，让每一次开发都有清晰上下文和可追溯结果。
+
+## 下载
+
+前往 [GitHub Releases](https://github.com/fanbuz/codesucker/releases/latest) 下载与你的电脑匹配的 MVP 安装包：
+
+| 系统 | 架构 | 安装包 |
+|---|---|---|
+| macOS | Apple Silicon（M1/M2/M3/M4） | `CodeSucker-0.1.0-mac-arm64.dmg` |
+| macOS | Intel | `CodeSucker-0.1.0-mac-x64.dmg` |
+| Windows | x64 | `CodeSucker-0.1.0-win-x64.exe` |
+
+每个 Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件是否完整。
+
+> **macOS MVP 说明**：当前安装包尚未进行 Apple Developer ID 签名与公证。首次打开如果被 Gatekeeper 拦截，请先尝试打开一次，再进入“系统设置 → 隐私与安全性”，在安全提示旁选择“仍要打开”。不要从非本项目 Release 的来源下载安装包。正式签名与公证将在后续版本接入。
 
 ## 功能特性
 
@@ -58,7 +72,7 @@ CodeSucker 把《计算机软件著作权登记办法》和版权保护中心的
 
 > 依据：[《计算机软件著作权登记办法》](https://www.ncac.gov.cn/xxfb/flfg/bmgz/202410/P020241015604759788122.pdf)及中国版权保护中心公开审查口径。本工具不构成法律建议，最终以登记机构要求为准。
 
-## 快速开始
+## 从源码运行
 
 ### 开发运行
 
@@ -104,16 +118,16 @@ scripts/    图标生成等工具脚本
 **Q：生成的文档能直接提交吗？**
 能。docx 即为最终鉴别材料格式；建议先看第 5 步校验报告，把「退回风险」项清零。
 
-**Q：老版本 macOS Electron 被系统当恶意软件删除？**
-XProtect 会误杀旧版 Electron 的二进制，本项目已固定使用 Electron 43+，若仍遇到请走 npmmirror 重新下载（见上方提示）。
+**Q：macOS 提示无法验证开发者，怎么办？**
+v0.1.0 MVP 尚未签名与公证，请确认安装包来自本项目 Release 并核对 SHA-256，然后按照下载章节的 Gatekeeper 指引手动放行。后续版本会接入 Developer ID 签名与 Apple 公证。
 
 **Q：我的代码会被上传吗？**
 不会。全部处理在本机完成，应用零网络请求（更新检查也仅在手动点击时进行）。
 
 ## 路线图
 
-- [x] **V1（MVP）**：五段流水线 · 5 步向导 · docx/txt 导出 · 8 项合规校验 · 配置持久化
-- [ ] **V2**：electron-builder 三平台安装包 · electron-updater 自动更新（国内 OSS 源）· 自定义排除/脱敏规则 · 校验项一键修复 · CLI 版本
+- [x] **V1（MVP）**：五段流水线 · 5 步向导 · docx/txt 导出 · 8 项合规校验 · 配置持久化 · macOS/Windows 安装包
+- [ ] **V2**：Linux 安装包 · macOS 签名与公证 · electron-updater 自动更新（国内 OSS 源）· 自定义排除/脱敏规则 · 校验项一键修复 · CLI 版本
 - [ ] **V3**：用户手册/设计说明书模板化生成 · 例外交存模式（黑斜线覆盖）· 多申报主体管理
 
 ## 版本与发布

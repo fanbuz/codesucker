@@ -67,6 +67,7 @@ input,button{font-family:inherit}
 .about-card__text-link,.about-card__author{appearance:none;border:0;background:transparent;padding:0;color:var(--text2);font:inherit;cursor:pointer}
 .about-card__text-link{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;border-bottom:1px solid transparent}
 .about-card__text-link:hover,.about-card__author:hover{color:var(--accent);border-color:var(--accent-line)}
+.about-card__craft{position:relative;z-index:1;display:flex;align-items:center;gap:5px;margin-top:10px;color:var(--text3);font-size:10.5px}
 .about-card__footer{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:15px;padding-top:13px;border-top:1px solid var(--border2)}
 .about-card__byline{display:flex;align-items:center;gap:5px;color:var(--text3);font-size:11px}
 .about-card__author{color:var(--text);font-family:var(--mono);font-size:11px;font-weight:600;border-bottom:1px solid var(--border)}

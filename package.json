@@ -17,13 +17,16 @@
     "test": "npm run test -w @codesucker/core && npm run test -w @codesucker/app",
     "test:integration": "npm run test:workers -w @codesucker/app",
     "perf": "npm run build && npm run perf -w @codesucker/app",
+    "dist:mac:x64": "npm run dist:mac:x64 -w @codesucker/app",
+    "dist:mac:arm64": "npm run dist:mac:arm64 -w @codesucker/app",
+    "dist:win:x64": "npm run dist:win:x64 -w @codesucker/app",
     "lockfile:check": "node scripts/check-lockfile-registry.mjs",
     "version:check": "node scripts/check-version.mjs",
     "version:set": "node scripts/set-version.mjs",
     "verify": "npm run version:check && npm run lockfile:check && npm test && npm run build && npm run test:integration"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12.0"
   },
   "devDependencies": {
     "png2icons": "^2.0.1",

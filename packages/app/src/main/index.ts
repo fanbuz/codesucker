@@ -8,7 +8,10 @@ const TRUSTED_EXTERNAL_URLS = new Set([
   'https://github.com/fanbuz',
   'https://github.com/fanbuz/codesucker',
   'https://github.com/fanbuz/codesucker/blob/main/LICENSE',
+  'https://github.com/fanbuz/mochi-issue-flow-skill',
 ]);
+
+app.setName('CodeSucker');
 
 function createWindow() {
   win = new BrowserWindow({

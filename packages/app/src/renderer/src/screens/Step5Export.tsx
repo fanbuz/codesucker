@@ -15,9 +15,11 @@ export default function Step5Export() {
   const warnN = audit.filter((a) => a.status === 'warn').length;
   const failN = audit.filter((a) => a.status === 'fail').length;
   const hasRisk = failN > 0;
+  const hasExportableContent = !!p && p.selection.pages.length > 0 && p.selection.pickedLines > 0;
 
   const doExport = async () => {
     if (s.exporting || !s.root) return;
+    if (!hasExportableContent) { toast('没有可导出的代码内容，请调整文件选择或清洗规则'); return; }
     if (!s.swName.trim()) { toast('请先在「清洗与排版」填写软件全称+版本号'); s.set({ step: 3 }); return; }
     if (!s.fmtDocx && !s.fmtTxt) { toast('请至少选择一种输出格式'); return; }
     const jobId = createJobId('export');
@@ -140,7 +142,8 @@ export default function Step5Export() {
           </div>
         )}
         <button className="btn-primary" onClick={s.exporting ? cancelExport : doExport}
-          style={{ height: 44, borderRadius: 10, fontSize: 14, fontWeight: 600, boxShadow: '0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, opacity: s.exporting ? 0.85 : 1 }}>
+          disabled={!s.exporting && !hasExportableContent}
+          style={{ height: 44, borderRadius: 10, fontSize: 14, fontWeight: 600, boxShadow: '0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, opacity: s.exporting ? 0.85 : hasExportableContent ? 1 : 0.5, cursor: !s.exporting && !hasExportableContent ? 'not-allowed' : undefined }}>
           {s.exporting && <svg width="15" height="15" viewBox="0 0 30 30" style={{ animation: 'cs-spin .8s linear infinite' }}><circle cx="15" cy="15" r="12" fill="none" stroke="rgba(255,255,255,.3)" strokeWidth="4" /><path d="M15 3a12 12 0 0 1 12 12" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" /></svg>}
           {s.exporting ? `${exportLabel} · 点击取消` : '生成申报文档'}
         </button>

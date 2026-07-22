@@ -92,11 +92,12 @@ function extractCommentFragments(rawText: string, ext: string): CommentFragment[
   const fragments: CommentFragment[] = [];
   let blockClose: string | null = null;
   let tripleClose: string | null = null;
+  let multilineStringClose: string | null = null;
 
   rawLines.forEach((rawLine, lineIndex) => {
     let index = 0;
     let codeBefore = '';
-    let inString: string | null = null;
+    let inString: string | null = multilineStringClose;
 
     while (index < rawLine.length) {
       if (blockClose) {
@@ -121,26 +122,45 @@ function extractCommentFragments(rawText: string, ext: string): CommentFragment[
 
       const char = rawLine[index];
       if (inString) {
+        if (inString.length > 1) {
+          if (rawLine.startsWith(inString, index)) {
+            index += inString.length;
+            inString = null;
+            multilineStringClose = null;
+          } else {
+            index++;
+          }
+          continue;
+        }
         if (char === '\\') {
           index += Math.min(2, rawLine.length - index);
           continue;
         }
-        if (char === inString) inString = null;
+        if (char === inString) {
+          inString = null;
+          multilineStringClose = null;
+        }
         index++;
         continue;
       }
 
-      if (syntax.triple && codeBefore.trim() === '') {
+      if (syntax.triple) {
         const triple = syntax.triple.find((token) => rawLine.startsWith(token, index));
         if (triple) {
-          const closeIndex = rawLine.indexOf(triple, index + triple.length);
-          const end = closeIndex === -1 ? rawLine.length : closeIndex + triple.length;
-          fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
-          if (closeIndex === -1) {
-            tripleClose = triple;
-            return;
+          if (codeBefore.trim() === '') {
+            const closeIndex = rawLine.indexOf(triple, index + triple.length);
+            const end = closeIndex === -1 ? rawLine.length : closeIndex + triple.length;
+            fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
+            if (closeIndex === -1) {
+              tripleClose = triple;
+              return;
+            }
+            index = end;
+          } else {
+            inString = triple;
+            multilineStringClose = triple;
+            index += triple.length;
           }
-          index = end;
           continue;
         }
       }
@@ -165,9 +185,16 @@ function extractCommentFragments(rawText: string, ext: string): CommentFragment[
         return;
       }
 
-      if (syntax.quotes.includes(char)) inString = char;
+      if (syntax.quotes.includes(char)) {
+        inString = char;
+        if (char === '`') multilineStringClose = char;
+      }
       codeBefore += char;
       index++;
+    }
+
+    if (inString === '`' || (inString && syntax.triple?.includes(inString))) {
+      multilineStringClose = inString;
     }
   });
 
@@ -261,6 +288,7 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
 
   let blockClose: string | null = null; // 处于块注释中时的结束符
   let tripleClose: string | null = null; // python 三引号 docstring
+  let multilineStringClose: string | null = null; // 模板字符串或作为值的 python 三引号字符串
 
   for (const raw of rawLines) {
     const expanded = raw.replace(/\t/g, ' '.repeat(opts.tabWidth));
@@ -268,6 +296,8 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
     let hadComment = false;
     let i = 0;
     const line = expanded;
+    let inString: string | null = multilineStringClose;
+    let hadStringContent = multilineStringClose !== null;
 
     if (tripleClose) {
       const idx = line.indexOf(tripleClose);
@@ -280,7 +310,6 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
       hadComment = true;
     }
 
-    let inString: string | null = null;
     scan: while (i < line.length) {
       if (blockClose) {
         const idx = line.indexOf(blockClose, i);
@@ -292,11 +321,25 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
       }
       const ch = line[i];
       if (inString) {
+        hadStringContent = true;
+        if (inString.length > 1) {
+          if (line.startsWith(inString, i)) {
+            code += inString;
+            i += inString.length;
+            inString = null;
+            multilineStringClose = null;
+          } else {
+            code += ch;
+            i++;
+          }
+          continue;
+        }
         code += ch;
         if (ch === '\\') {
           if (i + 1 < line.length) { code += line[i + 1]; i += 2; continue; }
         } else if (ch === inString) {
           inString = null;
+          multilineStringClose = null;
         }
         i++;
         continue;
@@ -311,9 +354,12 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
               hadComment = true;
               if (closeIdx === -1) { tripleClose = t; i = line.length; } else { i = closeIdx + t.length; }
             } else {
-              // 作为普通字符串保留
-              if (closeIdx === -1) { code += line.slice(i); i = line.length; }
-              else { code += line.slice(i, closeIdx + t.length); i = closeIdx + t.length; }
+              // 作为普通字符串保留，并把词法状态带到后续行。
+              code += t;
+              i += t.length;
+              inString = t;
+              multilineStringClose = t;
+              hadStringContent = true;
             }
             continue scan;
           }
@@ -334,9 +380,17 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
           continue scan;
         }
       }
-      if (syntax.quotes.includes(ch)) inString = ch;
+      if (syntax.quotes.includes(ch)) {
+        inString = ch;
+        if (ch === '`') multilineStringClose = ch;
+        hadStringContent = true;
+      }
       code += ch;
       i++;
+    }
+
+    if (inString === '`' || (inString && syntax.triple?.includes(inString))) {
+      multilineStringClose = inString;
     }
 
     if (!opts.removeComments && hadComment) {
@@ -349,7 +403,7 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
     }
 
     const trimmed = code.trimEnd();
-    if (trimmed.trim() === '') {
+    if (trimmed.trim() === '' && !hadStringContent) {
       if (hadComment) {
         result.push({ text: raw, kind: 'comment', masked: false, out: [] });
       } else {
