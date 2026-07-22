@@ -8,7 +8,7 @@
 
 全程离线 · 代码不出本机 · 规范内置 · 导出前自动校验
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#快速开始)
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#参与贡献)
@@ -63,6 +63,7 @@ cd codesucker
 npm install
 npm run dev        # 启动桌面应用
 npm test           # core 流水线冒烟测试
+npm run verify     # 版本一致性 + 测试 + 完整构建
 ```
 
 > **国内网络提示**：Electron 二进制下载失败时执行
@@ -110,12 +111,24 @@ XProtect 会误杀旧版 Electron 的二进制，本项目已固定使用 Electr
 - [ ] **V2**：electron-builder 三平台安装包 · electron-updater 自动更新（国内 OSS 源）· 自定义排除/脱敏规则 · 校验项一键修复 · CLI 版本
 - [ ] **V3**：用户手册/设计说明书模板化生成 · 例外交存模式（黑斜线覆盖）· 多申报主体管理
 
+## 版本与发布
+
+CodeSucker 使用 Semantic Versioning。根包、桌面应用、core 包和 lockfile 的产品版本由统一脚本同步；项目配置 schema 与合规规则版本独立演进。
+
+```bash
+npm run version:check                    # 检查所有版本字段一致
+npm run version:set -- 0.2.0-beta.1      # 统一设置产品版本
+npm run verify                           # 发布前完整校验
+```
+
+正式发布以 `v<SemVer>` Git tag 和 GitHub Release 为准，仅修改源码中的版本字段不代表已经发布。完整规则见 [VERSIONING.md](VERSIONING.md)，用户可见变化记录在 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 参与贡献
 
-欢迎 Issue 与 PR。提交前请确保 `npm test` 与 `npm run build` 通过；提交信息请说明动机而不止是改动内容。
+欢迎 Issue 与 PR。提交前请确保 `npm run verify` 通过；提交信息请说明动机而不止是改动内容。
 
 ## 许可证
 
-[GPL-3.0](LICENSE) © fanbuz
+[Apache-2.0](LICENSE) © fanbuz
 
-本项目自由使用、修改与分发；基于本项目的衍生作品须以相同许可证开源。
+本项目允许使用、修改、分发及闭源商用；再分发时须附带 Apache-2.0 许可证、保留适用的版权与 [NOTICE](NOTICE) 声明，并标明对文件所作的修改。

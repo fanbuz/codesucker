@@ -4,6 +4,7 @@ export { annotate, cleanFile, wrapLine } from './clean.ts';
 export { select } from './select.ts';
 export { renderDocx, renderTxt, type RenderOptions } from './render.ts';
 export { audit } from './audit.ts';
+export { CONFIG_SCHEMA_VERSION, RULES_VERSION } from './version.ts';
 
 import { readSource } from './discover.ts';
 import { cleanFile } from './clean.ts';

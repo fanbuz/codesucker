@@ -2,15 +2,28 @@
   "name": "@codesucker/app",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "main": "out/main/index.js",
   "build": {
     "appId": "com.fanbuz.codesucker",
     "productName": "CodeSucker",
-    "directories": { "buildResources": "build" },
-    "files": ["out/**"],
-    "mac": { "icon": "build/icon.icns", "category": "public.app-category.developer-tools" },
-    "win": { "icon": "build/icon.ico" },
-    "linux": { "icon": "build/icon.png", "category": "Development" }
+    "directories": {
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**"
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Development"
+    }
   },
   "scripts": {
     "dev": "electron-vite dev",

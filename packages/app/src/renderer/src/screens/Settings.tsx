@@ -15,7 +15,7 @@ export default function Settings() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
               <div style={{ fontSize: 13.5, fontWeight: 600 }}>软件更新</div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>当前 v0.1.0 · 更新仅在手动检查时联网，不上传任何数据</div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>当前 v{__APP_VERSION__} · 更新仅在手动检查时联网，不上传任何数据</div>
             </div>
             <button className="btn-primary" style={{ height: 32, padding: '0 16px', fontSize: 12.5 }}
               onClick={() => toast('自动更新将在正式版开启（electron-updater）')}>检查更新</button>

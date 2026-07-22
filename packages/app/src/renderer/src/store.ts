@@ -10,6 +10,7 @@ export interface AuditRow {
 }
 export interface PageData { no: number; lines: string[]; startFile: string; endFile: string }
 export interface ProcessData {
+  meta: { appVersion: string; configSchemaVersion: number; rulesVersion: string };
   stats: { totalFiles: number; includedFiles: number; cleanedLines: number; estimatedPages: number; htmlCssRatio: number; langCounts: Record<string, number> };
   selection: { pages: PageData[]; totalLines: number; pickedLines: number; truncated: boolean; splitAfterPage: number | null; frontEndFile: string | null; backStartFile: string | null };
   audit: AuditRow[];
@@ -50,7 +51,7 @@ interface State {
   fmtTxt: boolean;
   outDir: string;
   exporting: boolean;
-  exportResult: null | { docx?: string; txt?: string; size: number; pages: number; lines: number };
+  exportResult: null | { docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string };
   toast: string | null;
   set: (p: Partial<State>) => void;
 }

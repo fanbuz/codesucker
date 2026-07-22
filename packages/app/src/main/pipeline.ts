@@ -4,13 +4,60 @@ import * as path from 'node:path';
 import {
   annotate, DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, defaultCleanOptions,
   discover, processFiles, readSource, renderDocx, renderTxt, sortFiles,
+  CONFIG_SCHEMA_VERSION, RULES_VERSION,
 } from '@codesucker/core';
 import type { CleanOptions, FileEntry, ProjectConfig } from '@codesucker/core';
+import appPackage from '../../package.json';
 
 /** 最近一次扫描缓存：relPath → FileEntry */
 let lastScan: { root: string; byRel: Map<string, FileEntry> } | null = null;
 
 const recentFile = () => path.join(app.getPath('userData'), 'recent.json');
+
+interface VersionMeta {
+  appVersion: string;
+  configSchemaVersion: number;
+  rulesVersion: string;
+}
+
+function versionMeta(): VersionMeta {
+  return {
+    appVersion: appPackage.version,
+    configSchemaVersion: CONFIG_SCHEMA_VERSION,
+    rulesVersion: RULES_VERSION,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function loadProjectConfig(root: string): { config: Record<string, unknown> | null; warning: string | null } {
+  const configFile = path.join(root, '.codesucker.json');
+  if (!fs.existsSync(configFile)) return { config: null, warning: null };
+
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    if (!isRecord(parsed)) return { config: null, warning: '项目配置格式无效，已忽略 .codesucker.json' };
+
+    const schema = parsed.schemaVersion;
+    if (schema === undefined) {
+      return { config: parsed, warning: `检测到旧版项目配置，将在下次保存时升级到 schema ${CONFIG_SCHEMA_VERSION}` };
+    }
+    if (!Number.isInteger(schema) || (schema as number) < 1) {
+      return { config: null, warning: '项目配置 schemaVersion 无效，已忽略该配置' };
+    }
+    if ((schema as number) > CONFIG_SCHEMA_VERSION) {
+      return {
+        config: null,
+        warning: `项目配置来自更新版本（schema ${schema}），当前仅支持 ${CONFIG_SCHEMA_VERSION}，请升级 CodeSucker`,
+      };
+    }
+    return { config: parsed, warning: null };
+  } catch {
+    return { config: null, warning: '项目配置无法解析，已忽略 .codesucker.json' };
+  }
+}
 
 interface RecentProject {
   name: string;
@@ -78,10 +125,12 @@ export function registerPipelineIpc() {
     const entryOrder = sortFiles(files, 'entry').map((f) => f.relPath);
     const mtimeOrder = sortFiles(files, 'mtime').map((f) => f.relPath);
     if (files.length > 0) touchRecent({ name: path.basename(root), root });
-    // 读取项目内保存的配置
-    let savedConfig: unknown = null;
-    try { savedConfig = JSON.parse(fs.readFileSync(path.join(root, '.codesucker.json'), 'utf8')); } catch { /* 无配置 */ }
-    return { files, langCounts, entryOrder, mtimeOrder, savedConfig };
+    const saved = loadProjectConfig(root);
+    return {
+      files, langCounts, entryOrder, mtimeOrder,
+      savedConfig: saved.config,
+      savedConfigWarning: saved.warning,
+    };
   });
 
   ipcMain.handle('project:process', (_e, p: ProcessPayload) => {
@@ -102,6 +151,7 @@ export function registerPipelineIpc() {
       };
     }
     return {
+      meta: versionMeta(),
       stats: result.stats,
       selection: {
         ...result.selection,
@@ -121,8 +171,9 @@ export function registerPipelineIpc() {
     const result = processFiles(entries, buildConfig(p));
     const pages = result.selection.pages;
     const renderOpts = { title: p.title, fontName: 'SimSun', fontSizePt: 10.5, outDir: p.outDir };
-    const out: { docx?: string; txt?: string; size: number; pages: number; lines: number } = {
+    const out: { docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string } = {
       size: 0, pages: pages.length, lines: result.selection.pickedLines,
+      appVersion: appPackage.version, rulesVersion: RULES_VERSION,
     };
     if (p.formats.docx) {
       out.docx = await renderDocx(pages, renderOpts);
@@ -139,7 +190,14 @@ export function registerPipelineIpc() {
   });
 
   ipcMain.handle('project:saveConfig', (_e, root: string, config: unknown) => {
-    fs.writeFileSync(path.join(root, '.codesucker.json'), JSON.stringify(config, null, 2));
+    const values = isRecord(config) ? config : {};
+    const persisted = {
+      ...values,
+      schemaVersion: CONFIG_SCHEMA_VERSION,
+      appVersion: appPackage.version,
+      rulesVersion: RULES_VERSION,
+    };
+    fs.writeFileSync(path.join(root, '.codesucker.json'), `${JSON.stringify(persisted, null, 2)}\n`);
     return true;
   });
 }

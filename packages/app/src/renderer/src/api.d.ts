@@ -1,6 +1,8 @@
 export {};
 
 declare global {
+  const __APP_VERSION__: string;
+
   interface Window {
     cs: {
       win: (action: 'minimize' | 'maximize' | 'close') => void;

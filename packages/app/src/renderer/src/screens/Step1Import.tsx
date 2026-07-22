@@ -6,7 +6,9 @@ interface ScanResult {
   langCounts: Record<string, number>;
   entryOrder: string[];
   mtimeOrder: string[];
+  savedConfigWarning?: string | null;
   savedConfig: null | {
+    schemaVersion?: number; appVersion?: string; rulesVersion?: string;
     title?: string; owner?: string; sortMode?: 'entry' | 'mtime' | 'manual';
     order?: string[]; excludedRelPaths?: string[];
     clean?: { removeComments: boolean; removeBlankLines: boolean; maskSensitive: boolean; wrapLongLines: boolean };
@@ -50,7 +52,8 @@ export default function Step1Import() {
           outDir: cfg?.outDir ?? '',
           processData: null, page: 1,
         });
-        if (cfg) toast('已恢复项目配置（.codesucker.json）');
+        if (r.savedConfigWarning) toast(r.savedConfigWarning);
+        else if (cfg) toast('已恢复项目配置（.codesucker.json）');
       }, 350);
     } catch (e) {
       clearInterval(timer.current);
