@@ -17,9 +17,10 @@
     "test": "npm run test -w @codesucker/core && npm run test -w @codesucker/app",
     "test:integration": "npm run test:workers -w @codesucker/app",
     "perf": "npm run build && npm run perf -w @codesucker/app",
+    "lockfile:check": "node scripts/check-lockfile-registry.mjs",
     "version:check": "node scripts/check-version.mjs",
     "version:set": "node scripts/set-version.mjs",
-    "verify": "npm run version:check && npm test && npm run build && npm run test:integration"
+    "verify": "npm run version:check && npm run lockfile:check && npm test && npm run build && npm run test:integration"
   },
   "engines": {
     "node": ">=18"

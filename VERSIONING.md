@@ -56,7 +56,7 @@ npm run version:check
 npm run verify
 ```
 
-`verify` 会依次执行版本一致性校验、测试和完整构建。
+`verify` 会依次执行版本一致性校验、lockfile 公共源检查、测试和完整构建。lockfile 中出现非公共依赖下载地址时必须失败，且检查日志不得回显具体地址。
 
 ## 配置结构版本
 
