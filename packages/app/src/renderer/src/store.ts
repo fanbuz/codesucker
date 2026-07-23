@@ -136,6 +136,34 @@ export function orderedIncluded(s: Pick<State, 'files' | 'order'>): FileRow[] {
   return s.order.map((r) => byRel.get(r)).filter((f): f is FileRow => !!f && f.included);
 }
 
+export function completeFileOrder(
+  currentOrder: readonly string[],
+  fallbackOrder: readonly string[],
+  knownPaths: ReadonlySet<string>,
+): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const relPath of [...currentOrder, ...fallbackOrder]) {
+    if (knownPaths.has(relPath) && !seen.has(relPath)) {
+      result.push(relPath);
+      seen.add(relPath);
+    }
+  }
+  return result;
+}
+
+export function reorderIncludedPaths(fullOrder: readonly string[], includedOrder: readonly string[]): string[] {
+  const includedPaths = new Set(includedOrder);
+  const fullPaths = new Set(fullOrder);
+  let cursor = 0;
+  const result = fullOrder.map((relPath) => includedPaths.has(relPath) ? includedOrder[cursor++] : relPath);
+  for (; cursor < includedOrder.length; cursor++) {
+    const relPath = includedOrder[cursor];
+    if (!fullPaths.has(relPath)) result.push(relPath);
+  }
+  return result;
+}
+
 export function cleanOptions(t: CleanToggles) {
   return { ...t, maxLineWidth: 78, tabWidth: 4 };
 }
