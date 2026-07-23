@@ -105,6 +105,7 @@ export default function Step1Import() {
       await updateRecent(() => window.cs.setRecentPinned(project.root, !project.pinned));
       toast(project.pinned ? '已取消置顶' : '已置顶最近项目');
     } catch (error) {
+      await refreshRecent();
       toast(`操作失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       closeRecentMenu(true);
@@ -117,6 +118,7 @@ export default function Step1Import() {
       await updateRecent(() => window.cs.removeRecent(project.root));
       toast('已从最近项目移除，项目文件未受影响');
     } catch (error) {
+      await refreshRecent();
       toast(`移除失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       closeRecentMenu(true);
@@ -133,6 +135,7 @@ export default function Step1Import() {
       setManagingRecent(false);
       toast(`已移除 ${roots.length} 条最近记录，项目文件未受影响`);
     } catch (error) {
+      await refreshRecent();
       toast(`批量移除失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
