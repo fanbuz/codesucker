@@ -7,6 +7,7 @@ import iconv from 'iconv-lite';
 import type { FileEntry } from './types.ts';
 import type { FileTaskError, PipelineProgress } from './types.ts';
 import { mapConcurrent, throwIfAborted } from './async.ts';
+import { compileExcludePatterns } from './exclude-rules.ts';
 
 const LANG_BY_EXT: Record<string, string> = {
   java: 'JAVA', kt: 'KT', kts: 'KT', py: 'PY', js: 'JS', jsx: 'JSX',
@@ -108,19 +109,13 @@ export function discover(root: string, extensions: string[], excludes: string[])
     ig.add(fs.readFileSync(gitignorePath, 'utf8'));
   }
 
-  const dirExcludes = excludes.filter((e) => !e.includes('*'));
-  const fileExcludes = excludes.filter((e) => e.includes('*'));
-
   const entries = fg.sync(`**/*.{${extensions.join(',')}}`, {
     cwd: root,
     dot: false,
     onlyFiles: true,
     stats: true,
     suppressErrors: true,
-    ignore: [
-      ...dirExcludes.map((d) => `**/${d.replace(/\/$/, '')}/**`),
-      ...fileExcludes.map((f) => `**/${f}`),
-    ],
+    ignore: compileExcludePatterns(excludes),
   });
 
   const files: FileEntry[] = [];
@@ -182,18 +177,13 @@ export async function discoverAsync(
     if (code !== 'ENOENT') throw error;
   }
 
-  const dirExcludes = excludes.filter((e) => !e.includes('*'));
-  const fileExcludes = excludes.filter((e) => e.includes('*'));
   const entries = await fg(`**/*.{${extensions.join(',')}}`, {
     cwd: root,
     dot: false,
     onlyFiles: true,
     stats: true,
     suppressErrors: true,
-    ignore: [
-      ...dirExcludes.map((d) => `**/${d.replace(/\/$/, '')}/**`),
-      ...fileExcludes.map((f) => `**/${f}`),
-    ],
+    ignore: compileExcludePatterns(excludes),
   });
   throwIfAborted(signal);
 

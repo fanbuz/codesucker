@@ -12,6 +12,9 @@ import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
 import { validateDroppedDirectory } from './drop-path';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
+import {
+  loadScanExcludeSnapshot, registerScanExcludesIpc, SCAN_EXCLUDES_CONFIG_NAME,
+} from './scan-excludes-config';
 import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, RenderWorkerRequest,
 } from './workers/protocol';
@@ -47,6 +50,7 @@ export async function shutdownPipeline(): Promise<void> {
 }
 
 const recentFile = () => path.join(app.getPath('userData'), 'recent.json');
+const scanExcludesFile = () => path.join(app.getPath('userData'), SCAN_EXCLUDES_CONFIG_NAME);
 
 interface VersionMeta {
   appVersion: string;
@@ -221,8 +225,10 @@ async function scanWithWorkers(
   const job = jobs.start(request.jobId, 'scan');
   const workerResources = getResources();
   const report = createProgressReporter(job, sender, workerResources.workerCount);
+  // 每次扫描只读取一次规则快照，运行中的设置修改留到下次扫描生效。
+  const excludeRules = loadScanExcludeSnapshot(scanExcludesFile());
   try {
-    const result = await discoverAsync(request.root, DEFAULT_EXTENSIONS, DEFAULT_EXCLUDES, {
+    const result = await discoverAsync(request.root, DEFAULT_EXTENSIONS, excludeRules, {
       concurrency: workerResources.workerCount * 2,
       signal: job.signal,
       onProgress: report,
@@ -302,6 +308,7 @@ export function registerPipelineIpc() {
   ipcMain.handle('path:validateDroppedDirectory', (_event, inputPath: string) => validateDroppedDirectory(inputPath));
 
   ipcMain.handle('recent:list', () => loadRecent());
+  registerScanExcludesIpc(ipcMain, scanExcludesFile);
   ipcMain.handle('project:cancel', (_event, jobId: string) => jobs.cancel(jobId));
 
   ipcMain.handle('project:scan', (event, request: ScanRequest) => scanWithWorkers(request, event.sender));

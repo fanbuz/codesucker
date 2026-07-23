@@ -10,6 +10,11 @@ export { renderDocx, renderTxt, renderTxtAsync, type RenderOptions } from './ren
 export { audit } from './audit.ts';
 export { CONFIG_SCHEMA_VERSION, RULES_VERSION } from './version.ts';
 export { abortError, mapConcurrent, throwIfAborted } from './async.ts';
+export {
+  compileExcludePatterns, normalizeExcludeRules, validateExcludeRule,
+  ExcludeRuleValidationError,
+  type ExcludeRuleKind, type ExcludeRuleValidation, type ExcludeRuleValidationCode,
+} from './exclude-rules.ts';
 
 import { readSource, readSourceAsync } from './discover.ts';
 import { cleanFile } from './clean.ts';

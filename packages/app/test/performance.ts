@@ -102,6 +102,16 @@ async function main() {
       '并发扫描文件顺序必须与同步基准一致',
     );
 
+    const customExcludeRules = [...DEFAULT_EXCLUDES, 'src/module-*'];
+    const customExcludeScan = await measure(() => discover(root, DEFAULT_EXTENSIONS, customExcludeRules));
+    const customExcludeAsyncScan = await measure(() => discoverAsync(root, DEFAULT_EXTENSIONS, customExcludeRules));
+    assert.equal(customExcludeScan.result.length, 0, '自定义目录 glob 应在扫描阶段排除匹配目录');
+    assert.deepEqual(
+      customExcludeAsyncScan.result.files,
+      customExcludeScan.result,
+      '自定义排除后的并发与同步扫描结果必须一致',
+    );
+
     const syncOrdered = sortFiles(syncScan.result, 'entry');
     const parallelOrdered = sortFiles(parallelScan.result.files, 'entry');
     const syncProcess = await measure(() => processFiles(syncOrdered, config));
@@ -152,6 +162,12 @@ async function main() {
         scan: metric(parallelScan),
         process: metric(parallelProcess),
         render: metric(parallelRender),
+      },
+      customExclusion: {
+        rule: 'src/module-*',
+        syncScan: metric(customExcludeScan),
+        asyncScan: metric(customExcludeAsyncScan),
+        matchedFiles: customExcludeScan.result.length,
       },
     };
     console.log(JSON.stringify(report, null, 2));
