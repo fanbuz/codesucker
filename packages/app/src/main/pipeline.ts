@@ -195,11 +195,16 @@ function buildConfig(payload: ProcessPayload): ProjectConfig {
   };
 }
 
+function requireCurrentScan(root: string) {
+  if (!lastScan || lastScan.root !== root) throw new Error('请先重新扫描项目');
+  validateProjectRoot(lastScan.rootSnapshot, root);
+  return lastScan;
+}
+
 function orderedEntries(payload: ProcessPayload): FileEntry[] {
-  if (!lastScan || lastScan.root !== payload.root) throw new Error('请先重新扫描项目');
-  validateProjectRoot(lastScan.rootSnapshot, payload.root);
+  const scan = requireCurrentScan(payload.root);
   return payload.orderedRelPaths
-    .map((relativePath) => lastScan!.byRel.get(relativePath))
+    .map((relativePath) => scan.byRel.get(relativePath))
     .filter((entry): entry is FileEntry => !!entry);
 }
 
@@ -338,6 +343,7 @@ export function registerPipelineIpc() {
         previewWithWorker(entries[0], request.payload.clean, job),
       ]);
       job.assertCurrent();
+      requireCurrentScan(request.payload.root);
       const audit = result.errors.length > 0
         ? [{
             status: 'warn' as const,
@@ -386,6 +392,7 @@ export function registerPipelineIpc() {
     try {
       const entries = orderedEntries(request.payload);
       const result = await processWithWorkers(entries, request.payload, job, event.sender);
+      requireCurrentScan(request.payload.root);
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
       const renderOptions = {
