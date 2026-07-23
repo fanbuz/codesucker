@@ -200,17 +200,11 @@ export class WindowStateTracker {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private detached = false;
 
-  private readonly captureAndSchedule = (): void => { this.capture(); this.scheduleSave(); };
+  private readonly captureAndSchedule = (): void => { this.reconcileBounds(); this.scheduleSave(); };
   private readonly flushOnClose = (): void => { this.capture(); this.flush(); };
   private readonly detachOnClosed = (): void => this.detach();
   private readonly handleDisplayChange = (): void => {
-    if (this.window.isDestroyed()) return;
-    const candidate = this.window.getNormalBounds();
-    const constrained = constrainWindowBounds(candidate, this.screen, this.options.minWidth, this.options.minHeight);
-    const minimum = minimumSizeForBounds(constrained, this.options.minWidth, this.options.minHeight);
-    this.window.setMinimumSize(minimum.width, minimum.height);
-    this.normalBounds = constrained;
-    if (!this.window.isMaximized() && !sameBounds(candidate, constrained)) this.window.setBounds(constrained);
+    this.reconcileBounds();
     this.scheduleSave();
   };
 
@@ -234,6 +228,16 @@ export class WindowStateTracker {
     if (this.window.isDestroyed()) return;
     const bounds = this.window.getNormalBounds();
     this.normalBounds = constrainWindowBounds(bounds, this.screen, this.options.minWidth, this.options.minHeight);
+  }
+
+  private reconcileBounds(): void {
+    if (this.window.isDestroyed()) return;
+    const candidate = this.window.getNormalBounds();
+    const constrained = constrainWindowBounds(candidate, this.screen, this.options.minWidth, this.options.minHeight);
+    const minimum = minimumSizeForBounds(constrained, this.options.minWidth, this.options.minHeight);
+    this.window.setMinimumSize(minimum.width, minimum.height);
+    this.normalBounds = constrained;
+    if (!this.window.isMaximized() && !sameBounds(candidate, constrained)) this.window.setBounds(constrained);
   }
 
   private scheduleSave(): void {

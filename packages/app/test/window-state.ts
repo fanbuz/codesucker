@@ -106,6 +106,26 @@ assert.deepEqual(smallDisplayWindow.setBoundsCalls.at(-1), smallState.bounds);
 smallDisplayWindow.emit('closed');
 smallDisplayTracker.detach();
 
+const connectedSmallScreen = new FakeScreen([
+  primary,
+  { workArea: { x: 1920, y: 0, width: 1024, height: 720 } },
+]);
+const movedToSmallBounds = { x: 2000, y: 50, width: 1160, height: 760 };
+const movedToSmallWindow = new FakeWindow(movedToSmallBounds);
+const movedToSmallTracker = new WindowStateTracker(
+  path.join(root, 'move-to-small-display.json'), movedToSmallWindow, connectedSmallScreen,
+  { ...smallState, bounds: movedToSmallBounds }, { debounceMs: 15 },
+);
+movedToSmallWindow.emit('move');
+assert.deepEqual(movedToSmallWindow.setMinimumSizeCalls.at(-1), { width: 1024, height: 720 });
+assert.deepEqual(
+  movedToSmallWindow.setBoundsCalls.at(-1),
+  { x: 1920, y: 0, width: 1024, height: 720 },
+  '拖到已连接的小显示器时，也应同步最小尺寸并将窗口完整约束到工作区',
+);
+movedToSmallWindow.emit('closed');
+movedToSmallTracker.detach();
+
 const trackedFile = path.join(root, 'tracked.json');
 const initial: WindowState = {
   schemaVersion: WINDOW_STATE_SCHEMA_VERSION,
