@@ -41,7 +41,7 @@ declare global {
       offProgress: () => void;
       saveConfig: (root: string, config: unknown) => Promise<boolean>;
       revealProjectFile: (root: string, relPath: string) => Promise<void>;
-      showItem: (p: string) => Promise<void>;
+      revealLatestExport: () => Promise<void>;
       openExternal: (url: string) => Promise<void>;
     };
   }

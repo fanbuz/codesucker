@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { resolveProjectFile } from '../src/main/project-file.ts';
+import { resolveProjectFile, resolveRecentExportFile } from '../src/main/project-file.ts';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codesucker-project-file-'));
 const root = path.join(sandbox, 'project');
@@ -27,6 +27,10 @@ assert.throws(() => resolveProjectFile(root, root, 'src/folder'), /普通文件/
 assert.throws(() => resolveProjectFile(root, root, ''), /相对路径/);
 assert.throws(() => resolveProjectFile(null, root, 'src/main.ts'), /重新扫描/);
 assert.throws(() => resolveProjectFile(root, sandbox, 'outside.ts'), /扫描结果/);
+assert.equal(resolveRecentExportFile(fs.realpathSync(outside)), fs.realpathSync(outside));
+assert.throws(() => resolveRecentExportFile(null), /暂无可定位/);
+assert.throws(() => resolveRecentExportFile(path.join(sandbox, 'missing.txt')), /不存在/);
+assert.throws(() => resolveRecentExportFile(fs.realpathSync(path.join(root, 'src'))), /发生变化/);
 
 try {
   fs.symlinkSync(outside, path.join(root, 'src', 'outside-link.ts'));

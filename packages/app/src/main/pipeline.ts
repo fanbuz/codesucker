@@ -11,7 +11,7 @@ import type {
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
 import { validateDroppedDirectory } from './drop-path';
-import { resolveProjectFile } from './project-file';
+import { resolveProjectFile, resolveRecentExportFile } from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
 import {
   loadScanExcludeSnapshot, registerScanExcludesIpc, SCAN_EXCLUDES_CONFIG_NAME,
@@ -22,6 +22,7 @@ import type {
 
 /** 最近一次扫描缓存只保存文件元数据，不保存原始源码。 */
 let lastScan: { root: string; byRel: Map<string, FileEntry> } | null = null;
+let lastExportFile: string | null = null;
 const jobs = new JobController();
 
 interface PipelineResources {
@@ -312,6 +313,10 @@ export function registerPipelineIpc() {
     shell.showItemInFolder(resolveProjectFile(lastScan?.root ?? null, root, relPath));
   });
 
+  ipcMain.handle('project:revealLatestExport', () => {
+    shell.showItemInFolder(resolveRecentExportFile(lastExportFile));
+  });
+
   ipcMain.handle('recent:list', () => loadRecent());
   registerScanExcludesIpc(ipcMain, scanExcludesFile);
   ipcMain.handle('project:cancel', (_event, jobId: string) => jobs.cancel(jobId));
@@ -369,6 +374,7 @@ export function registerPipelineIpc() {
     request: JobRequest<ProcessPayload & { outDir: string; formats: { docx: boolean; txt: boolean } }>,
   ) => {
     const job = jobs.start(request.jobId, 'export');
+    lastExportFile = null;
     const workerResources = getResources();
     const report = createProgressReporter(job, event.sender, workerResources.workerCount);
     try {
@@ -417,6 +423,9 @@ export function registerPipelineIpc() {
       }
 
       job.assertCurrent();
+      const exportedFile = output.docx ?? output.txt;
+      if (!exportedFile) throw new Error('请至少选择一种输出格式');
+      lastExportFile = fs.realpathSync.native(exportedFile);
       touchRecent({
         name: path.basename(request.payload.root),
         root: request.payload.root,

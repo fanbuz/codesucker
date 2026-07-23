@@ -261,6 +261,7 @@ input,button{font-family:inherit}
 .settings-dialog__close{width:30px;height:30px;flex:none;padding:0;font-size:18px;line-height:1}
 .settings-dialog__close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .settings-dialog__body{min-height:0;overflow-x:hidden;overflow-y:auto;padding:16px 20px 20px;color:var(--text2);font-size:12px;line-height:1.7;overscroll-behavior:contain;user-select:text}
+.settings-dialog__body:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
 .settings-dialog__body ul{display:flex;flex-direction:column;gap:8px;margin:0;padding-left:20px}
 .settings-dialog__body li{padding-left:2px;overflow-wrap:anywhere}
 

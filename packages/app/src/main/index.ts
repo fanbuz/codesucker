@@ -42,7 +42,6 @@ app.whenReady().then(() => {
   ipcMain.on('win:minimize', () => win?.minimize());
   ipcMain.on('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()));
   ipcMain.on('win:close', () => win?.close());
-  ipcMain.handle('shell:showItem', (_e, p: string) => shell.showItemInFolder(p));
   ipcMain.handle('shell:openExternal', async (_e, url: string) => {
     if (!isTrustedExternalUrl(url)) throw new Error('不允许打开未受信任的外部链接');
     await shell.openExternal(url);

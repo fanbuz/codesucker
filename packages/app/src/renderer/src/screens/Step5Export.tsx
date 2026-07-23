@@ -195,7 +195,14 @@ export default function Step5Export() {
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
               <button className="btn-primary" style={{ flex: 1, height: 38, fontSize: 13 }}
-                onClick={() => { window.cs.showItem(r.docx ?? r.txt ?? ''); s.set({ exportResult: null }); }}>打开所在文件夹</button>
+                onClick={async () => {
+                  try {
+                    await window.cs.revealLatestExport();
+                    s.set({ exportResult: null });
+                  } catch (error) {
+                    toast('无法定位导出文件：' + (error instanceof Error ? error.message : String(error)));
+                  }
+                }}>打开所在文件夹</button>
               <button className="btn-ghost" style={{ flex: 1, height: 38, fontSize: 13, borderRadius: 9, color: 'var(--text)' }}
                 onClick={() => s.set({ exportResult: null })}>再次生成</button>
             </div>

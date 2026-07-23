@@ -379,7 +379,7 @@ export default function Settings() {
               <button type="button" className="btn-ghost settings-dialog__close"
                 onClick={() => setReleaseNotesOpen(false)} aria-label="关闭更新说明">×</button>
             </div>
-            <div className="settings-dialog__body">
+            <div className="settings-dialog__body" tabIndex={0} role="region" aria-label="更新说明正文">
               <ul>
                 {update.notes.map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}
               </ul>

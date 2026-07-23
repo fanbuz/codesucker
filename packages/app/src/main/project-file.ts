@@ -56,3 +56,19 @@ export function resolveProjectFile(trustedRoot: string | null, root: unknown, re
   }
   return realFile;
 }
+
+/** 仅允许重新定位主进程最近一次真实生成并记录的导出文件。 */
+export function resolveRecentExportFile(exportedFile: string | null): string {
+  if (!exportedFile) throw new Error('暂无可定位的导出文件，请先生成申报文档');
+
+  let realFile: string;
+  try {
+    realFile = fs.realpathSync.native(exportedFile);
+  } catch {
+    throw new Error('导出文件不存在，可能已被移动或删除');
+  }
+  if (realFile !== exportedFile || !fs.statSync(realFile).isFile()) {
+    throw new Error('导出文件已发生变化，无法安全定位');
+  }
+  return realFile;
+}
