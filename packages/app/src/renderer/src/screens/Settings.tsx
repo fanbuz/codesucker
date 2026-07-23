@@ -1,4 +1,4 @@
-import { toast, useStore } from '../store';
+import { checkForUpdates, toast, useStore } from '../store';
 
 const EXCLUDE_RULES = ['node_modules/', 'build/', '.git/', 'dist/', '.gradle/', 'vendor/', '*.min.js', '*.lock'];
 const LINKS = {
@@ -10,6 +10,35 @@ const LINKS = {
 
 export default function Settings() {
   const s = useStore();
+  const update = s.updateResult;
+  const hasUpdate = update?.status === 'available';
+  const updateTitle = s.updateChecking
+    ? '正在检查 GitHub Release…'
+    : hasUpdate
+      ? `发现新版本 v${update.latestVersion}`
+      : update?.status === 'up-to-date'
+        ? '已是最新版本'
+        : update?.status === 'error'
+          ? '暂时无法检查更新'
+          : '检查新版本';
+  const updateDetail = s.updateChecking
+    ? '只查询公开版本元数据，不会上传项目或源码'
+    : hasUpdate
+      ? `当前 v${update.currentVersion}${update.publishedAt ? ` · 发布于 ${new Date(update.publishedAt).toLocaleDateString('zh-CN')}` : ''}`
+      : update?.status === 'up-to-date'
+        ? `当前 v${update.currentVersion} · GitHub 最新 v${update.latestVersion}`
+        : update?.status === 'error'
+          ? update.message
+          : `当前 v${__APP_VERSION__} · 启动时自动检查正式 Release`;
+
+  const handleUpdateAction = async () => {
+    if (hasUpdate) {
+      try { await window.cs.openExternal(update.releaseUrl); } catch { toast('无法打开 GitHub Release 页面'); }
+      return;
+    }
+    await checkForUpdates(true);
+  };
+
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '22px 32px', animation: 'cs-fade .18s ease-out' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
@@ -17,16 +46,30 @@ export default function Settings() {
         <div style={{ fontSize: 16, fontWeight: 600 }}>设置</div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 640 }}>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, boxShadow: 'var(--shadow)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: 13.5, fontWeight: 600 }}>软件更新</div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>当前 v{__APP_VERSION__} · MVP 暂不包含自动更新</div>
-            </div>
-            <button className="btn-ghost" style={{ height: 32, padding: '0 16px', fontSize: 12.5 }}
-              onClick={() => toast('自动更新将在后续版本开放')}>后续版本开放</button>
+        <section className={`update-card${hasUpdate ? ' update-card--available' : ''}`} aria-live="polite">
+          <div className="update-card__icon" aria-hidden="true">
+            {s.updateChecking
+              ? <span className="update-card__spinner" />
+              : hasUpdate ? '↗' : update?.status === 'up-to-date' ? '✓' : '↑'}
           </div>
-        </div>
+          <div className="update-card__content">
+            <div className="update-card__eyebrow">SOFTWARE UPDATE · 软件更新</div>
+            <div className="update-card__title">
+              {updateTitle}
+              {hasUpdate && <span className="update-card__badge">NEW</span>}
+            </div>
+            <div className="update-card__detail">{updateDetail}</div>
+            {hasUpdate && update.notes.length > 0 && (
+              <ul className="update-card__notes">
+                {update.notes.map((note) => <li key={note}>{note}</li>)}
+              </ul>
+            )}
+          </div>
+          <button className={hasUpdate ? 'btn-primary update-card__action' : 'btn-ghost update-card__action'}
+            disabled={s.updateChecking} onClick={handleUpdateAction}>
+            {s.updateChecking ? '检查中…' : hasUpdate ? '查看并下载' : update?.status === 'up-to-date' ? '重新检查' : '检查更新'}
+          </button>
+        </section>
         <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, boxShadow: 'var(--shadow)' }}>
           <div style={{ fontSize: 13.5, fontWeight: 600 }}>默认排除规则</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4, marginBottom: 10 }}>匹配的目录与文件在导入时自动排除（.gitignore 亦生效）</div>
@@ -43,7 +86,7 @@ export default function Settings() {
             隐私说明
           </div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8, lineHeight: 1.9 }}>
-            CodeSucker 在本机完成全部处理：扫描、清洗、脱敏、排版、导出均不产生任何网络请求。您的源代码<span style={{ color: 'var(--text)', fontWeight: 600 }}>永远不会离开这台电脑</span>。
+            CodeSucker 的扫描、清洗、脱敏、排版与导出全部在本机完成，您的源代码<span style={{ color: 'var(--text)', fontWeight: 600 }}>永远不会离开这台电脑</span>。应用启动或您手动检查更新时，只向 GitHub 请求公开的 Release 版本元数据，不会发送项目路径、源码或配置。
           </div>
         </div>
         <section className="about-card" aria-labelledby="about-codesucker">

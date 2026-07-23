@@ -52,7 +52,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
-    "test": "tsx test/job-controller.ts && tsx test/worker-pool.ts && tsx test/export-guard.ts && tsx test/drop-path.ts",
+    "test": "tsx test/job-controller.ts && tsx test/worker-pool.ts && tsx test/export-guard.ts && tsx test/drop-path.ts && tsx test/update-check.ts",
     "test:workers": "tsx test/worker-integration.ts",
     "perf": "tsx test/performance.ts",
     "dist:mac:x64": "npm run build && electron-builder --mac dmg --x64 --publish never",

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { UpdateCheckResult } from '../../shared/update-types';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
@@ -42,6 +43,8 @@ interface State {
   activeJobId: string | null;
   jobProgress: JobProgress | null;
   recent: RecentProject[];
+  updateChecking: boolean;
+  updateResult: UpdateCheckResult | null;
   files: FileRow[];
   entryOrder: string[];
   mtimeOrder: string[];
@@ -76,6 +79,8 @@ export const useStore = create<State>((set) => ({
   activeJobId: null,
   jobProgress: null,
   recent: [],
+  updateChecking: false,
+  updateResult: null,
   files: [],
   entryOrder: [],
   mtimeOrder: [],
@@ -102,6 +107,27 @@ export function toast(text: string) {
   clearTimeout(toastTimer);
   useStore.getState().set({ toast: text });
   toastTimer = setTimeout(() => useStore.getState().set({ toast: null }), 1800);
+}
+
+export async function checkForUpdates(force = false): Promise<void> {
+  const current = useStore.getState();
+  if (current.updateChecking) return;
+  current.set({ updateChecking: true });
+  try {
+    const result = await window.cs.checkForUpdates(force);
+    useStore.getState().set({ updateChecking: false, updateResult: result });
+  } catch (error) {
+    useStore.getState().set({
+      updateChecking: false,
+      updateResult: {
+        status: 'error',
+        currentVersion: __APP_VERSION__,
+        checkedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : '检查更新失败，请稍后重试',
+        fromCache: false,
+      },
+    });
+  }
 }
 
 /** 当前有序入选文件（按 order 中 relPath 顺序） */

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useStore, toast, type RecentProject } from './store';
+import { checkForUpdates, useStore, toast, type RecentProject } from './store';
 import Step1Import from './screens/Step1Import';
 import Step2Files from './screens/Step2Files';
 import Step3Clean from './screens/Step3Clean';
@@ -18,6 +18,7 @@ export default function App() {
 
   useEffect(() => {
     window.cs.recentList().then((r) => s.set({ recent: r as RecentProject[] }));
+    void checkForUpdates(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -94,9 +95,9 @@ export default function App() {
           <div style={{ padding: 10, borderRadius: 8, background: 'var(--panel2)', border: '1px solid var(--border2)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)' }}>
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" strokeWidth="1.4" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" strokeWidth="1.4" /></svg>
-              完全离线处理
+              源码处理全程离线
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>代码不会离开这台电脑，零网络请求</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>版本检测仅查询 GitHub，不上传代码</div>
           </div>
         </div>
 
