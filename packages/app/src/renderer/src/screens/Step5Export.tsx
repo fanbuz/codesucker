@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   cleanOptions, createJobId, isCancellation, orderedIncluded, runProcess, toast, useStore,
 } from '../store';
+import { settleExportState } from '../export-state';
 
 export default function Step5Export() {
   const s = useStore();
@@ -18,17 +19,19 @@ export default function Step5Export() {
   const hasExportableContent = !!p && p.selection.pages.length > 0 && p.selection.pickedLines > 0;
 
   const doExport = async () => {
-    if (s.exporting || !s.root) return;
+    if (s.exporting || !s.root || !s.scanSessionId) return;
     if (!hasExportableContent) { toast('没有可导出的代码内容，请调整文件选择或清洗规则'); return; }
     if (!s.swName.trim()) { toast('请先在「清洗与排版」填写软件全称+版本号'); s.set({ step: 3 }); return; }
     if (!s.fmtDocx && !s.fmtTxt) { toast('请至少选择一种输出格式'); return; }
     const jobId = createJobId('export');
+    const scanSessionId = s.scanSessionId;
     // export 会在主进程重新处理一次；若进入本页时的校验仍未结束，
     // 新 job 会替代它，因此同步清理旧 processing 状态。
     s.set({ exporting: true, processing: false, activeJobId: jobId, jobProgress: null });
     try {
       const r = await window.cs.export({
         root: s.root,
+        scanSessionId,
         orderedRelPaths: orderedIncluded(s).map((f) => f.relPath),
         title: s.swName,
         owner: s.owner || undefined,
@@ -36,12 +39,17 @@ export default function Step5Export() {
         outDir: s.outDir || `${s.root}/软著申报`,
         formats: { docx: s.fmtDocx, txt: s.fmtTxt },
       }, jobId);
-      if (useStore.getState().activeJobId !== jobId) return;
-      s.set({ exporting: false, exportResult: r as typeof s.exportResult, activeJobId: null, jobProgress: null });
+      const result = r as NonNullable<typeof s.exportResult>;
+      const current = useStore.getState();
+      if (current.activeJobId !== jobId || result.scanSessionId !== scanSessionId) {
+        current.set(settleExportState(current.activeJobId, jobId));
+        return;
+      }
+      current.set({ exporting: false, exportResult: result, activeJobId: null, jobProgress: null });
       window.cs.recentList().then((list) => s.set({ recent: list as typeof s.recent }));
     } catch (e) {
-      if (useStore.getState().activeJobId !== jobId) return;
-      s.set({ exporting: false, activeJobId: null, jobProgress: null });
+      const current = useStore.getState();
+      current.set(settleExportState(current.activeJobId, jobId));
       if (!isCancellation(e)) toast('导出失败：' + (e instanceof Error ? e.message : String(e)));
     }
   };
@@ -51,7 +59,9 @@ export default function Step5Export() {
     if (!jobId) return;
     await window.cs.cancel(jobId);
     if (useStore.getState().activeJobId === jobId) {
-      s.set({ exporting: false, activeJobId: null, jobProgress: null });
+      // TXT 写盘本身不可中断。保留 exporting/activeJobId，直到原 export Promise
+      // 真正结束并进入 catch，避免这段窗口期内启动扫描使旧文件覆盖新会话结果。
+      s.set({ jobProgress: null });
     }
   };
 

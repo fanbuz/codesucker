@@ -33,7 +33,7 @@ declare global {
       getScanExcludes: () => Promise<ScanExcludesState>;
       saveScanExcludes: (rules: string[]) => Promise<ScanExcludesState>;
       resetScanExcludes: () => Promise<ScanExcludesState>;
-      scan: (root: string, jobId: string) => Promise<unknown>;
+      scan: (root: string, jobId: string, scanSessionId: string) => Promise<unknown>;
       process: (payload: unknown, jobId: string) => Promise<unknown>;
       export: (payload: unknown, jobId: string) => Promise<unknown>;
       cancel: (jobId: string) => Promise<boolean>;

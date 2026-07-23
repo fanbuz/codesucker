@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type { UpdateCheckResult } from '../../shared/update-types';
+import { mergeRescannedFiles } from './scan-project-state';
+import { canStartScan } from './scan-guard';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
@@ -15,6 +17,7 @@ export interface AuditRow {
 export interface PageData { no: number; lines: string[]; startFile: string; endFile: string }
 export interface ProcessData {
   jobId: string;
+  scanSessionId: string;
   meta: { appVersion: string; configSchemaVersion: number; rulesVersion: string };
   stats: { totalFiles: number; includedFiles: number; cleanedLines: number; estimatedPages: number; langCounts: Record<string, number> };
   selection: { pages: PageData[]; totalLines: number; pickedLines: number; truncated: boolean; selectedRelPaths: string[]; splitAfterPage: number | null; frontEndFile: string | null; backStartFile: string | null };
@@ -31,17 +34,49 @@ export interface ProcessData {
 export interface RecentProject { name: string; root: string; lastGenerated?: string; pages?: number; ok?: boolean }
 
 export interface CleanToggles { removeComments: boolean; removeBlankLines: boolean; maskSensitive: boolean; wrapLongLines: boolean }
+export type ScanIntent = 'open' | 'rescan';
+
+interface ScanResult {
+  jobId: string;
+  scanSessionId: string;
+  root: string;
+  pathSeparator: '/' | '\\';
+  files: FileRow[];
+  errors: FileTaskError[];
+  workerCount: number;
+  langCounts: Record<string, number>;
+  entryOrder: string[];
+  mtimeOrder: string[];
+  savedConfigWarning?: string | null;
+  savedConfig: null | {
+    schemaVersion?: number; appVersion?: string; rulesVersion?: string;
+    title?: string; owner?: string; sortMode?: 'entry' | 'mtime' | 'manual';
+    order?: string[]; excludedRelPaths?: string[];
+    clean?: CleanToggles;
+    fmtDocx?: boolean; fmtTxt?: boolean; outDir?: string;
+  };
+}
+
+const DEFAULT_CLEAN: CleanToggles = {
+  removeComments: true,
+  removeBlankLines: true,
+  maskSensitive: true,
+  wrapLongLines: true,
+};
 
 interface State {
   theme: 'light' | 'dark';
   view: 'wizard' | 'settings';
   step: number;
+  maxUnlockedStep: number;
   loaded: boolean;
   root: string | null;
   projName: string;
   scanPhase: 'idle' | 'scanning' | 'error';
+  scanIntent: ScanIntent;
   scanError: string | null;
   scanErrors: FileTaskError[];
+  scanSessionId: string | null;
   activeJobId: string | null;
   jobProgress: JobProgress | null;
   recent: RecentProject[];
@@ -64,7 +99,7 @@ interface State {
   fmtTxt: boolean;
   outDir: string;
   exporting: boolean;
-  exportResult: null | { docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
+  exportResult: null | { scanSessionId: string; docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
   toast: string | null;
   set: (p: Partial<State>) => void;
 }
@@ -73,12 +108,15 @@ export const useStore = create<State>((set) => ({
   theme: 'light',
   view: 'wizard',
   step: 1,
+  maxUnlockedStep: 1,
   loaded: false,
   root: null,
   projName: '未打开项目',
   scanPhase: 'idle',
+  scanIntent: 'open',
   scanError: null,
   scanErrors: [],
+  scanSessionId: null,
   activeJobId: null,
   jobProgress: null,
   recent: [],
@@ -92,7 +130,7 @@ export const useStore = create<State>((set) => ({
   sortMode: 'entry',
   swName: '',
   owner: '',
-  clean: { removeComments: true, removeBlankLines: true, maskSensitive: true, wrapLongLines: true },
+  clean: DEFAULT_CLEAN,
   layoutOpen: false,
   processData: null,
   processing: false,
@@ -181,20 +219,172 @@ export function isCancellation(error: unknown): boolean {
   return /AbortError|任务已取消|已由新任务替代/.test(text);
 }
 
+function projectName(root: string): string {
+  return root.split(/[\\/]+/).filter(Boolean).at(-1) ?? root;
+}
+
+export async function scanProject(root: string, intent: ScanIntent): Promise<void> {
+  const previous = useStore.getState();
+  if (!canStartScan(previous)) return;
+  const jobId = createJobId('scan');
+  const scanSessionId = crypto.randomUUID();
+  const preserveCurrentConfig = intent === 'rescan' && previous.root === root;
+
+  previous.set({
+    scanPhase: 'scanning',
+    scanIntent: intent,
+    scanError: null,
+    scanErrors: [],
+    scanSessionId: null,
+    activeJobId: jobId,
+    jobProgress: null,
+    processing: false,
+    exporting: false,
+    processData: null,
+    exportResult: null,
+    page: 1,
+    step: 1,
+    maxUnlockedStep: 1,
+    loaded: false,
+    root,
+    projName: projectName(root),
+  });
+
+  try {
+    const result = (await window.cs.scan(root, jobId, scanSessionId)) as ScanResult;
+    const current = useStore.getState();
+    if (current.activeJobId !== jobId || result.scanSessionId !== scanSessionId) return;
+    if (result.files.length === 0) {
+      current.set({
+        scanPhase: 'error',
+        scanError: result.errors.length > 0
+          ? `扫描失败 ${result.errors.length} 个文件，未发现可用源码`
+          : '未发现可用源代码文件',
+        scanErrors: result.errors,
+        activeJobId: null,
+        jobProgress: null,
+      });
+      return;
+    }
+
+    const preferredOrder = previous.sortMode === 'mtime' ? result.mtimeOrder : result.entryOrder;
+    let files: FileRow[];
+    let order: string[];
+    let sortMode: State['sortMode'];
+    let swName: string;
+    let owner: string;
+    let clean: CleanToggles;
+    let fmtDocx: boolean;
+    let fmtTxt: boolean;
+    let outDir: string;
+
+    if (preserveCurrentConfig) {
+      const merged = mergeRescannedFiles(previous.files, previous.order, result.files, preferredOrder);
+      files = merged.files;
+      order = merged.order;
+      sortMode = previous.sortMode;
+      swName = previous.swName;
+      owner = previous.owner;
+      clean = previous.clean;
+      fmtDocx = previous.fmtDocx;
+      fmtTxt = previous.fmtTxt;
+      outDir = previous.outDir;
+    } else {
+      const config = result.savedConfig;
+      const excluded = new Set(config?.excludedRelPaths ?? []);
+      files = result.files.map((file) => ({ ...file, included: !excluded.has(file.relPath) }));
+      const known = new Set(files.map((file) => file.relPath));
+      const configuredOrder = (config?.order ?? []).filter((relPath) => known.has(relPath));
+      const fallback = config?.sortMode === 'mtime' ? result.mtimeOrder : result.entryOrder;
+      order = [...configuredOrder];
+      for (const relPath of fallback) if (!order.includes(relPath)) order.push(relPath);
+      sortMode = config?.sortMode ?? 'entry';
+      swName = config?.title ?? '';
+      owner = config?.owner ?? '';
+      clean = config?.clean ?? DEFAULT_CLEAN;
+      fmtDocx = config?.fmtDocx ?? true;
+      fmtTxt = config?.fmtTxt ?? false;
+      outDir = config?.outDir ?? '';
+    }
+
+    current.set({
+      scanPhase: 'idle',
+      loaded: true,
+      step: 2,
+      maxUnlockedStep: 2,
+      root: result.root,
+      projName: projectName(result.root),
+      scanSessionId,
+      scanErrors: result.errors,
+      activeJobId: null,
+      jobProgress: null,
+      pathSeparator: result.pathSeparator,
+      files,
+      entryOrder: result.entryOrder,
+      mtimeOrder: result.mtimeOrder,
+      order,
+      sortMode,
+      swName,
+      owner,
+      clean,
+      fmtDocx,
+      fmtTxt,
+      outDir,
+    });
+
+    if (result.errors.length > 0) toast(`${result.errors.length} 个文件扫描失败，已跳过`);
+    else if (intent === 'rescan') toast('重新扫描完成，旧处理结果已失效');
+    else if (result.savedConfigWarning) toast(result.savedConfigWarning);
+    else if (result.savedConfig) toast('已恢复项目配置（.codesucker.json）');
+  } catch (error) {
+    const current = useStore.getState();
+    if (current.activeJobId !== jobId) return;
+    const cancelled = isCancellation(error);
+    const message = cancelled
+      ? (intent === 'rescan' ? '重新扫描已取消，旧结果已失效，请重试扫描' : '扫描已取消')
+      : (error instanceof Error ? error.message : String(error));
+    current.set({
+      scanPhase: intent === 'rescan' || !cancelled ? 'error' : 'idle',
+      scanError: message,
+      activeJobId: null,
+      jobProgress: null,
+    });
+    if (!cancelled) toast('扫描失败：' + message);
+  }
+}
+
+export async function cancelActiveScan(): Promise<void> {
+  const current = useStore.getState();
+  const jobId = current.activeJobId;
+  if (!jobId || current.scanPhase !== 'scanning') return;
+  const intent = current.scanIntent;
+  await window.cs.cancel(jobId);
+  const latest = useStore.getState();
+  if (latest.activeJobId !== jobId) return;
+  latest.set({
+    scanPhase: intent === 'rescan' ? 'error' : 'idle',
+    scanError: intent === 'rescan' ? '重新扫描已取消，旧结果已失效，请重试扫描' : null,
+    activeJobId: null,
+    jobProgress: null,
+  });
+}
+
 export async function runProcess() {
   const s = useStore.getState();
-  if (!s.root) return;
+  if (!s.root || !s.scanSessionId) return;
+  const scanSessionId = s.scanSessionId;
   const jobId = createJobId('process');
   s.set({ processing: true, activeJobId: jobId, jobProgress: null });
   try {
     const data = (await window.cs.process({
       root: s.root,
+      scanSessionId,
       orderedRelPaths: orderedIncluded(s).map((f) => f.relPath),
       title: s.swName,
       owner: s.owner || undefined,
       clean: cleanOptions(s.clean),
     }, jobId)) as ProcessData;
-    if (useStore.getState().activeJobId !== jobId) return;
+    if (useStore.getState().activeJobId !== jobId || data.scanSessionId !== scanSessionId) return;
     useStore.getState().set({ processData: data, processing: false, activeJobId: null, jobProgress: null });
     if (data.errors.length > 0) toast(`${data.errors.length} 个文件处理失败，已跳过`);
   } catch (e) {

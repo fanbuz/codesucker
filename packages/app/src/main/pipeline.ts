@@ -16,6 +16,7 @@ import {
   type ProjectRootSnapshot,
 } from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
+import { ScanSessionGuard } from './scan-session';
 import {
   loadScanExcludeSnapshot, registerScanExcludesIpc, SCAN_EXCLUDES_CONFIG_NAME,
 } from './scan-excludes-config';
@@ -23,8 +24,13 @@ import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, RenderWorkerRequest,
 } from './workers/protocol';
 
-/** 最近一次扫描缓存只保存文件元数据，不保存原始源码。 */
-let lastScan: { root: string; rootSnapshot: ProjectRootSnapshot; byRel: Map<string, FileEntry> } | null = null;
+interface ScanSnapshot {
+  rootSnapshot: ProjectRootSnapshot;
+  byRel: Map<string, FileEntry>;
+}
+
+/** 当前扫描会话只保存文件元数据，不保存原始源码。 */
+const scanSessions = new ScanSessionGuard<ScanSnapshot>();
 let lastExportFile: string | null = null;
 const jobs = new JobController();
 
@@ -49,6 +55,8 @@ function getResources(): PipelineResources {
 
 export async function shutdownPipeline(): Promise<void> {
   jobs.cancelAll();
+  scanSessions.invalidate();
+  lastExportFile = null;
   const current = resources;
   resources = null;
   if (current) await Promise.all([current.pipeline.close(), current.render.close()]);
@@ -71,6 +79,7 @@ interface JobProgress extends PipelineProgress {
 
 interface ScanRequest {
   jobId: string;
+  scanSessionId: string;
   root: string;
 }
 
@@ -173,6 +182,7 @@ function touchRecent(patch: RecentProject) {
 
 interface ProcessPayload {
   root: string;
+  scanSessionId: string;
   orderedRelPaths: string[];
   title: string;
   owner?: string;
@@ -195,14 +205,14 @@ function buildConfig(payload: ProcessPayload): ProjectConfig {
   };
 }
 
-function requireCurrentScan(root: string) {
-  if (!lastScan || lastScan.root !== root) throw new Error('请先重新扫描项目');
-  validateProjectRoot(lastScan.rootSnapshot, root);
-  return lastScan;
+function requireCurrentScan(root: string, scanSessionId: string) {
+  const scan = scanSessions.require(scanSessionId, root);
+  validateProjectRoot(scan.rootSnapshot, root);
+  return scan;
 }
 
 function orderedEntries(payload: ProcessPayload): FileEntry[] {
-  const scan = requireCurrentScan(payload.root);
+  const scan = requireCurrentScan(payload.root, payload.scanSessionId);
   return payload.orderedRelPaths
     .map((relativePath) => scan.byRel.get(relativePath))
     .filter((entry): entry is FileEntry => !!entry);
@@ -234,6 +244,10 @@ async function scanWithWorkers(
   sender: WebContents,
 ) {
   const job = jobs.start(request.jobId, 'scan');
+  // begin 必须早于任何异步扫描工作：从这一刻起旧处理、分页与导出会话均失效。
+  const normalizedRoot = path.resolve(request.root);
+  scanSessions.begin(request.scanSessionId, normalizedRoot);
+  lastExportFile = null;
   const workerResources = getResources();
   const report = createProgressReporter(job, sender, workerResources.workerCount);
   // 每次扫描只读取一次规则快照，运行中的设置修改留到下次扫描生效。
@@ -251,7 +265,10 @@ async function scanWithWorkers(
     });
     job.assertCurrent();
     validateProjectRoot(rootSnapshot, request.root);
-    lastScan = { root: request.root, rootSnapshot, byRel: new Map(result.files.map((file) => [file.relPath, file])) };
+    scanSessions.commit(request.scanSessionId, normalizedRoot, {
+      rootSnapshot,
+      byRel: new Map(result.files.map((file) => [file.relPath, file])),
+    });
     const entryOrder = sortFiles(result.files, 'entry').map((file) => file.relPath);
     const mtimeOrder = sortFiles(result.files, 'mtime').map((file) => file.relPath);
     if (result.files.length > 0) touchRecent({ name: path.basename(request.root), root: request.root });
@@ -260,6 +277,8 @@ async function scanWithWorkers(
     for (const file of result.files) langCounts[file.lang] = (langCounts[file.lang] ?? 0) + 1;
     return {
       jobId: job.id,
+      scanSessionId: request.scanSessionId,
+      root: rootSnapshot.inputPath,
       pathSeparator: path.sep === '\\' ? '\\' : '/',
       files: result.files,
       errors: result.errors,
@@ -321,7 +340,7 @@ export function registerPipelineIpc() {
   ipcMain.handle('path:validateDroppedDirectory', (_event, inputPath: string) => validateDroppedDirectory(inputPath));
 
   ipcMain.handle('project:revealFile', (_event, root: unknown, relPath: unknown) => {
-    shell.showItemInFolder(resolveProjectFile(lastScan?.rootSnapshot ?? null, root, relPath));
+    shell.showItemInFolder(resolveProjectFile(scanSessions.peek()?.rootSnapshot ?? null, root, relPath));
   });
 
   ipcMain.handle('project:revealLatestExport', () => {
@@ -343,7 +362,7 @@ export function registerPipelineIpc() {
         previewWithWorker(entries[0], request.payload.clean, job),
       ]);
       job.assertCurrent();
-      requireCurrentScan(request.payload.root);
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       const audit = result.errors.length > 0
         ? [{
             status: 'warn' as const,
@@ -358,6 +377,7 @@ export function registerPipelineIpc() {
         : result.auditItems;
       return {
         jobId: job.id,
+        scanSessionId: request.payload.scanSessionId,
         meta: versionMeta(),
         stats: result.stats,
         selection: {
@@ -392,7 +412,7 @@ export function registerPipelineIpc() {
     try {
       const entries = orderedEntries(request.payload);
       const result = await processWithWorkers(entries, request.payload, job, event.sender);
-      requireCurrentScan(request.payload.root);
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
       const renderOptions = {
@@ -436,6 +456,7 @@ export function registerPipelineIpc() {
       }
 
       job.assertCurrent();
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       const exportedFile = output.docx ?? output.txt;
       if (!exportedFile) throw new Error('请至少选择一种输出格式');
       lastExportFile = fs.realpathSync.native(exportedFile);
@@ -446,7 +467,7 @@ export function registerPipelineIpc() {
         pages: pages.length,
         ok: !result.auditItems.some((item) => item.status === 'fail'),
       });
-      return output;
+      return { ...output, scanSessionId: request.payload.scanSessionId };
     } finally {
       jobs.finish(job.id);
     }
