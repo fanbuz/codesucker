@@ -94,7 +94,7 @@ export function compareVersions(left: string, right: string): number {
     if (typeof av === 'number' && typeof bv === 'number') return av > bv ? 1 : -1;
     if (typeof av === 'number') return -1;
     if (typeof bv === 'number') return 1;
-    return av.localeCompare(bv) > 0 ? 1 : -1;
+    return av > bv ? 1 : -1;
   }
   return 0;
 }

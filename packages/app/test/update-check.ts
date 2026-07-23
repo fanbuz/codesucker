@@ -24,8 +24,13 @@ assert.equal(compareVersions('0.2.0', '0.1.9'), 1);
 assert.equal(compareVersions('0.2.0-beta.1', '0.2.0'), -1);
 assert.equal(compareVersions('0.2.0-beta.2', '0.2.0-beta.1'), 1);
 assert.equal(compareVersions('0.2.0-beta.1', '0.2.0-beta.alpha'), -1);
+assert.equal(compareVersions('1.0.0-A', '1.0.0-a'), -1);
+assert.equal(compareVersions('1.0.0-a', '1.0.0-A'), 1);
 
 assert.equal(isTrustedReleaseUrl('https://github.com/fanbuz/codesucker/releases/tag/v0.2.0'), true);
+assert.equal(isTrustedReleaseUrl('https://github.com/fanbuz/codesucker/releases/tag/v0.2.0+win.1'), true);
+assert.equal(isTrustedReleaseUrl('https://github.com/fanbuz/codesucker/releases/tag/v0.2.0%2Bwin.1'), true);
+assert.equal(isTrustedReleaseUrl('https://github.com/fanbuz/codesucker/releases/tag/v0.2.0%2Fwin.1'), false);
 assert.equal(isTrustedReleaseUrl('https://github.com/fanbuz/codesucker/releases/tag/v0.2.0?download=1'), false);
 assert.equal(isTrustedReleaseUrl('https://evil.example/fanbuz/codesucker/releases/tag/v0.2.0'), false);
 assert.equal(isTrustedExternalUrl('https://github.com/fanbuz/codesucker'), true);
@@ -49,6 +54,13 @@ async function main() {
     assert.equal(available.latestVersion, '0.2.0');
     assert.deepEqual(available.notes, ['文件类型统计', '下载说明']);
   }
+
+  const buildMetadata = await checkLatestRelease('0.1.0', async () => releaseResponse({
+    tag_name: 'v0.2.0+win.1',
+    html_url: 'https://github.com/fanbuz/codesucker/releases/tag/v0.2.0%2Bwin.1',
+  }), { now });
+  assert.equal(buildMetadata.status, 'available');
+  if (buildMetadata.status !== 'error') assert.equal(buildMetadata.latestVersion, '0.2.0');
 
   const current = await checkLatestRelease('0.2.0', async () => releaseResponse(), { now });
   assert.equal(current.status, 'up-to-date');
