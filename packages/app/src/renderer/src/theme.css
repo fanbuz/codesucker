@@ -52,6 +52,9 @@ input,button{font-family:inherit}
 .menu-item:hover{background:var(--accent-soft)}
 .chip-x{color:var(--text3);cursor:pointer;font-size:10px}
 .chip-x:hover{color:var(--red)}
+.file-type-row{transition:background .14s ease,opacity .14s ease}
+.file-type-row:hover{background:var(--panel)}
+.file-type-row button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 
 .about-card{position:relative;overflow:hidden;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
 .about-card::after{content:"";position:absolute;right:-34px;top:-42px;width:150px;height:150px;border:1px solid var(--accent-line);border-radius:42px;transform:rotate(24deg);opacity:.28;pointer-events:none}
