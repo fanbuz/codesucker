@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  cancelActiveScan, scanProject, updateRecent, useStore, toast, type RecentProject,
+  cancelActiveScan, refreshRecent, scanProject, updateRecent, useStore, toast, type RecentProject,
 } from '../store';
 import {
   clampRecentMenuPosition, nextRecentMenuIndex, reconcileRecentSelection,
@@ -137,14 +137,22 @@ export default function Step1Import() {
     }
   };
 
-  const openRecent = (project: RecentProject) => {
+  const openRecent = async (project: RecentProject) => {
     if (managingRecent) {
       toggleRecentSelection(project.root);
       return;
     }
     if (!project.available) {
-      toast(`${unavailableLabel(project.unavailableReason)}，可从管理模式移除该记录`);
-      return;
+      const refreshed = await refreshRecent();
+      if (!refreshed) {
+        toast('暂时无法刷新项目状态，请稍后重试');
+        return;
+      }
+      const current = refreshed?.find((item) => item.root === project.root);
+      if (!current?.available) {
+        toast(`${unavailableLabel(current?.unavailableReason)}，可从管理模式移除该记录`);
+        return;
+      }
     }
     void scanProject(project.root, 'open');
   };
@@ -242,7 +250,7 @@ export default function Step1Import() {
         <div className="step1-recent__list" tabIndex={s.recent.length > 0 ? 0 : undefined}>
           {s.recent.map((r: RecentProject) => (
             <div key={r.root} className={`step1-recent__item card-hover${r.available ? '' : ' is-unavailable'}${selectedRecent.has(r.root) ? ' is-selected' : ''}`}
-              role="button" tabIndex={0} aria-disabled={!r.available && !managingRecent}
+              role="button" tabIndex={0}
               aria-pressed={managingRecent ? selectedRecent.has(r.root) : undefined}
               aria-haspopup={managingRecent ? undefined : 'menu'}
               aria-expanded={managingRecent ? undefined : recentMenu?.root === r.root}
@@ -250,7 +258,7 @@ export default function Step1Import() {
                 if (node) recentTriggerRefs.current.set(r.root, node);
                 else recentTriggerRefs.current.delete(r.root);
               }}
-              onClick={() => openRecent(r)}
+              onClick={() => { void openRecent(r); }}
               onContextMenu={(event) => {
                 event.preventDefault();
                 if (managingRecent) return;
@@ -260,12 +268,13 @@ export default function Step1Import() {
               onKeyDown={(event) => {
                 if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
                   event.preventDefault();
+                  if (managingRecent) return;
                   openRecentMenuFromKeyboard(r.root, event.currentTarget);
                   return;
                 }
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
-                  openRecent(r);
+                  void openRecent(r);
                 }
               }}
             >

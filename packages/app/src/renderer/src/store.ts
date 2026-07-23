@@ -166,9 +166,10 @@ const recentRequestGuard = new LatestRequestGuard();
 
 export async function updateRecent(
   request: () => Promise<RecentProject[]>,
-): Promise<RecentProject[]> {
+): Promise<RecentProject[] | null> {
   const { value, isLatest } = await recentRequestGuard.run(request);
-  if (isLatest) useStore.getState().set({ recent: value });
+  if (!isLatest) return null;
+  useStore.getState().set({ recent: value });
   return value;
 }
 
