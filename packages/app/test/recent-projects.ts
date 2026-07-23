@@ -86,6 +86,16 @@ assert.equal(active.find((item) => item.root === fileRoot)?.available, false);
 assert.equal(active.find((item) => item.root === fileRoot)?.unavailableReason, 'not-directory');
 assert.equal(active.find((item) => item.root === openedAgain)?.available, true);
 
+if (process.platform !== 'win32') {
+  const unreadableRoot = project('readable-without-search-permission');
+  fs.chmodSync(unreadableRoot, 0o400);
+  touchRecentProject(activeConfig, { name: 'No search permission', root: unreadableRoot }, at(32));
+  active = await loadRecentProjects(activeConfig);
+  assert.equal(active.find((item) => item.root === unreadableRoot)?.available, false);
+  assert.equal(active.find((item) => item.root === unreadableRoot)?.unavailableReason, 'inaccessible');
+  fs.chmodSync(unreadableRoot, 0o700);
+}
+
 const marker = path.join(openedAgain, '.codesucker.json');
 fs.writeFileSync(marker, '{}');
 active = await removeRecentProject(activeConfig, openedAgain, at(32));

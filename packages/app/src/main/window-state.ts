@@ -3,6 +3,8 @@ import * as path from 'node:path';
 
 export const WINDOW_STATE_SCHEMA_VERSION = 1 as const;
 export const WINDOW_STATE_CONFIG_NAME = 'window-state.json';
+export const WINDOW_MIN_WIDTH = 1160;
+export const WINDOW_MIN_HEIGHT = 760;
 
 export interface WindowBounds { x: number; y: number; width: number; height: number }
 
@@ -30,6 +32,7 @@ export interface BrowserWindowLike {
   getNormalBounds(): WindowBounds;
   isMaximized(): boolean;
   isDestroyed(): boolean;
+  setMinimumSize(width: number, height: number): void;
   setBounds(bounds: WindowBounds): void;
 }
 
@@ -57,8 +60,8 @@ interface ResolvedOptions {
 const DEFAULT_OPTIONS: ResolvedOptions = {
   defaultWidth: 1440,
   defaultHeight: 900,
-  minWidth: 1160,
-  minHeight: 760,
+  minWidth: WINDOW_MIN_WIDTH,
+  minHeight: WINDOW_MIN_HEIGHT,
   debounceMs: 300,
 };
 const DISPLAY_EVENTS: DisplayEvent[] = ['display-added', 'display-removed', 'display-metrics-changed'];
@@ -116,6 +119,18 @@ export function constrainWindowBounds(
 
 function resolveOptions(options: WindowStateOptions): ResolvedOptions {
   return { ...DEFAULT_OPTIONS, ...options };
+}
+
+/** Electron minimums must never exceed the work-area-constrained window bounds. */
+export function minimumSizeForBounds(
+  bounds: Pick<WindowBounds, 'width' | 'height'>,
+  minWidth = WINDOW_MIN_WIDTH,
+  minHeight = WINDOW_MIN_HEIGHT,
+): Pick<WindowBounds, 'width' | 'height'> {
+  return {
+    width: Math.min(minWidth, bounds.width),
+    height: Math.min(minHeight, bounds.height),
+  };
 }
 
 function defaultWindowState(screen: ScreenLike, options: ResolvedOptions): WindowState {
@@ -192,6 +207,8 @@ export class WindowStateTracker {
     if (this.window.isDestroyed()) return;
     const candidate = this.window.getNormalBounds();
     const constrained = constrainWindowBounds(candidate, this.screen, this.options.minWidth, this.options.minHeight);
+    const minimum = minimumSizeForBounds(constrained, this.options.minWidth, this.options.minHeight);
+    this.window.setMinimumSize(minimum.width, minimum.height);
     this.normalBounds = constrained;
     if (!this.window.isMaximized() && !sameBounds(candidate, constrained)) this.window.setBounds(constrained);
     this.scheduleSave();

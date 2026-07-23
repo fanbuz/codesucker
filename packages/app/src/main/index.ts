@@ -4,7 +4,8 @@ import { registerPipelineIpc, shutdownPipeline } from './pipeline';
 import { isTrustedExternalUrl } from './external-url';
 import { registerUpdateIpc } from './update-ipc';
 import {
-  loadWindowState, showRestoredWindow, WINDOW_STATE_CONFIG_NAME, WindowStateTracker,
+  loadWindowState, minimumSizeForBounds, showRestoredWindow,
+  WINDOW_STATE_CONFIG_NAME, WindowStateTracker,
 } from './window-state';
 
 let win: BrowserWindow | null = null;
@@ -14,10 +15,11 @@ app.setName('CodeSucker');
 function createWindow() {
   const stateFile = path.join(app.getPath('userData'), WINDOW_STATE_CONFIG_NAME);
   const restoredState = loadWindowState(stateFile, screen);
+  const minimumSize = minimumSizeForBounds(restoredState.bounds);
   const createdWindow = new BrowserWindow({
     ...restoredState.bounds,
-    minWidth: 1160,
-    minHeight: 760,
+    minWidth: minimumSize.width,
+    minHeight: minimumSize.height,
     frame: false,
     show: false,
     icon: path.join(__dirname, '../../build/icon.png'),

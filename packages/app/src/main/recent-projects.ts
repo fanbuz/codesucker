@@ -177,7 +177,7 @@ async function availability(root: string): Promise<Pick<RecentProject, 'availabl
   try {
     const stat = await fs.promises.stat(root);
     if (!stat.isDirectory()) return { available: false, unavailableReason: 'not-directory' };
-    await fs.promises.access(root, fs.constants.R_OK);
+    await fs.promises.access(root, fs.constants.R_OK | fs.constants.X_OK);
     return { available: true };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

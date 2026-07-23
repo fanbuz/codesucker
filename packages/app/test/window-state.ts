@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  constrainWindowBounds, loadWindowState, saveWindowState, showRestoredWindow,
+  constrainWindowBounds, loadWindowState, minimumSizeForBounds, saveWindowState, showRestoredWindow,
   WINDOW_STATE_SCHEMA_VERSION, WindowStateTracker,
   type BrowserWindowLike, type DisplayLike, type ScreenLike,
   type WindowBounds, type WindowState,
@@ -30,10 +30,14 @@ class FakeWindow extends EventEmitter implements BrowserWindowLike {
   maximized = false;
   destroyed = false;
   setBoundsCalls: WindowBounds[] = [];
+  setMinimumSizeCalls: Array<{ width: number; height: number }> = [];
   constructor(public bounds: WindowBounds, public normalBounds: WindowBounds = bounds) { super(); }
   getNormalBounds(): WindowBounds { return { ...this.normalBounds }; }
   isMaximized(): boolean { return this.maximized; }
   isDestroyed(): boolean { return this.destroyed; }
+  setMinimumSize(width: number, height: number): void {
+    this.setMinimumSizeCalls.push({ width, height });
+  }
   setBounds(bounds: WindowBounds): void {
     this.bounds = { ...bounds };
     this.normalBounds = { ...bounds };
@@ -83,6 +87,24 @@ assert.deepEqual(
   { x: 2300, y: 140, width: 1160, height: 760 },
   '有效位置应保留，同时恢复到应用最小尺寸并保持完整可见',
 );
+const smallScreen = new FakeScreen([{ workArea: { x: 0, y: 0, width: 1024, height: 720 } }]);
+const smallState = loadWindowState(path.join(root, 'small-screen.json'), smallScreen);
+assert.deepEqual(smallState.bounds, { x: 0, y: 0, width: 1024, height: 720 });
+assert.deepEqual(
+  minimumSizeForBounds(smallState.bounds),
+  { width: 1024, height: 720 },
+  '显示器工作区小于应用默认最小尺寸时，Electron 最小尺寸也应同步收缩',
+);
+const smallDisplayWindow = new FakeWindow({ x: 0, y: 0, width: 1200, height: 800 });
+const smallDisplayTracker = new WindowStateTracker(
+  path.join(root, 'small-display-tracked.json'), smallDisplayWindow, smallScreen,
+  { ...smallState, bounds: smallDisplayWindow.bounds }, { debounceMs: 15 },
+);
+smallScreen.emit('display-metrics-changed');
+assert.deepEqual(smallDisplayWindow.setMinimumSizeCalls.at(-1), { width: 1024, height: 720 });
+assert.deepEqual(smallDisplayWindow.setBoundsCalls.at(-1), smallState.bounds);
+smallDisplayWindow.emit('closed');
+smallDisplayTracker.detach();
 
 const trackedFile = path.join(root, 'tracked.json');
 const initial: WindowState = {
@@ -116,6 +138,7 @@ assert.equal(fakeWindow.setBoundsCalls.length, 0, '最大化期间不应改变�
 fakeWindow.maximized = false;
 fakeWindow.bounds = fakeWindow.normalBounds;
 fakeWindow.emit('unmaximize');
+assert.deepEqual(fakeWindow.setMinimumSizeCalls.at(-1), { width: 1160, height: 760 });
 assert.deepEqual(
   fakeWindow.setBoundsCalls.at(-1),
   { x: 640, y: 100, width: 1280, height: 800 },
@@ -167,6 +190,7 @@ const minimizedDisplayTracker = new WindowStateTracker(
 );
 minimizedDisplayScreen.displays = [primary];
 minimizedDisplayScreen.emit('display-removed');
+assert.deepEqual(minimizedDisplayWindow.setMinimumSizeCalls.at(-1), { width: 1160, height: 760 });
 assert.deepEqual(
   minimizedDisplayWindow.setBoundsCalls.at(-1),
   { x: 640, y: 80, width: 1280, height: 800 },
