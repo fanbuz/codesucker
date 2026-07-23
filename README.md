@@ -17,6 +17,8 @@
 
 <img src="docs/screenshots/step2-files.png" alt="CodeSucker — 文件与排序：勾选纳入、拖拽调序、文件类型统计与页数预估" width="920" />
 
+<img src="docs/screenshots/step4-preview.png" alt="CodeSucker — 分页预览：A4 页面效果、前后段分界与页码导航" width="920" />
+
 </div>
 
 ---
