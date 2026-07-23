@@ -117,6 +117,12 @@ const movedToSmallTracker = new WindowStateTracker(
   { ...smallState, bounds: movedToSmallBounds }, { debounceMs: 15 },
 );
 movedToSmallWindow.emit('move');
+assert.equal(
+  movedToSmallWindow.setBoundsCalls.length,
+  0,
+  '跨屏拖动进行中不应立即夹紧窗口，否则窗口会粘在原显示器边缘',
+);
+await new Promise((resolve) => setTimeout(resolve, 40));
 assert.deepEqual(movedToSmallWindow.setMinimumSizeCalls.at(-1), { width: 1024, height: 720 });
 assert.deepEqual(
   movedToSmallWindow.setBoundsCalls.at(-1),

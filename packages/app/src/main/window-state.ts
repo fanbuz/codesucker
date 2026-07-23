@@ -200,7 +200,7 @@ export class WindowStateTracker {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private detached = false;
 
-  private readonly captureAndSchedule = (): void => { this.reconcileBounds(); this.scheduleSave(); };
+  private readonly captureAndSchedule = (): void => { this.capture(); this.scheduleSave(true); };
   private readonly flushOnClose = (): void => { this.capture(); this.flush(); };
   private readonly detachOnClosed = (): void => this.detach();
   private readonly handleDisplayChange = (): void => {
@@ -240,10 +240,14 @@ export class WindowStateTracker {
     if (!this.window.isMaximized() && !sameBounds(candidate, constrained)) this.window.setBounds(constrained);
   }
 
-  private scheduleSave(): void {
+  private scheduleSave(reconcileBeforePersist = false): void {
     if (this.detached) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.timer = null; this.persist(); }, this.options.debounceMs);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      if (reconcileBeforePersist) this.reconcileBounds();
+      this.persist();
+    }, this.options.debounceMs);
   }
 
   private persist(): void {
