@@ -54,7 +54,9 @@ export default function Step5Export() {
     if (!jobId) return;
     await window.cs.cancel(jobId);
     if (useStore.getState().activeJobId === jobId) {
-      s.set({ exporting: false, activeJobId: null, jobProgress: null });
+      // TXT 写盘本身不可中断。保留 exporting/activeJobId，直到原 export Promise
+      // 真正结束并进入 catch，避免这段窗口期内启动扫描使旧文件覆盖新会话结果。
+      s.set({ jobProgress: null });
     }
   };
 

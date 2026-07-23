@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { UpdateCheckResult } from '../../shared/update-types';
 import { mergeRescannedFiles } from './scan-project-state';
+import { canStartScan } from './scan-guard';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
@@ -224,7 +225,7 @@ function projectName(root: string): string {
 
 export async function scanProject(root: string, intent: ScanIntent): Promise<void> {
   const previous = useStore.getState();
-  if (previous.scanPhase === 'scanning') return;
+  if (!canStartScan(previous)) return;
   const jobId = createJobId('scan');
   const scanSessionId = crypto.randomUUID();
   const preserveCurrentConfig = intent === 'rescan' && previous.root === root;
