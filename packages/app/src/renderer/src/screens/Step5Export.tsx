@@ -40,8 +40,12 @@ export default function Step5Export() {
         formats: { docx: s.fmtDocx, txt: s.fmtTxt },
       }, jobId);
       const result = r as NonNullable<typeof s.exportResult>;
-      if (useStore.getState().activeJobId !== jobId || result.scanSessionId !== scanSessionId) return;
-      s.set({ exporting: false, exportResult: result, activeJobId: null, jobProgress: null });
+      const current = useStore.getState();
+      if (current.activeJobId !== jobId || result.scanSessionId !== scanSessionId) {
+        current.set(settleExportState(current.activeJobId, jobId));
+        return;
+      }
+      current.set({ exporting: false, exportResult: result, activeJobId: null, jobProgress: null });
       window.cs.recentList().then((list) => s.set({ recent: list as typeof s.recent }));
     } catch (e) {
       const current = useStore.getState();
