@@ -9,15 +9,14 @@
 全程离线 · 代码不出本机 · 规范内置 · 导出前自动校验
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/fanbuz/codesucker?display_name=tag&sort=semver)](https://github.com/fanbuz/codesucker/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](#下载)
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#参与贡献)
 
 <br/>
 
-<img src="docs/screenshots/step2-files.png" alt="CodeSucker — 文件与排序：勾选纳入、拖拽调序、文件类型统计与页数预估" width="920" />
-
-<img src="docs/screenshots/step4-preview.png" alt="CodeSucker — 分页预览：A4 页面效果、前后段分界与页码导航" width="920" />
+<img src="docs/screenshots/step2-files.png" alt="CodeSucker v0.3.0 — 真实目录树、目录级选择、全局反选、文件类型统计与固定操作区" width="920" />
 
 </div>
 
