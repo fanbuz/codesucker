@@ -41,7 +41,6 @@ interface MutableDirectory<T extends SelectableFile> {
  */
 export function normalizeRelativePath(relPath: string): string {
   return relPath
-    .trim()
     .replace(/\\/g, '/')
     .split('/')
     .filter((part) => part.length > 0 && part !== '.')

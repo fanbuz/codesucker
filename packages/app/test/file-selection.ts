@@ -32,6 +32,8 @@ function directory(
 
 assert.equal(normalizeRelativePath('.\\src\\main//App.ts'), 'src/main/App.ts');
 assert.equal(normalizeRelativePath('./README.md'), 'README.md');
+assert.equal(normalizeRelativePath(' src/a.ts'), ' src/a.ts', '目录名前置空格必须保留');
+assert.equal(normalizeRelativePath('src/a.ts '), 'src/a.ts ', '文件名后置空格必须保留');
 
 const source = [
   file('README.md', true, 1),
@@ -90,6 +92,20 @@ assert.equal(selectedSrc[4], source[4], '非目标目录对象引用必须保持
 assert.equal(selectedSrc[5], source[5], '相似前缀目录不得被误选');
 assert.equal(selectedSrc[1], source[1], '状态未变化的目标对象引用必须保持');
 assert.equal(source[2].included, false, '目录批量操作不得修改输入');
+
+const whitespacePaths = [
+  file('src/a.ts', true),
+  file(' src/a.ts', true),
+  file('src /a.ts', true),
+];
+const whitespaceTree = buildFileTree(whitespacePaths);
+assert.equal(whitespaceTree.children.filter((node) => node.kind === 'directory').length, 3);
+const whitespaceSelection = setDirectoryIncluded(whitespacePaths, 'src', false);
+assert.deepEqual(
+  whitespaceSelection.map((item) => item.included),
+  [false, true, true],
+  '目录选择不得合并带前置或后置空格的合法路径',
+);
 
 const selectedRoot = setDirectoryIncluded(source, '.', true);
 assert.ok(selectedRoot.every((item) => item.included), '根目录操作应覆盖全部文件');
