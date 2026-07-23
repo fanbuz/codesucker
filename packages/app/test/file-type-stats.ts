@@ -4,7 +4,9 @@ import {
   aggregateStats, compositionCells, includeOnlyExtension, rankExtensionStats,
   scopeTotals, setExtensionIncluded, statValue, summarizeFileTypes,
 } from '../src/renderer/src/file-type-stats.ts';
-import { orderedIncluded, type FileRow } from '../src/renderer/src/store.ts';
+import {
+  completeFileOrder, orderedIncluded, reorderIncludedPaths, type FileRow,
+} from '../src/renderer/src/store.ts';
 
 const files = [
   { ext: 'java', lang: 'JAVA', sizeBytes: 400, rawLines: 40, included: true },
@@ -81,6 +83,25 @@ assert.deepEqual(
   orderedIncluded({ files: exportSelection, order: exportRows.map((file) => file.relPath) }).map((file) => file.relPath),
   ['src/App.java', 'src/Service.java'],
   '按后缀选择后的 orderedIncluded 应直接成为清洗和导出输入',
+);
+
+const manualOrder = ['src/Service.java', 'src/app.xml', 'src/App.java'];
+const knownExportPaths = new Set(exportRows.map((file) => file.relPath));
+assert.deepEqual(
+  completeFileOrder(manualOrder, exportRows.map((file) => file.relPath), knownExportPaths),
+  manualOrder,
+  '临时后缀筛选不得从完整手动顺序中删除被排除路径',
+);
+assert.deepEqual(
+  reorderIncludedPaths(manualOrder, ['src/App.java', 'src/Service.java']),
+  ['src/App.java', 'src/app.xml', 'src/Service.java'],
+  '筛选状态下拖拽时应保留隐藏路径并只重排已纳入文件',
+);
+const restoredSelection = setExtensionIncluded(exportSelection, 'xml', true);
+assert.deepEqual(
+  orderedIncluded({ files: restoredSelection, order: manualOrder }).map((file) => file.relPath),
+  manualOrder,
+  '重新启用后缀后应恢复其在完整手动顺序中的位置',
 );
 
 const large = Array.from({ length: 6000 }, (_, index) => ({

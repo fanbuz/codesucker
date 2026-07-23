@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { orderedIncluded, useStore, type FileRow } from '../store';
+import { completeFileOrder, orderedIncluded, reorderIncludedPaths, useStore, type FileRow } from '../store';
 import {
   aggregateStats, compositionCells, includeOnlyExtension, rankExtensionStats,
   scopeTotals, setExtensionIncluded, statValue, summarizeFileTypes,
@@ -66,21 +66,9 @@ export default function Step2Files() {
   const markupRatio = fileTypes.includedHtmlCssRatio;
 
   const updateFiles = (files: FileRow[]) => {
-    const includedPaths = new Set(files.filter((file) => file.included).map((file) => file.relPath));
+    const knownPaths = new Set(files.map((file) => file.relPath));
     const preferred = s.sortMode === 'mtime' ? s.mtimeOrder : s.entryOrder;
-    let order: string[];
-    if (s.sortMode === 'manual') {
-      order = s.order.filter((relPath) => includedPaths.has(relPath));
-      const ordered = new Set(order);
-      for (const relPath of preferred) {
-        if (includedPaths.has(relPath) && !ordered.has(relPath)) {
-          order.push(relPath);
-          ordered.add(relPath);
-        }
-      }
-    } else {
-      order = preferred.filter((relPath) => includedPaths.has(relPath));
-    }
+    const order = completeFileOrder(s.sortMode === 'manual' ? s.order : preferred, preferred, knownPaths);
     s.set({ files, order, processData: null });
   };
 
@@ -104,7 +92,7 @@ export default function Step2Files() {
   const setSortMode = (mode: 'entry' | 'mtime' | 'manual') => {
     if (mode === 'manual') { s.set({ sortMode: mode }); return; }
     const base = mode === 'entry' ? s.entryOrder : s.mtimeOrder;
-    s.set({ sortMode: mode, order: base.filter((r) => byRel.get(r)?.included ?? false), processData: null });
+    s.set({ sortMode: mode, order: base.filter((r) => byRel.has(r)), processData: null });
   };
 
   const onDragOver = (i: number) => (e: React.DragEvent) => {
@@ -114,7 +102,7 @@ export default function Step2Files() {
     const [it] = arr.splice(dragIdx, 1);
     arr.splice(i, 0, it);
     setDragIdx(i);
-    s.set({ order: arr, sortMode: 'manual', processData: null });
+    s.set({ order: reorderIncludedPaths(s.order, arr), sortMode: 'manual', processData: null });
   };
 
   const ring = 2 * Math.PI * 26;
