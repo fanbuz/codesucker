@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, type WebContents } from 'electron';
+import { app, dialog, ipcMain, shell, type WebContents } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -11,6 +11,7 @@ import type {
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
 import { validateDroppedDirectory } from './drop-path';
+import { resolveProjectFile } from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
 import {
   loadScanExcludeSnapshot, registerScanExcludesIpc, SCAN_EXCLUDES_CONFIG_NAME,
@@ -307,6 +308,10 @@ export function registerPipelineIpc() {
 
   ipcMain.handle('path:validateDroppedDirectory', (_event, inputPath: string) => validateDroppedDirectory(inputPath));
 
+  ipcMain.handle('project:revealFile', (_event, root: unknown, relPath: unknown) => {
+    shell.showItemInFolder(resolveProjectFile(lastScan?.root ?? null, root, relPath));
+  });
+
   ipcMain.handle('recent:list', () => loadRecent());
   registerScanExcludesIpc(ipcMain, scanExcludesFile);
   ipcMain.handle('project:cancel', (_event, jobId: string) => jobs.cancel(jobId));
@@ -326,9 +331,12 @@ export function registerPipelineIpc() {
         ? [{
             status: 'warn' as const,
             name: `${result.errors.length} 个文件处理失败，已跳过`,
-            detail: `${result.errors[0].file}：${result.errors[0].message}`,
-            file: result.errors[0].file,
-            context: result.errors.slice(0, 5).map((error) => `${error.file} · ${error.message}`),
+            detail: result.errors[0].message,
+            location: { file: result.errors[0].file },
+            evidence: result.errors.slice(0, 5).map((error) => ({
+              location: { file: error.file },
+              detail: error.message,
+            })),
           }, ...result.auditItems]
         : result.auditItems;
       return {

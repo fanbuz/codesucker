@@ -40,6 +40,7 @@ declare global {
       onProgress: (callback: (progress: JobProgress) => void) => void;
       offProgress: () => void;
       saveConfig: (root: string, config: unknown) => Promise<boolean>;
+      revealProjectFile: (root: string, relPath: string) => Promise<void>;
       showItem: (p: string) => Promise<void>;
       openExternal: (url: string) => Promise<void>;
     };

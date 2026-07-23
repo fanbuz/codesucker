@@ -43,9 +43,9 @@ CodeSucker 把常见的软件著作权源程序材料规则整理成一套本地
 
 | 系统 | 架构 | 安装包 |
 |---|---|---|
-| macOS | Apple Silicon（M1/M2/M3/M4） | `CodeSucker-0.3.0-mac-arm64.dmg` |
-| macOS | Intel | `CodeSucker-0.3.0-mac-x64.dmg` |
-| Windows | x64 | `CodeSucker-0.3.0-win-x64.exe` |
+| macOS | Apple Silicon（M 系列芯片） | `CodeSucker-0.3.1-mac-arm64.dmg` |
+| macOS | Intel | `CodeSucker-0.3.1-mac-x64.dmg` |
+| Windows | x64 | `CodeSucker-0.3.1-win-x64.exe` |
 
 每个 Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件是否完整。
 
@@ -145,6 +145,7 @@ scripts/    图标生成等工具脚本
 - [x] **v0.1.0（MVP）**：五段流水线 · 5 步向导 · docx/txt 导出 · 多项风险校验 · 配置持久化 · macOS/Windows 安装包
 - [x] **v0.2.0**：文件类型统计与按后缀导出 · GitHub Release 更新检测 · 设置页布局优化
 - [x] **v0.3.0**：目录级文件筛选与全局反选 · 窄窗布局稳定性 · 默认路径排除配置 · 自定义扫描排除规则
+- [x] **v0.3.1**：清洗页独立滚动 · 设置页紧凑布局 · 校验详情防溢出 · 问题文件快捷定位
 - [ ] **后续版本**：多目录导入 · 成立日期输入 · 自定义脱敏规则 · 校验项一键修复 · Linux 安装包 · macOS 签名与公证 · 应用内下载/安装更新 · CLI 版本
 - [ ] **V3**：用户手册/设计说明书模板化生成 · 例外交存模式（黑斜线覆盖）· 多申报主体管理
 
