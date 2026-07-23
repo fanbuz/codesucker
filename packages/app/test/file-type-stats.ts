@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import {
   aggregateStats, compositionCells, includeOnlyExtension, rankExtensionStats,
-  setExtensionIncluded, statValue, summarizeFileTypes,
+  scopeTotals, setExtensionIncluded, statValue, summarizeFileTypes,
 } from '../src/renderer/src/file-type-stats.ts';
 import { orderedIncluded, type FileRow } from '../src/renderer/src/store.ts';
 
@@ -45,6 +45,23 @@ assert.equal(statValue(java, 'included', 'rawLines'), 40);
 assert.equal(rankExtensionStats(summary.extensions, 'all', 'rawLines')[0].extension, 'java');
 assert.equal(aggregateStats(summary.extensions.slice(0, 2)).files, summary.extensions[0].files + summary.extensions[1].files);
 assert.equal(compositionCells(summary.extensions, 'included', 'rawLines', 20).length, 20);
+
+const collapsedSummary = summarizeFileTypes(Array.from({ length: 7 }, (_, index) => ({
+  ext: String.fromCharCode(97 + index),
+  lang: 'OTHER',
+  sizeBytes: (index + 1) * 10,
+  rawLines: (index + 1) * 10,
+  included: index < 6,
+})));
+const collapsedHidden = aggregateStats(
+  rankExtensionStats(collapsedSummary.extensions, 'included', 'rawLines').slice(6),
+);
+assert.deepEqual(
+  scopeTotals(collapsedHidden, 'included'),
+  { files: 0, rawLines: 0, bytes: 0 },
+  '已纳入口径下的折叠汇总不得包含被排除的隐藏类型',
+);
+assert.deepEqual(scopeTotals(collapsedHidden, 'all'), { files: 1, rawLines: 70, bytes: 70 });
 
 const javaOff = setExtensionIncluded(files, '.java', false);
 assert.ok(javaOff.filter((file) => file.ext.replace(/^\./, '') === 'java').every((file) => !file.included));

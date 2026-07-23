@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { orderedIncluded, useStore, type FileRow } from '../store';
 import {
   aggregateStats, compositionCells, includeOnlyExtension, rankExtensionStats,
-  setExtensionIncluded, statValue, summarizeFileTypes,
+  scopeTotals, setExtensionIncluded, statValue, summarizeFileTypes,
   type ExtensionStat, type StatMetric, type StatScope,
 } from '../file-type-stats';
 
@@ -23,12 +23,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes >= 10 * 1024 ? 0 : 1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function scopeTotals(stat: ExtensionStat, scope: StatScope) {
-  return scope === 'included'
-    ? { files: stat.includedFiles, rawLines: stat.includedRawLines, bytes: stat.includedBytes }
-    : { files: stat.files, rawLines: stat.rawLines, bytes: stat.bytes };
 }
 
 export default function Step2Files() {
@@ -61,6 +55,7 @@ export default function Step2Files() {
   const visibleTypes = showAllTypes ? rankedTypes : rankedTypes.slice(0, visibleTypeLimit);
   const hiddenTypes = showAllTypes ? [] : rankedTypes.slice(visibleTypeLimit);
   const hiddenTotals = aggregateStats(hiddenTypes);
+  const hiddenValues = scopeTotals(hiddenTotals, statScope);
   const statTotal = statScope === 'included'
     ? (statMetric === 'files' ? fileTypes.includedFiles : fileTypes.includedRawLines)
     : (statMetric === 'files' ? fileTypes.files : fileTypes.rawLines);
@@ -290,7 +285,7 @@ export default function Step2Files() {
           {hiddenTypes.length > 0 && (
             <button onClick={() => setShowAllTypes(true)}
               style={{ width: '100%', marginTop: 5, padding: '7px 6px 1px', border: 0, borderTop: '1px solid var(--border2)', background: 'transparent', color: 'var(--text3)', fontSize: 10.5, cursor: 'pointer', textAlign: 'left' }}>
-              其余 {hiddenTypes.length} 类 · {hiddenTotals.files} 文件 · {hiddenTotals.rawLines.toLocaleString()} 行　<span style={{ color: 'var(--accent)' }}>展开</span>
+              其余 {hiddenTypes.length} 类 · {hiddenValues.files} 文件 · {hiddenValues.rawLines.toLocaleString()} 行　<span style={{ color: 'var(--accent)' }}>展开</span>
             </button>
           )}
           {showAllTypes && rankedTypes.length > visibleTypeLimit && (

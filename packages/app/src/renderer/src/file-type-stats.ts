@@ -131,6 +131,12 @@ export function statValue(stat: AggregateTotals, scope: StatScope, metric: StatM
   return metric === 'files' ? stat.files : stat.rawLines;
 }
 
+export function scopeTotals(stat: AggregateTotals, scope: StatScope): { files: number; rawLines: number; bytes: number } {
+  return scope === 'included'
+    ? { files: stat.includedFiles, rawLines: stat.includedRawLines, bytes: stat.includedBytes }
+    : { files: stat.files, rawLines: stat.rawLines, bytes: stat.bytes };
+}
+
 export function rankExtensionStats(
   stats: readonly ExtensionStat[],
   scope: StatScope,
