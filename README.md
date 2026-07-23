@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="packages/app/build/icon-256.png" width="110" alt="CodeSucker" />
+<img src="docs/screenshots/codesucker-v0.3.0-file-tree.png" alt="CodeSucker v0.3.0 — 真实目录树、目录级选择、全局反选、文件类型统计与固定操作区" width="920" />
 
 # CodeSucker · 软著代码抽取器
 
@@ -16,7 +16,7 @@
 
 <br/>
 
-<img src="docs/screenshots/step2-files.png" alt="CodeSucker v0.3.0 — 真实目录树、目录级选择、全局反选、文件类型统计与固定操作区" width="920" />
+<img src="docs/screenshots/codesucker-v0.3.0-page-preview.png" alt="CodeSucker v0.3.0 — 源程序分页预览、前后段分界与页码导航" width="920" />
 
 </div>
 
