@@ -733,8 +733,6 @@ class Component extends DCLogic {
       const lm = langMeta[Math.max(0, idx)];
       return { color: isSel(lm.name) ? lm.color : 'var(--border2)' };
     });
-    const webMeta = langMeta.find(l => l.name === 'HTML+CSS');
-    const webPct = Math.round(webMeta.lines / totalLines * 100);
     const selLinesLabel = selLines.toLocaleString();
 
     const sortModes = [
@@ -886,7 +884,7 @@ class Component extends DCLogic {
       resetError: () => this.setState({ scanPhase: 'idle' }),
       recentProjects,
       // step2
-      tree, sortModes, orderItems, langStats, langCells, webPct, webColor: webMeta.color, selLinesLabel,
+      tree, sortModes, orderItems, langStats, langCells, selLinesLabel,
       goStep3: () => this.setState({ step: 3 }),
       // step3
       swName: s.swName,

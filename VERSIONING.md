@@ -9,7 +9,7 @@
 | 产品版本 | `0.1.0` | 用户看到的应用与安装包版本 | 三个 `package.json`，由脚本同步 |
 | 构建版本 | Git SHA / Actions run number | 定位同一产品版本的具体构建 | CI 环境，不写回源码 |
 | 配置结构版本 | `1` | 迁移 `.codesucker.json` | `CONFIG_SCHEMA_VERSION` |
-| 合规规则版本 | `2026.07.1` | 追踪生成时采用的校验规则口径 | `RULES_VERSION` |
+| 合规规则版本 | `2026.07.2` | 追踪生成时采用的校验规则口径 | `RULES_VERSION` |
 
 产品版本、配置结构版本和规则版本相互独立，不得用升级产品补丁版本代替配置迁移或规则版本记录。
 
@@ -66,7 +66,7 @@ npm run verify
 {
   "schemaVersion": 1,
   "appVersion": "0.1.0",
-  "rulesVersion": "2026.07.1"
+  "rulesVersion": "2026.07.2"
 }
 ```
 

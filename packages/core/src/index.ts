@@ -10,6 +10,11 @@ export { renderDocx, renderTxt, renderTxtAsync, type RenderOptions } from './ren
 export { audit } from './audit.ts';
 export { CONFIG_SCHEMA_VERSION, RULES_VERSION } from './version.ts';
 export { abortError, mapConcurrent, throwIfAborted } from './async.ts';
+export {
+  compileExcludePatterns, normalizeExcludeRules, validateExcludeRule,
+  ExcludeRuleValidationError,
+  type ExcludeRuleKind, type ExcludeRuleValidation, type ExcludeRuleValidationCode,
+} from './exclude-rules.ts';
 
 import { readSource, readSourceAsync } from './discover.ts';
 import { cleanFile } from './clean.ts';
@@ -112,8 +117,6 @@ function buildProcessResult(
 ): ProcessResult {
 
   const cleanedLines = cleaned.reduce((s, f) => s + f.lines.length, 0);
-  const markup = cleaned.filter((f) => ['html', 'htm', 'css', 'scss', 'less'].includes(f.entry.ext))
-    .reduce((s, f) => s + f.lines.length, 0);
   const langCounts: Record<string, number> = {};
   for (const f of cleaned) langCounts[f.entry.lang] = (langCounts[f.entry.lang] ?? 0) + 1;
 
@@ -122,7 +125,6 @@ function buildProcessResult(
     includedFiles: cleaned.length,
     cleanedLines,
     estimatedPages: selection.pages.length,
-    htmlCssRatio: cleanedLines > 0 ? markup / cleanedLines : 0,
     langCounts,
   };
   return { cleaned, selection, auditItems, stats, errors };

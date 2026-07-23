@@ -5,6 +5,7 @@ import {
 
 interface ScanResult {
   jobId: string;
+  pathSeparator: '/' | '\\';
   files: FileRow[];
   errors: FileTaskError[];
   workerCount: number;
@@ -78,6 +79,7 @@ export default function Step1Import() {
         scanErrors: r.errors,
         activeJobId: null,
         jobProgress: null,
+        pathSeparator: r.pathSeparator,
         files, entryOrder: r.entryOrder, mtimeOrder: r.mtimeOrder, order,
         sortMode: cfg?.sortMode ?? 'entry',
         swName: cfg?.title ?? s.swName,

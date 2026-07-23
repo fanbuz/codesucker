@@ -16,6 +16,12 @@ declare global {
     message?: string;
   }
 
+  interface ScanExcludesState {
+    rules: string[];
+    source: 'default' | 'user';
+    warning: string | null;
+  }
+
   interface Window {
     cs: {
       win: (action: 'minimize' | 'maximize' | 'close') => void;
@@ -24,6 +30,9 @@ declare global {
       resolveDroppedPath: (file: File) => Promise<{ path: string | null; error: string | null }>;
       recentList: () => Promise<unknown>;
       checkForUpdates: (force?: boolean) => Promise<UpdateCheckResult>;
+      getScanExcludes: () => Promise<ScanExcludesState>;
+      saveScanExcludes: (rules: string[]) => Promise<ScanExcludesState>;
+      resetScanExcludes: () => Promise<ScanExcludesState>;
       scan: (root: string, jobId: string) => Promise<unknown>;
       process: (payload: unknown, jobId: string) => Promise<unknown>;
       export: (payload: unknown, jobId: string) => Promise<unknown>;

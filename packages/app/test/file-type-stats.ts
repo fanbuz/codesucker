@@ -39,8 +39,7 @@ assert.equal(summary.extensions.find((item) => item.extension === 'other')?.labe
 const kotlin = summary.languages.find((item) => item.language === 'KT')!;
 assert.deepEqual(kotlin.extensions, ['kt', 'kts'], '同语言的多扩展名应合并到语言统计');
 assert.equal(kotlin.rawLines, 30);
-assert.equal(summary.htmlCssRatio, 30 / 170);
-assert.equal(summary.includedHtmlCssRatio, 30 / 109);
+assert.equal(summary.extensions.find((item) => item.extension === 'html')?.rawLines, 30, 'HTML 应作为普通后缀参与统计');
 
 assert.equal(statValue(java, 'all', 'files'), 2);
 assert.equal(statValue(java, 'included', 'rawLines'), 40);
