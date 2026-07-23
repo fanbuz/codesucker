@@ -45,6 +45,7 @@ interface State {
   recent: RecentProject[];
   updateChecking: boolean;
   updateResult: UpdateCheckResult | null;
+  pathSeparator: '/' | '\\';
   files: FileRow[];
   entryOrder: string[];
   mtimeOrder: string[];
@@ -81,6 +82,7 @@ export const useStore = create<State>((set) => ({
   recent: [],
   updateChecking: false,
   updateResult: null,
+  pathSeparator: '/',
   files: [],
   entryOrder: [],
   mtimeOrder: [],

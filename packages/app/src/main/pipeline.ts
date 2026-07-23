@@ -241,6 +241,7 @@ async function scanWithWorkers(
     for (const file of result.files) langCounts[file.lang] = (langCounts[file.lang] ?? 0) + 1;
     return {
       jobId: job.id,
+      pathSeparator: path.sep === '\\' ? '\\' : '/',
       files: result.files,
       errors: result.errors,
       workerCount: workerResources.workerCount,

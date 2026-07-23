@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import {
   buildFileTree, getDirectorySelection, invertAllIncluded, normalizeRelativePath,
-  setAllIncluded, setDirectoryIncluded, type FileTreeDirectoryNode, type SelectableFile,
+  setAllIncluded, setDirectoryIncluded, type FileTreeDirectoryNode, type PathSeparator, type SelectableFile,
 } from '../src/renderer/src/file-selection.ts';
 
 interface TestFile extends SelectableFile {
   marker: number;
 }
 
-function file(relPath: string, included: boolean, marker = 0): TestFile {
-  const normalized = normalizeRelativePath(relPath);
+function file(relPath: string, included: boolean, marker = 0, pathSeparator: PathSeparator = '/'): TestFile {
+  const normalized = normalizeRelativePath(relPath, pathSeparator);
   return { relPath, name: normalized.split('/').at(-1) ?? relPath, included, marker };
 }
 
@@ -31,6 +31,7 @@ function directory(
 }
 
 assert.equal(normalizeRelativePath('./src/main//App.ts'), 'src/main/App.ts');
+assert.equal(normalizeRelativePath('.\\src\\main\\App.ts', '\\'), 'src/main/App.ts');
 assert.equal(normalizeRelativePath('./README.md'), 'README.md');
 assert.equal(normalizeRelativePath(' src/a.ts'), ' src/a.ts', '目录名前置空格必须保留');
 assert.equal(normalizeRelativePath('src/a.ts '), 'src/a.ts ', '文件名后置空格必须保留');
@@ -120,6 +121,22 @@ assert.deepEqual(
   setDirectoryIncluded(backslashPaths, 'foo', false).map((item) => item.included),
   [true, false],
   '目录选择不得包含名称中带反斜杠的根文件',
+);
+
+const windowsPaths = [
+  file('src\\App.ts', true, 1, '\\'),
+  file('src\\components\\Button.tsx', false, 2, '\\'),
+];
+const windowsTree = buildFileTree(windowsPaths, '\\');
+assert.equal(directory(windowsTree, 'src').totalFiles, 2, 'Windows 原生分隔符应构建为目录层级');
+assert.deepEqual(
+  getDirectorySelection(windowsPaths, 'src/components', '\\'),
+  { totalFiles: 1, includedFiles: 0, selectionState: 'unchecked' },
+);
+assert.deepEqual(
+  setDirectoryIncluded(windowsPaths, 'src', false, '\\').map((item) => item.included),
+  [false, false],
+  'Windows 目录选择应覆盖反斜杠路径中的后代文件',
 );
 
 const selectedRoot = setDirectoryIncluded(source, '.', true);

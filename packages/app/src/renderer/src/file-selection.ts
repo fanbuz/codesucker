@@ -4,6 +4,7 @@ export interface SelectableFile {
   included: boolean;
 }
 
+export type PathSeparator = '/' | '\\';
 export type SelectionState = 'checked' | 'mixed' | 'unchecked';
 
 export interface FileTreeFileNode<T extends SelectableFile = SelectableFile> {
@@ -36,11 +37,13 @@ interface MutableDirectory<T extends SelectableFile> {
 
 /**
  * Normalize a scanner-provided relative path without changing the source FileRow.
- * Scanner paths already use `/` on every platform. Redundant separators and
- * `.` segments are removed, while backslashes remain part of legal POSIX names.
+ * Normalize a scanner path with its explicit platform separator. This keeps
+ * backslashes as legal filename characters on POSIX while still supporting
+ * native Windows paths.
  */
-export function normalizeRelativePath(relPath: string): string {
-  return relPath
+export function normalizeRelativePath(relPath: string, pathSeparator: PathSeparator = '/'): string {
+  const portablePath = pathSeparator === '\\' ? relPath.replace(/\\/g, '/') : relPath;
+  return portablePath
     .split('/')
     .filter((part) => part.length > 0 && part !== '.')
     .join('/');
@@ -95,11 +98,14 @@ function finalizeDirectory<T extends SelectableFile>(directory: MutableDirectory
 }
 
 /** Build a real nested directory tree and aggregate descendant selection in one pass. */
-export function buildFileTree<T extends SelectableFile>(files: readonly T[]): FileTreeDirectoryNode<T> {
+export function buildFileTree<T extends SelectableFile>(
+  files: readonly T[],
+  pathSeparator: PathSeparator = '/',
+): FileTreeDirectoryNode<T> {
   const root = makeMutableDirectory<T>('.', '');
 
   for (const file of files) {
-    const normalizedPath = normalizeRelativePath(file.relPath);
+    const normalizedPath = normalizeRelativePath(file.relPath, pathSeparator);
     const parts = normalizedPath.split('/').filter(Boolean);
     const normalizedName = parts.pop() || file.name;
     let directory = root;
@@ -126,8 +132,8 @@ export function buildFileTree<T extends SelectableFile>(files: readonly T[]): Fi
   return finalizeDirectory(root);
 }
 
-function normalizeDirectoryPath(directoryPath: string): string {
-  const normalized = normalizeRelativePath(directoryPath);
+function normalizeDirectoryPath(directoryPath: string, pathSeparator: PathSeparator): string {
+  const normalized = normalizeRelativePath(directoryPath, pathSeparator);
   return normalized === '.' ? '' : normalized;
 }
 
@@ -140,13 +146,14 @@ function isInDirectory(relPath: string, directoryPath: string): boolean {
 export function getDirectorySelection<T extends SelectableFile>(
   files: readonly T[],
   directoryPath: string,
+  pathSeparator: PathSeparator = '/',
 ): { totalFiles: number; includedFiles: number; selectionState: SelectionState } {
-  const normalizedDirectory = normalizeDirectoryPath(directoryPath);
+  const normalizedDirectory = normalizeDirectoryPath(directoryPath, pathSeparator);
   let totalFiles = 0;
   let includedFiles = 0;
 
   for (const file of files) {
-    if (!isInDirectory(normalizeRelativePath(file.relPath), normalizedDirectory)) continue;
+    if (!isInDirectory(normalizeRelativePath(file.relPath, pathSeparator), normalizedDirectory)) continue;
     totalFiles++;
     if (file.included) includedFiles++;
   }
@@ -163,10 +170,11 @@ export function setDirectoryIncluded<T extends SelectableFile>(
   files: readonly T[],
   directoryPath: string,
   included: boolean,
+  pathSeparator: PathSeparator = '/',
 ): T[] {
-  const normalizedDirectory = normalizeDirectoryPath(directoryPath);
+  const normalizedDirectory = normalizeDirectoryPath(directoryPath, pathSeparator);
   return files.map((file) => {
-    const matches = isInDirectory(normalizeRelativePath(file.relPath), normalizedDirectory);
+    const matches = isInDirectory(normalizeRelativePath(file.relPath, pathSeparator), normalizedDirectory);
     return matches && file.included !== included ? { ...file, included } : file;
   });
 }

@@ -103,7 +103,7 @@ export default function Step2Files() {
   const byRel = useMemo(() => new Map(s.files.map((f) => [f.relPath, f])), [s.files]);
   const included = orderedIncluded(s);
 
-  const tree = useMemo(() => buildFileTree(s.files), [s.files]);
+  const tree = useMemo(() => buildFileTree(s.files, s.pathSeparator), [s.files, s.pathSeparator]);
 
   const fileTypes = useMemo(() => summarizeFileTypes(s.files), [s.files]);
   const rankedTypes = useMemo(
@@ -135,7 +135,12 @@ export default function Step2Files() {
   };
 
   const toggleDirectory = (node: FileTreeDirectoryNode<FileRow>) => {
-    updateFiles(setDirectoryIncluded(s.files, node.relPath, node.selectionState !== 'checked'));
+    updateFiles(setDirectoryIncluded(
+      s.files,
+      node.relPath,
+      node.selectionState !== 'checked',
+      s.pathSeparator,
+    ));
   };
 
   const toggleExpanded = (relPath: string) => {
