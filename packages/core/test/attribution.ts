@@ -96,6 +96,14 @@ assert.equal(
   undefined,
   'HTML 文案和字符串中的署名示例不应当作源码注释',
 );
+const markupAudit = run([{
+  relPath: 'web/index.html',
+  text: Array.from({ length: 60 }, (_, i) => `<div data-row="${i}">content</div>`).join('\n'),
+}], 'fanbuz');
+assert.ok(
+  !markupAudit.some((item) => item.name.includes('HTML/CSS')),
+  'HTML/CSS 应按普通源码处理，不应再生成独立占比审计项',
+);
 const inlineComment = conflict(run([{
   relPath: 'src/inline.ts',
   text: 'export const answer = 42; // @author Inline Maintainer',

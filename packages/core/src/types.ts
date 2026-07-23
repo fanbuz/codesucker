@@ -109,7 +109,6 @@ export interface ProjectStats {
   includedFiles: number;
   cleanedLines: number;
   estimatedPages: number;
-  htmlCssRatio: number;
   langCounts: Record<string, number>;
 }
 

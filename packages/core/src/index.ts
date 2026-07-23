@@ -112,8 +112,6 @@ function buildProcessResult(
 ): ProcessResult {
 
   const cleanedLines = cleaned.reduce((s, f) => s + f.lines.length, 0);
-  const markup = cleaned.filter((f) => ['html', 'htm', 'css', 'scss', 'less'].includes(f.entry.ext))
-    .reduce((s, f) => s + f.lines.length, 0);
   const langCounts: Record<string, number> = {};
   for (const f of cleaned) langCounts[f.entry.lang] = (langCounts[f.entry.lang] ?? 0) + 1;
 
@@ -122,7 +120,6 @@ function buildProcessResult(
     includedFiles: cleaned.length,
     cleanedLines,
     estimatedPages: selection.pages.length,
-    htmlCssRatio: cleanedLines > 0 ? markup / cleanedLines : 0,
     langCounts,
   };
   return { cleaned, selection, auditItems, stats, errors };

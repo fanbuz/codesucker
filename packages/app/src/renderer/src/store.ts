@@ -14,7 +14,7 @@ export interface PageData { no: number; lines: string[]; startFile: string; endF
 export interface ProcessData {
   jobId: string;
   meta: { appVersion: string; configSchemaVersion: number; rulesVersion: string };
-  stats: { totalFiles: number; includedFiles: number; cleanedLines: number; estimatedPages: number; htmlCssRatio: number; langCounts: Record<string, number> };
+  stats: { totalFiles: number; includedFiles: number; cleanedLines: number; estimatedPages: number; langCounts: Record<string, number> };
   selection: { pages: PageData[]; totalLines: number; pickedLines: number; truncated: boolean; selectedRelPaths: string[]; splitAfterPage: number | null; frontEndFile: string | null; backStartFile: string | null };
   audit: AuditRow[];
   errors: FileTaskError[];

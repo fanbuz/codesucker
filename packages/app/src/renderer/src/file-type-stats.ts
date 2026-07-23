@@ -36,11 +36,7 @@ export interface LanguageStat extends AggregateTotals {
 export interface FileTypeSummary extends AggregateTotals {
   extensions: ExtensionStat[];
   languages: LanguageStat[];
-  htmlCssRatio: number;
-  includedHtmlCssRatio: number;
 }
-
-const MARKUP_EXTENSIONS = new Set(['html', 'htm', 'css', 'scss', 'less']);
 
 function emptyTotals(): AggregateTotals {
   return { files: 0, rawLines: 0, bytes: 0, includedFiles: 0, includedRawLines: 0, includedBytes: 0 };
@@ -71,8 +67,6 @@ export function summarizeFileTypes(files: readonly FileStatSource[]): FileTypeSu
   const totals = emptyTotals();
   const byExtension = new Map<string, ExtensionStat>();
   const byLanguage = new Map<string, LanguageStat>();
-  let markupLines = 0;
-  let includedMarkupLines = 0;
 
   for (const file of files) {
     addFile(totals, file);
@@ -98,10 +92,6 @@ export function summarizeFileTypes(files: readonly FileStatSource[]): FileTypeSu
     if (!languageStat.extensions.includes(extension)) languageStat.extensions.push(extension);
     byLanguage.set(language, languageStat);
 
-    if (MARKUP_EXTENSIONS.has(extension)) {
-      markupLines += file.rawLines;
-      if (file.included) includedMarkupLines += file.rawLines;
-    }
   }
 
   const extensions = [...byExtension.values()].map((stat) => ({
@@ -121,8 +111,6 @@ export function summarizeFileTypes(files: readonly FileStatSource[]): FileTypeSu
     ...totals,
     extensions,
     languages,
-    htmlCssRatio: totals.rawLines > 0 ? markupLines / totals.rawLines : 0,
-    includedHtmlCssRatio: totals.includedRawLines > 0 ? includedMarkupLines / totals.includedRawLines : 0,
   };
 }
 

@@ -2,4 +2,4 @@
 export const CONFIG_SCHEMA_VERSION = 1 as const;
 
 /** 内置申报校验规则版本；规则口径变化时独立于应用版本递增。 */
-export const RULES_VERSION = '2026.07.1' as const;
+export const RULES_VERSION = '2026.07.2' as const;

@@ -1,7 +1,5 @@
 import type { AuditItem, CleanedFile, ProjectConfig, Selection } from './types.ts';
 
-const MARKUP_LANGS = new Set(['html', 'htm', 'css', 'scss', 'less']);
-
 function normalizeParty(value: string): string {
   return value
     .normalize('NFKC')
@@ -79,17 +77,7 @@ export function audit(
     }
   }
 
-  // 6. HTML/CSS 占比
-  const totalLines = files.reduce((s, f) => s + f.lines.length, 0);
-  const markupLines = files.filter((f) => MARKUP_LANGS.has(f.entry.ext)).reduce((s, f) => s + f.lines.length, 0);
-  const ratio = totalLines > 0 ? markupLines / totalLines : 0;
-  if (ratio > 0.2) {
-    items.push({ status: 'warn', name: `HTML/CSS 占比 ${(ratio * 100).toFixed(0)}%，超过建议值`, detail: '标记语言占比过高易被质疑独创性，建议取消勾选部分页面文件，优先纳入业务逻辑代码' });
-  } else {
-    items.push({ status: 'pass', name: `HTML/CSS 占比 ${(ratio * 100).toFixed(0)}%`, detail: '处于建议范围（≤20%）内' });
-  }
-
-  // 7. 署名/版权冲突扫描：证据在清洗前提取，只检查最终分页涉及的文件。
+  // 6. 署名/版权冲突扫描：证据在清洗前提取，只检查最终分页涉及的文件。
   if (config.owner) {
     const selected = new Set(selection.selectedRelPaths);
     const hits = files
@@ -110,7 +98,7 @@ export function audit(
     }
   }
 
-  // 8. 文件时间早于成立日期
+  // 7. 文件时间早于成立日期
   if (config.foundedDate) {
     const founded = new Date(config.foundedDate).getTime();
     const early = files.filter((f) => f.entry.included && f.entry.mtimeMs < founded);
