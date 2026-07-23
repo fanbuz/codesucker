@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { UpdateCheckResult } from '../../shared/update-types';
 import { mergeRescannedFiles } from './scan-project-state';
 import { canStartScan } from './scan-guard';
+import { LatestRequestGuard } from './latest-request-guard';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
@@ -161,11 +162,19 @@ export function toast(text: string) {
   toastTimer = setTimeout(() => useStore.getState().set({ toast: null }), 1800);
 }
 
+const recentRequestGuard = new LatestRequestGuard();
+
+export async function updateRecent(
+  request: () => Promise<RecentProject[]>,
+): Promise<RecentProject[]> {
+  const { value, isLatest } = await recentRequestGuard.run(request);
+  if (isLatest) useStore.getState().set({ recent: value });
+  return value;
+}
+
 export async function refreshRecent(): Promise<RecentProject[] | null> {
   try {
-    const recent = await window.cs.recentList();
-    useStore.getState().set({ recent });
-    return recent;
+    return await updateRecent(() => window.cs.recentList());
   } catch {
     return null;
   }

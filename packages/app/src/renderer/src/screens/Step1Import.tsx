@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  cancelActiveScan, scanProject, useStore, toast, type RecentProject,
+  cancelActiveScan, scanProject, updateRecent, useStore, toast, type RecentProject,
 } from '../store';
 import {
   clampRecentMenuPosition, nextRecentMenuIndex, reconcileRecentSelection,
@@ -96,15 +96,13 @@ export default function Step1Import() {
     setSelectedRecent((current) => reconcileRecentSelection(current, s.recent));
   }, [s.recent]);
 
-  const applyRecent = (recent: RecentProject[]) => s.set({ recent });
-
   const toggleRecentSelection = (root: string) => {
     setSelectedRecent((current) => toggleSelectedRoot(current, root));
   };
 
   const setPinned = async (project: RecentProject) => {
     try {
-      applyRecent(await window.cs.setRecentPinned(project.root, !project.pinned));
+      await updateRecent(() => window.cs.setRecentPinned(project.root, !project.pinned));
       toast(project.pinned ? '已取消置顶' : '已置顶最近项目');
     } catch (error) {
       toast(`操作失败：${error instanceof Error ? error.message : String(error)}`);
@@ -116,7 +114,7 @@ export default function Step1Import() {
   const removeOne = async (project: RecentProject) => {
     if (!window.confirm(`只会从最近项目中移除“${project.name}”的记录，不会删除磁盘上的项目文件。确定移除吗？`)) return;
     try {
-      applyRecent(await window.cs.removeRecent(project.root));
+      await updateRecent(() => window.cs.removeRecent(project.root));
       toast('已从最近项目移除，项目文件未受影响');
     } catch (error) {
       toast(`移除失败：${error instanceof Error ? error.message : String(error)}`);
@@ -130,7 +128,7 @@ export default function Step1Import() {
     if (roots.length === 0) return;
     if (!window.confirm(`只会移除选中的 ${roots.length} 条最近记录，不会删除任何项目文件。确定继续吗？`)) return;
     try {
-      applyRecent(await window.cs.removeRecentMany(roots));
+      await updateRecent(() => window.cs.removeRecentMany(roots));
       setSelectedRecent(new Set());
       setManagingRecent(false);
       toast(`已移除 ${roots.length} 条最近记录，项目文件未受影响`);
