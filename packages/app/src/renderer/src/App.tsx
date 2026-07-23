@@ -6,6 +6,7 @@ import Step3Clean from './screens/Step3Clean';
 import Step4Preview from './screens/Step4Preview';
 import Step5Export from './screens/Step5Export';
 import Settings from './screens/Settings';
+import { canVisitStep } from './wizard-progress';
 
 const STEP_TITLES = ['导入项目', '文件与排序', '清洗与排版', '分页预览', '校验与导出'];
 
@@ -113,8 +114,8 @@ export default function App() {
           {STEP_TITLES.map((title, i) => {
             const n = i + 1;
             const active = s.view === 'wizard' && s.step === n;
-            const done = s.loaded && n < s.step;
-            const enabled = n === 1 || (s.loaded && n <= s.step);
+            const done = s.loaded && n < s.maxUnlockedStep;
+            const enabled = canVisitStep(n, s.loaded, s.maxUnlockedStep);
             return (
               <div key={n} className={`step-item${enabled ? '' : ' disabled'}`}
                 onClick={() => enabled && s.set({ step: n, view: 'wizard' })}

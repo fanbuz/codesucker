@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { runProcess, useStore, type PageData } from '../store';
 import { PREVIEW_PAPER_HEIGHT, PREVIEW_PAPER_WIDTH, previewPaperScale } from '../preview-layout';
+import { unlockStep } from '../wizard-progress';
 
 export default function Step4Preview() {
   const s = useStore();
@@ -95,7 +96,8 @@ export default function Step4Preview() {
           )}
           {thumbsB.map((pg) => <Thumb key={pg.no} pg={pg} />)}
         </div>
-        <button className="btn-primary step4-next" onClick={() => s.set({ step: 5 })}>下一步：校验与导出</button>
+        <button className="btn-primary step4-next"
+          onClick={() => s.set({ step: 5, maxUnlockedStep: unlockStep(s.maxUnlockedStep, 5) })}>下一步：校验与导出</button>
       </footer>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { completeFileOrder, orderedIncluded, reorderIncludedPaths, useStore, type FileRow } from '../store';
+import { unlockStep } from '../wizard-progress';
 import {
   aggregateStats, compositionCells, includeOnlyExtension, rankExtensionStats,
   scopeTotals, setExtensionIncluded, statValue, summarizeFileTypes,
@@ -346,7 +347,8 @@ export default function Step2Files() {
 
         </div>
         <div className="step2-stats-footer">
-          <button className="btn-primary" disabled={included.length === 0} onClick={() => s.set({ step: 3 })}>下一步：清洗与排版</button>
+          <button className="btn-primary" disabled={included.length === 0}
+            onClick={() => s.set({ step: 3, maxUnlockedStep: unlockStep(s.maxUnlockedStep, 3) })}>下一步：清洗与排版</button>
           {included.length === 0 && <div className="step2-stats-footer__hint">至少选择一个文件</div>}
         </div>
       </aside>

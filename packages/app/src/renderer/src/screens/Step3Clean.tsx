@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { runProcess, useStore, type CleanToggles } from '../store';
+import { unlockStep } from '../wizard-progress';
 
 const TOGGLES: Array<{ key: keyof CleanToggles; label: string; sub?: string }> = [
   { key: 'removeComments', label: '删除注释' },
@@ -78,7 +79,10 @@ export default function Step3Clean() {
 
         <div className="step3-controls__footer">
           <button className="btn-primary" disabled={!s.swName.trim() || s.processing}
-            onClick={async () => { if (!s.processData) await runProcess(); s.set({ step: 4, page: 1 }); }}>
+            onClick={async () => {
+              if (!s.processData) await runProcess();
+              s.set({ step: 4, maxUnlockedStep: unlockStep(s.maxUnlockedStep, 4), page: 1 });
+            }}>
             {s.processing
               ? progress?.stage === 'cleaning' && progress.total > 0
                 ? `正在清洗 ${progress.completed}/${progress.total}…`

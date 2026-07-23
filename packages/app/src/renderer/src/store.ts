@@ -67,6 +67,7 @@ interface State {
   theme: 'light' | 'dark';
   view: 'wizard' | 'settings';
   step: number;
+  maxUnlockedStep: number;
   loaded: boolean;
   root: string | null;
   projName: string;
@@ -106,6 +107,7 @@ export const useStore = create<State>((set) => ({
   theme: 'light',
   view: 'wizard',
   step: 1,
+  maxUnlockedStep: 1,
   loaded: false,
   root: null,
   projName: '未打开项目',
@@ -241,6 +243,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
     exportResult: null,
     page: 1,
     step: 1,
+    maxUnlockedStep: 1,
     loaded: false,
     root,
     projName: projectName(root),
@@ -307,6 +310,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       scanPhase: 'idle',
       loaded: true,
       step: 2,
+      maxUnlockedStep: 2,
       root: result.root,
       projName: projectName(result.root),
       scanSessionId,
