@@ -11,7 +11,10 @@ import type {
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
 import { validateDroppedDirectory } from './drop-path';
-import { resolveProjectFile, resolveRecentExportFile } from './project-file';
+import {
+  captureProjectRoot, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  type ProjectRootSnapshot,
+} from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
 import {
   loadScanExcludeSnapshot, registerScanExcludesIpc, SCAN_EXCLUDES_CONFIG_NAME,
@@ -21,7 +24,7 @@ import type {
 } from './workers/protocol';
 
 /** 最近一次扫描缓存只保存文件元数据，不保存原始源码。 */
-let lastScan: { root: string; byRel: Map<string, FileEntry> } | null = null;
+let lastScan: { root: string; rootSnapshot: ProjectRootSnapshot; byRel: Map<string, FileEntry> } | null = null;
 let lastExportFile: string | null = null;
 const jobs = new JobController();
 
@@ -194,6 +197,7 @@ function buildConfig(payload: ProcessPayload): ProjectConfig {
 
 function orderedEntries(payload: ProcessPayload): FileEntry[] {
   if (!lastScan || lastScan.root !== payload.root) throw new Error('请先重新扫描项目');
+  validateProjectRoot(lastScan.rootSnapshot, payload.root);
   return payload.orderedRelPaths
     .map((relativePath) => lastScan!.byRel.get(relativePath))
     .filter((entry): entry is FileEntry => !!entry);
@@ -230,6 +234,7 @@ async function scanWithWorkers(
   // 每次扫描只读取一次规则快照，运行中的设置修改留到下次扫描生效。
   const excludeRules = loadScanExcludeSnapshot(scanExcludesFile());
   try {
+    const rootSnapshot = captureProjectRoot(request.root);
     const result = await discoverAsync(request.root, DEFAULT_EXTENSIONS, excludeRules, {
       concurrency: workerResources.workerCount * 2,
       signal: job.signal,
@@ -240,7 +245,8 @@ async function scanWithWorkers(
       },
     });
     job.assertCurrent();
-    lastScan = { root: request.root, byRel: new Map(result.files.map((file) => [file.relPath, file])) };
+    validateProjectRoot(rootSnapshot, request.root);
+    lastScan = { root: request.root, rootSnapshot, byRel: new Map(result.files.map((file) => [file.relPath, file])) };
     const entryOrder = sortFiles(result.files, 'entry').map((file) => file.relPath);
     const mtimeOrder = sortFiles(result.files, 'mtime').map((file) => file.relPath);
     if (result.files.length > 0) touchRecent({ name: path.basename(request.root), root: request.root });
@@ -310,7 +316,7 @@ export function registerPipelineIpc() {
   ipcMain.handle('path:validateDroppedDirectory', (_event, inputPath: string) => validateDroppedDirectory(inputPath));
 
   ipcMain.handle('project:revealFile', (_event, root: unknown, relPath: unknown) => {
-    shell.showItemInFolder(resolveProjectFile(lastScan?.root ?? null, root, relPath));
+    shell.showItemInFolder(resolveProjectFile(lastScan?.rootSnapshot ?? null, root, relPath));
   });
 
   ipcMain.handle('project:revealLatestExport', () => {

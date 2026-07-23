@@ -14,16 +14,48 @@ function isAbsoluteOnAnyPlatform(value: string): boolean {
     || /^[a-zA-Z]:/.test(value);
 }
 
+export interface ProjectRootSnapshot {
+  inputPath: string;
+  realPath: string;
+  device: number;
+  inode: number;
+}
+
+export function captureProjectRoot(root: string): ProjectRootSnapshot {
+  if (!path.isAbsolute(root)) throw new Error('项目目录无效，请重新导入项目');
+  try {
+    const realPath = fs.realpathSync.native(root);
+    const stat = fs.statSync(realPath);
+    if (!stat.isDirectory()) throw new Error('NOT_DIRECTORY');
+    return { inputPath: path.resolve(root), realPath, device: stat.dev, inode: stat.ino };
+  } catch {
+    throw new Error('项目目录无效，请重新导入项目');
+  }
+}
+
+export function validateProjectRoot(snapshot: ProjectRootSnapshot, root: unknown): string {
+  if (typeof root !== 'string' || !path.isAbsolute(root) || path.resolve(root) !== snapshot.inputPath) {
+    throw new Error('项目目录与最近扫描结果不一致，请重新扫描项目');
+  }
+  try {
+    const realPath = fs.realpathSync.native(root);
+    const stat = fs.statSync(realPath);
+    if (!stat.isDirectory() || realPath !== snapshot.realPath || stat.dev !== snapshot.device || stat.ino !== snapshot.inode) {
+      throw new Error('ROOT_IDENTITY_CHANGED');
+    }
+    return realPath;
+  } catch {
+    throw new Error('项目目录与最近扫描结果不一致，请重新扫描项目');
+  }
+}
+
 /**
  * 将渲染进程提供的项目相对路径解析为受控的真实文件路径。
  * 返回 realpath，避免在校验完成后继续沿用可能被替换的项目内符号链接。
  */
-export function resolveProjectFile(trustedRoot: string | null, root: unknown, relPath: unknown): string {
-  if (!trustedRoot) {
+export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: unknown, relPath: unknown): string {
+  if (!snapshot) {
     throw new Error('请先重新扫描项目，再定位问题文件');
-  }
-  if (typeof root !== 'string' || !path.isAbsolute(root) || !path.isAbsolute(trustedRoot)) {
-    throw new Error('项目目录无效，请重新导入项目');
   }
   if (typeof relPath !== 'string' || relPath.trim() === '' || relPath.includes('\0')) {
     throw new Error('问题文件相对路径无效');
@@ -32,16 +64,8 @@ export function resolveProjectFile(trustedRoot: string | null, root: unknown, re
     throw new Error('问题文件必须是项目目录内的相对路径');
   }
 
-  let realRoot: string;
+  const realRoot = validateProjectRoot(snapshot, root);
   let realFile: string;
-  try {
-    realRoot = fs.realpathSync.native(trustedRoot);
-    if (!fs.statSync(realRoot).isDirectory()) throw new Error('NOT_DIRECTORY');
-    if (fs.realpathSync.native(root) !== realRoot) throw new Error('ROOT_MISMATCH');
-  } catch {
-    throw new Error('项目目录与最近扫描结果不一致，请重新扫描项目');
-  }
-
   try {
     realFile = fs.realpathSync.native(path.resolve(realRoot, relPath));
   } catch {
