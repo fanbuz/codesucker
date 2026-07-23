@@ -1,6 +1,6 @@
 {
   "name": "@codesucker/app",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "离线生成符合软件著作权申报规范的源程序文档",
   "author": {
