@@ -88,10 +88,12 @@ export function audit(
       const h = hits[0];
       items.push({
         status: 'fail', name: '检测到疑似他人署名',
-        detail: `${h.file}:${h.line} 检测到署名主体「${h.subject}」，与著作权人「${config.owner}」不一致，共 ${hits.length} 处`,
-        file: h.file,
-        line: h.line,
-        context: hits.slice(0, 5).map((x) => `${x.file}:${x.line} · ${x.text.trim()}`),
+        detail: `检测到署名主体「${h.subject}」，与著作权人「${config.owner}」不一致，共 ${hits.length} 处`,
+        location: { file: h.file, line: h.line },
+        evidence: hits.slice(0, 5).map((item) => ({
+          location: { file: item.file, line: item.line },
+          detail: item.text.trim(),
+        })),
       });
     } else {
       items.push({ status: 'pass', name: '未检测到他人署名', detail: `入选代码中没有与著作权人「${config.owner}」冲突的 @author / Copyright 声明` });
@@ -106,6 +108,11 @@ export function audit(
       items.push({
         status: 'warn', name: `${early.length} 个文件修改时间早于成立日期`,
         detail: `${early.slice(0, 3).map((f) => f.entry.name).join('、')} 等文件早于 ${config.foundedDate}，如存在前期开发行为需提交《前期开发说明》`,
+        location: { file: early[0].entry.relPath },
+        evidence: early.slice(0, 5).map((file) => ({
+          location: { file: file.entry.relPath },
+          detail: `修改时间 ${new Date(file.entry.mtimeMs).toISOString().slice(0, 10)}，早于成立日期 ${config.foundedDate}`,
+        })),
       });
     }
   }

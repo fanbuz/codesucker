@@ -95,13 +95,27 @@ export interface Selection {
 
 export type AuditStatus = 'pass' | 'warn' | 'fail';
 
+export interface AuditLocation {
+  /** 相对于项目根目录的文件路径，仅可由主进程结合项目根目录定位 */
+  file: string;
+  /** 原始源码中的 1-based 行号 */
+  line?: number;
+}
+
+export interface AuditEvidence {
+  location: AuditLocation;
+  /** 与该文件位置关联的证据文本或错误信息 */
+  detail: string;
+}
+
 export interface AuditItem {
   status: AuditStatus;
   name: string;
   detail: string;
-  file?: string;
-  line?: number;
-  context?: string[];
+  /** 摘要所指向的首个问题文件 */
+  location?: AuditLocation;
+  /** 可独立定位的结构化证据，数量可由生成方限制 */
+  evidence?: AuditEvidence[];
 }
 
 export interface ProjectStats {

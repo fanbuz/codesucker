@@ -58,6 +58,18 @@ export default function Step5Export() {
   const iconFor = (st: string): [string, string, string] =>
     st === 'pass' ? ['var(--green-soft)', 'var(--green)', '✓'] : st === 'warn' ? ['var(--orange-soft)', 'var(--orange)', '!'] : ['var(--red-soft)', 'var(--red)', '✕'];
 
+  const revealFile = async (relPath: string) => {
+    if (!s.root) { toast('项目目录不可用，请重新导入项目'); return; }
+    try {
+      await window.cs.revealProjectFile(s.root, relPath);
+    } catch (error) {
+      toast('无法定位文件：' + (error instanceof Error ? error.message : String(error)));
+    }
+  };
+
+  const locationText = (location: { file: string; line?: number }) =>
+    `${location.file}${location.line ? `:${location.line}` : ''}`;
+
   const r = s.exportResult;
   const exportProgress = s.jobProgress?.jobKind === 'export' ? s.jobProgress : null;
   const exportLabel = exportProgress?.stage === 'cleaning' && exportProgress.total > 0
@@ -84,24 +96,44 @@ export default function Step5Export() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {audit.map((a, i) => {
             const [bg, fg, icon] = iconFor(a.status);
-            const expandable = !!a.context?.length;
+            const expandable = !!a.evidence?.length;
             return (
-              <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 11, boxShadow: 'var(--shadow)', overflow: 'hidden', animation: 'cs-fade .35s ease-out both', animationDelay: `${i * 70}ms` }}>
-                <div onClick={() => expandable && setExpanded(expanded === i ? null : i)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', cursor: expandable ? 'pointer' : 'default' }}>
+              <div className="step5-audit-card" key={i} style={{ animationDelay: `${i * 70}ms` }}>
+                <div className="step5-audit-summary">
                   <div style={{ width: 24, height: 24, flex: 'none', borderRadius: '50%', background: bg, color: fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>{icon}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{a.name}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 2 }}>{a.detail}</div>
+                  <div className="step5-audit-copy">
+                    <div className="step5-audit-name">{a.name}</div>
+                    <div className="step5-audit-detail">
+                      {a.location && <><button className="step5-file-link" type="button"
+                        title={`在文件管理器中定位 ${locationText(a.location)}`}
+                        aria-label={`在文件管理器中定位 ${locationText(a.location)}`}
+                        onClick={(event) => { event.stopPropagation(); void revealFile(a.location!.file); }}>
+                        {locationText(a.location)}
+                      </button><span> · </span></>}
+                      <span>{a.detail}</span>
+                    </div>
                   </div>
-                  {expandable && <span style={{ fontSize: 11, color: 'var(--accent)' }}>{expanded === i ? '收起 ▲' : '展开定位 ▼'}</span>}
+                  {expandable && (
+                    <button type="button" className="step5-audit-toggle"
+                      aria-expanded={expanded === i} aria-controls={`step5-evidence-${i}`}
+                      onClick={() => setExpanded(expanded === i ? null : i)}>
+                      {expanded === i ? '收起 ▲' : '展开定位 ▼'}
+                    </button>
+                  )}
                 </div>
-                {expanded === i && a.context && (
-                  <div style={{ borderTop: '1px solid var(--border2)', background: 'var(--panel2)', padding: '12px 16px' }}>
-                    {a.file && <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8, fontFamily: 'var(--mono)' }}>{a.file}{a.line ? `:${a.line}` : ''}</div>}
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.8, background: 'var(--panel)', border: '1px solid var(--border2)', borderRadius: 8, padding: '10px 12px' }}>
-                      {a.context.map((c, j) => (
-                        <div key={j} style={{ color: 'var(--red)' }}>{c}</div>
+                {expanded === i && a.evidence && (
+                  <div id={`step5-evidence-${i}`} className="step5-evidence-panel">
+                    <div className="step5-evidence-list">
+                      {a.evidence.map((evidence, j) => (
+                        <div className="step5-evidence-row" key={`${evidence.location.file}:${evidence.location.line ?? ''}:${j}`}>
+                          <button className="step5-file-link" type="button"
+                            title={`在文件管理器中定位 ${locationText(evidence.location)}`}
+                            aria-label={`在文件管理器中定位 ${locationText(evidence.location)}`}
+                            onClick={() => { void revealFile(evidence.location.file); }}>
+                            {locationText(evidence.location)}
+                          </button>
+                          <span> · {evidence.detail}</span>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -163,7 +195,14 @@ export default function Step5Export() {
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
               <button className="btn-primary" style={{ flex: 1, height: 38, fontSize: 13 }}
-                onClick={() => { window.cs.showItem(r.docx ?? r.txt ?? ''); s.set({ exportResult: null }); }}>打开所在文件夹</button>
+                onClick={async () => {
+                  try {
+                    await window.cs.revealLatestExport();
+                    s.set({ exportResult: null });
+                  } catch (error) {
+                    toast('无法定位导出文件：' + (error instanceof Error ? error.message : String(error)));
+                  }
+                }}>打开所在文件夹</button>
               <button className="btn-ghost" style={{ flex: 1, height: 38, fontSize: 13, borderRadius: 9, color: 'var(--text)' }}
                 onClick={() => s.set({ exportResult: null })}>再次生成</button>
             </div>

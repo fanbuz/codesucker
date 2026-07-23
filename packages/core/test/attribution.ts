@@ -57,10 +57,12 @@ const authorWithCommentsKept = conflict(run([{ relPath: 'src/main.ts', text: aut
 
 assert.ok(authorWithCommentsRemoved, '默认删除注释时仍应发现 @author 冲突');
 assert.ok(authorWithCommentsKept, '保留注释时也应发现相同 @author 冲突');
-assert.equal(authorWithCommentsRemoved.file, 'src/main.ts');
-assert.equal(authorWithCommentsRemoved.line, 2, '应保留原始源码行号');
 assert.equal(authorWithCommentsRemoved.detail, authorWithCommentsKept.detail, '删除注释开关不应改变署名结论');
-assert.match(authorWithCommentsRemoved.context?.[0] ?? '', /src\/main\.ts:2/);
+assert.deepEqual(authorWithCommentsRemoved.location, { file: 'src/main.ts', line: 2 });
+assert.deepEqual(authorWithCommentsRemoved.evidence?.[0], {
+  location: { file: 'src/main.ts', line: 2 },
+  detail: '* @Author: Alice Zhang',
+});
 
 const copyright = conflict(run([{
   relPath: 'src/service.py',
@@ -76,7 +78,7 @@ const multiple = conflict(run([
 ], '示例科技有限公司'));
 assert.ok(multiple, '多语言注释中的署名都应识别');
 assert.match(multiple.detail, /共 3 处/);
-assert.equal(multiple.context?.length, 3);
+assert.equal(multiple.evidence?.length, 3);
 
 assert.equal(
   conflict(run([{ relPath: 'src/owned.ts', text: '// Copyright 2026 fanbuz\nexport {}' }], 'fanbuz')),
@@ -109,7 +111,7 @@ const inlineComment = conflict(run([{
   text: 'export const answer = 42; // @author Inline Maintainer',
 }], 'fanbuz'));
 assert.ok(inlineComment, '行尾注释里的署名仍应被识别');
-assert.equal(inlineComment.line, 1);
+assert.equal(inlineComment.location?.line, 1);
 
 const cfg = config('fanbuz');
 const first = cleanFile(entry('src/first.ts'), Array.from({ length: 30 }, (_, i) => `const first${i} = ${i};`).join('\n'), cfg.clean);

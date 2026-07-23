@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, type WebContents } from 'electron';
+import { app, dialog, ipcMain, shell, type WebContents } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -11,6 +11,10 @@ import type {
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
 import { validateDroppedDirectory } from './drop-path';
+import {
+  captureProjectRoot, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  type ProjectRootSnapshot,
+} from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
 import {
   loadScanExcludeSnapshot, registerScanExcludesIpc, SCAN_EXCLUDES_CONFIG_NAME,
@@ -20,7 +24,8 @@ import type {
 } from './workers/protocol';
 
 /** 最近一次扫描缓存只保存文件元数据，不保存原始源码。 */
-let lastScan: { root: string; byRel: Map<string, FileEntry> } | null = null;
+let lastScan: { root: string; rootSnapshot: ProjectRootSnapshot; byRel: Map<string, FileEntry> } | null = null;
+let lastExportFile: string | null = null;
 const jobs = new JobController();
 
 interface PipelineResources {
@@ -190,10 +195,16 @@ function buildConfig(payload: ProcessPayload): ProjectConfig {
   };
 }
 
+function requireCurrentScan(root: string) {
+  if (!lastScan || lastScan.root !== root) throw new Error('请先重新扫描项目');
+  validateProjectRoot(lastScan.rootSnapshot, root);
+  return lastScan;
+}
+
 function orderedEntries(payload: ProcessPayload): FileEntry[] {
-  if (!lastScan || lastScan.root !== payload.root) throw new Error('请先重新扫描项目');
+  const scan = requireCurrentScan(payload.root);
   return payload.orderedRelPaths
-    .map((relativePath) => lastScan!.byRel.get(relativePath))
+    .map((relativePath) => scan.byRel.get(relativePath))
     .filter((entry): entry is FileEntry => !!entry);
 }
 
@@ -228,6 +239,7 @@ async function scanWithWorkers(
   // 每次扫描只读取一次规则快照，运行中的设置修改留到下次扫描生效。
   const excludeRules = loadScanExcludeSnapshot(scanExcludesFile());
   try {
+    const rootSnapshot = captureProjectRoot(request.root);
     const result = await discoverAsync(request.root, DEFAULT_EXTENSIONS, excludeRules, {
       concurrency: workerResources.workerCount * 2,
       signal: job.signal,
@@ -238,7 +250,8 @@ async function scanWithWorkers(
       },
     });
     job.assertCurrent();
-    lastScan = { root: request.root, byRel: new Map(result.files.map((file) => [file.relPath, file])) };
+    validateProjectRoot(rootSnapshot, request.root);
+    lastScan = { root: request.root, rootSnapshot, byRel: new Map(result.files.map((file) => [file.relPath, file])) };
     const entryOrder = sortFiles(result.files, 'entry').map((file) => file.relPath);
     const mtimeOrder = sortFiles(result.files, 'mtime').map((file) => file.relPath);
     if (result.files.length > 0) touchRecent({ name: path.basename(request.root), root: request.root });
@@ -307,6 +320,14 @@ export function registerPipelineIpc() {
 
   ipcMain.handle('path:validateDroppedDirectory', (_event, inputPath: string) => validateDroppedDirectory(inputPath));
 
+  ipcMain.handle('project:revealFile', (_event, root: unknown, relPath: unknown) => {
+    shell.showItemInFolder(resolveProjectFile(lastScan?.rootSnapshot ?? null, root, relPath));
+  });
+
+  ipcMain.handle('project:revealLatestExport', () => {
+    shell.showItemInFolder(resolveRecentExportFile(lastExportFile));
+  });
+
   ipcMain.handle('recent:list', () => loadRecent());
   registerScanExcludesIpc(ipcMain, scanExcludesFile);
   ipcMain.handle('project:cancel', (_event, jobId: string) => jobs.cancel(jobId));
@@ -322,13 +343,17 @@ export function registerPipelineIpc() {
         previewWithWorker(entries[0], request.payload.clean, job),
       ]);
       job.assertCurrent();
+      requireCurrentScan(request.payload.root);
       const audit = result.errors.length > 0
         ? [{
             status: 'warn' as const,
             name: `${result.errors.length} 个文件处理失败，已跳过`,
-            detail: `${result.errors[0].file}：${result.errors[0].message}`,
-            file: result.errors[0].file,
-            context: result.errors.slice(0, 5).map((error) => `${error.file} · ${error.message}`),
+            detail: result.errors[0].message,
+            location: { file: result.errors[0].file },
+            evidence: result.errors.slice(0, 5).map((error) => ({
+              location: { file: error.file },
+              detail: error.message,
+            })),
           }, ...result.auditItems]
         : result.auditItems;
       return {
@@ -361,11 +386,13 @@ export function registerPipelineIpc() {
     request: JobRequest<ProcessPayload & { outDir: string; formats: { docx: boolean; txt: boolean } }>,
   ) => {
     const job = jobs.start(request.jobId, 'export');
+    lastExportFile = null;
     const workerResources = getResources();
     const report = createProgressReporter(job, event.sender, workerResources.workerCount);
     try {
       const entries = orderedEntries(request.payload);
       const result = await processWithWorkers(entries, request.payload, job, event.sender);
+      requireCurrentScan(request.payload.root);
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
       const renderOptions = {
@@ -409,6 +436,9 @@ export function registerPipelineIpc() {
       }
 
       job.assertCurrent();
+      const exportedFile = output.docx ?? output.txt;
+      if (!exportedFile) throw new Error('请至少选择一种输出格式');
+      lastExportFile = fs.realpathSync.native(exportedFile);
       touchRecent({
         name: path.basename(request.payload.root),
         root: request.payload.root,

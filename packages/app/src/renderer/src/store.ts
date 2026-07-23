@@ -6,9 +6,11 @@ export interface FileRow {
   sizeBytes: number; rawLines: number; mtimeMs: number; included: boolean; entryScore: number;
 }
 export interface FileTaskError { stage: 'scanning' | 'cleaning' | 'rendering'; file: string; message: string }
+export interface AuditLocation { file: string; line?: number }
+export interface AuditEvidence { location: AuditLocation; detail: string }
 export interface AuditRow {
   status: 'pass' | 'warn' | 'fail'; name: string; detail: string;
-  file?: string; line?: number; context?: string[];
+  location?: AuditLocation; evidence?: AuditEvidence[];
 }
 export interface PageData { no: number; lines: string[]; startFile: string; endFile: string }
 export interface ProcessData {

@@ -34,7 +34,8 @@ const api = {
   },
   offProgress: () => ipcRenderer.removeAllListeners('project:progress'),
   saveConfig: (root: string, config: unknown) => ipcRenderer.invoke('project:saveConfig', root, config),
-  showItem: (p: string) => ipcRenderer.invoke('shell:showItem', p),
+  revealProjectFile: (root: string, relPath: string): Promise<void> => ipcRenderer.invoke('project:revealFile', root, relPath),
+  revealLatestExport: (): Promise<void> => ipcRenderer.invoke('project:revealLatestExport'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
 };
 
