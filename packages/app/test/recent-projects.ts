@@ -86,7 +86,7 @@ assert.equal(active.find((item) => item.root === fileRoot)?.available, false);
 assert.equal(active.find((item) => item.root === fileRoot)?.unavailableReason, 'not-directory');
 assert.equal(active.find((item) => item.root === openedAgain)?.available, true);
 
-if (process.platform !== 'win32') {
+if (process.platform !== 'win32' && (typeof process.geteuid !== 'function' || process.geteuid() !== 0)) {
   const unreadableRoot = project('readable-without-search-permission');
   fs.chmodSync(unreadableRoot, 0o400);
   touchRecentProject(activeConfig, { name: 'No search permission', root: unreadableRoot }, at(32));
