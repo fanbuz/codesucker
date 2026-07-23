@@ -22,13 +22,28 @@ declare global {
     warning: string | null;
   }
 
+  interface RecentProjectEntry {
+    name: string;
+    root: string;
+    lastGenerated?: string;
+    pages?: number;
+    ok?: boolean;
+    pinned: boolean;
+    lastOpenedAt: string;
+    available: boolean;
+    unavailableReason?: 'missing' | 'inaccessible' | 'not-directory';
+  }
+
   interface Window {
     cs: {
       win: (action: 'minimize' | 'maximize' | 'close') => void;
       pickFolder: () => Promise<string | null>;
       pickOutDir: () => Promise<string | null>;
       resolveDroppedPath: (file: File) => Promise<{ path: string | null; error: string | null }>;
-      recentList: () => Promise<unknown>;
+      recentList: () => Promise<RecentProjectEntry[]>;
+      setRecentPinned: (root: string, pinned: boolean) => Promise<RecentProjectEntry[]>;
+      removeRecent: (root: string) => Promise<RecentProjectEntry[]>;
+      removeRecentMany: (roots: string[]) => Promise<RecentProjectEntry[]>;
       checkForUpdates: (force?: boolean) => Promise<UpdateCheckResult>;
       getScanExcludes: () => Promise<ScanExcludesState>;
       saveScanExcludes: (rules: string[]) => Promise<ScanExcludesState>;

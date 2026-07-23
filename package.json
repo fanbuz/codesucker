@@ -1,6 +1,6 @@
 {
   "name": "codesucker",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "description": "软著代码抽取器 —— 离线生成符合软件著作权申报规范的源程序文档",
   "license": "Apache-2.0",

@@ -1,6 +1,23 @@
+import { useEffect, useRef, useState } from 'react';
 import {
-  cancelActiveScan, scanProject, useStore, toast, type RecentProject,
+  cancelActiveScan, refreshRecent, scanProject, updateRecent, useStore, toast, type RecentProject,
 } from '../store';
+import {
+  clampRecentMenuPosition, nextRecentMenuIndex, reconcileRecentSelection,
+  selectAllRecent, toggleRecentSelection as toggleSelectedRoot, type RecentMenuNavigationKey,
+} from '../recent-project-state';
+
+interface RecentContextMenu {
+  root: string;
+  left: number;
+  top: number;
+}
+
+function unavailableLabel(reason: RecentProject['unavailableReason']): string {
+  if (reason === 'missing') return '项目路径不存在';
+  if (reason === 'not-directory') return '该路径不是文件夹';
+  return '项目路径无法访问';
+}
 
 function scanPercent(progress: JobProgress | null): number {
   if (!progress) return 2;
@@ -19,8 +36,129 @@ function formatBytes(bytes = 0): string {
 
 export default function Step1Import() {
   const s = useStore();
+  const [managingRecent, setManagingRecent] = useState(false);
+  const [selectedRecent, setSelectedRecent] = useState<Set<string>>(() => new Set());
+  const [recentMenu, setRecentMenu] = useState<RecentContextMenu | null>(null);
+  const recentMenuRef = useRef<HTMLDivElement>(null);
+  const recentTriggerRefs = useRef(new Map<string, HTMLDivElement>());
   const progress = s.jobProgress?.jobKind === 'scan' ? s.jobProgress : null;
   const pct = scanPercent(progress);
+
+  const closeRecentMenu = (restoreFocus = false) => {
+    const triggerRoot = recentMenu?.root;
+    setRecentMenu(null);
+    if (restoreFocus && triggerRoot) {
+      window.requestAnimationFrame(() => recentTriggerRefs.current.get(triggerRoot)?.focus());
+    }
+  };
+
+  const openRecentMenu = (root: string, left: number, top: number) => {
+    setRecentMenu({
+      root,
+      ...clampRecentMenuPosition({ left, top }, { width: window.innerWidth, height: window.innerHeight }),
+    });
+  };
+
+  const openRecentMenuFromKeyboard = (root: string, trigger: HTMLElement) => {
+    const bounds = trigger.getBoundingClientRect();
+    openRecentMenu(root, bounds.left, bounds.bottom + 4);
+  };
+
+  useEffect(() => {
+    if (!recentMenu) return;
+    const focusFrame = window.requestAnimationFrame(() => {
+      recentMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!recentMenuRef.current?.contains(event.target as Node)) closeRecentMenu(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeRecentMenu(true);
+    };
+    const closeOnBlur = () => closeRecentMenu(false);
+    const closeAndRestoreFocus = () => closeRecentMenu(true);
+    window.addEventListener('pointerdown', closeOnPointerDown);
+    window.addEventListener('blur', closeOnBlur);
+    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('resize', closeAndRestoreFocus);
+    window.addEventListener('scroll', closeAndRestoreFocus, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('pointerdown', closeOnPointerDown);
+      window.removeEventListener('blur', closeOnBlur);
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('resize', closeAndRestoreFocus);
+      window.removeEventListener('scroll', closeAndRestoreFocus, true);
+    };
+  }, [recentMenu]);
+
+  useEffect(() => {
+    setSelectedRecent((current) => reconcileRecentSelection(current, s.recent));
+  }, [s.recent]);
+
+  const toggleRecentSelection = (root: string) => {
+    setSelectedRecent((current) => toggleSelectedRoot(current, root));
+  };
+
+  const setPinned = async (project: RecentProject) => {
+    try {
+      await updateRecent(() => window.cs.setRecentPinned(project.root, !project.pinned));
+      toast(project.pinned ? '已取消置顶' : '已置顶最近项目');
+    } catch (error) {
+      await refreshRecent();
+      toast(`操作失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      closeRecentMenu(true);
+    }
+  };
+
+  const removeOne = async (project: RecentProject) => {
+    if (!window.confirm(`只会从最近项目中移除“${project.name}”的记录，不会删除磁盘上的项目文件。确定移除吗？`)) return;
+    try {
+      await updateRecent(() => window.cs.removeRecent(project.root));
+      toast('已从最近项目移除，项目文件未受影响');
+    } catch (error) {
+      await refreshRecent();
+      toast(`移除失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      closeRecentMenu(true);
+    }
+  };
+
+  const removeSelected = async () => {
+    const roots = [...selectedRecent];
+    if (roots.length === 0) return;
+    if (!window.confirm(`只会移除选中的 ${roots.length} 条最近记录，不会删除任何项目文件。确定继续吗？`)) return;
+    try {
+      await updateRecent(() => window.cs.removeRecentMany(roots));
+      setSelectedRecent(new Set());
+      setManagingRecent(false);
+      toast(`已移除 ${roots.length} 条最近记录，项目文件未受影响`);
+    } catch (error) {
+      await refreshRecent();
+      toast(`批量移除失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const openRecent = async (project: RecentProject) => {
+    if (managingRecent) {
+      toggleRecentSelection(project.root);
+      return;
+    }
+    if (!project.available) {
+      const refreshed = await refreshRecent();
+      if (!refreshed) {
+        toast('暂时无法刷新项目状态，请稍后重试');
+        return;
+      }
+      const current = refreshed?.find((item) => item.root === project.root);
+      if (!current?.available) {
+        toast(`${unavailableLabel(current?.unavailableReason)}，可从管理模式移除该记录`);
+        return;
+      }
+    }
+    void scanProject(project.root, 'open');
+  };
 
   const pick = async () => {
     const root = await window.cs.pickFolder();
@@ -93,25 +231,69 @@ export default function Step1Import() {
       )}
 
       <section className="step1-recent" aria-label="最近项目">
-        <div className="step1-recent__heading">最近项目</div>
+        <div className="step1-recent__heading">
+          <span>最近项目</span>
+          {s.recent.length > 0 && !managingRecent && (
+            <button type="button" onClick={() => { setManagingRecent(true); setRecentMenu(null); }}>管理</button>
+          )}
+        </div>
+        {managingRecent && (
+          <div className="step1-recent__manage" aria-label="最近项目批量管理">
+            <span>已选 {selectedRecent.size} 项</span>
+            <div>
+              <button type="button" onClick={() => setSelectedRecent(selectAllRecent(s.recent))}
+                disabled={selectedRecent.size === s.recent.length}>全选当前列表</button>
+              <button type="button" className="is-danger" disabled={selectedRecent.size === 0}
+                onClick={() => { void removeSelected(); }}>批量移除</button>
+              <button type="button" onClick={() => { setManagingRecent(false); setSelectedRecent(new Set()); }}>取消</button>
+            </div>
+          </div>
+        )}
         {s.recent.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)' }}>暂无最近项目</div>}
         <div className="step1-recent__list" tabIndex={s.recent.length > 0 ? 0 : undefined}>
           {s.recent.map((r: RecentProject) => (
-            <div key={r.root} className="card-hover" role="button" tabIndex={0}
-              onClick={() => { void scanProject(r.root, 'open'); }}
+            <div key={r.root} className={`step1-recent__item card-hover${r.available ? '' : ' is-unavailable'}${selectedRecent.has(r.root) ? ' is-selected' : ''}`}
+              role="button" tabIndex={0}
+              aria-pressed={managingRecent ? selectedRecent.has(r.root) : undefined}
+              aria-haspopup={managingRecent ? undefined : 'menu'}
+              aria-expanded={managingRecent ? undefined : recentMenu?.root === r.root}
+              ref={(node) => {
+                if (node) recentTriggerRefs.current.set(r.root, node);
+                else recentTriggerRefs.current.delete(r.root);
+              }}
+              onClick={() => { void openRecent(r); }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                if (managingRecent) return;
+                if (event.clientX === 0 && event.clientY === 0) openRecentMenuFromKeyboard(r.root, event.currentTarget);
+                else openRecentMenu(r.root, event.clientX, event.clientY);
+              }}
               onKeyDown={(event) => {
+                if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                  event.preventDefault();
+                  if (managingRecent) return;
+                  openRecentMenuFromKeyboard(r.root, event.currentTarget);
+                  return;
+                }
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
-                  void scanProject(r.root, 'open');
+                  void openRecent(r);
                 }
               }}
-              style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 11, cursor: 'pointer', boxShadow: 'var(--shadow)' }}>
+            >
+              {managingRecent && (
+                <span className="step1-recent__checkbox" aria-hidden="true">{selectedRecent.has(r.root) ? '✓' : ''}</span>
+              )}
               <div style={{ width: 36, height: 36, flex: 'none', borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--accent)' }}>
                 {r.name.slice(0, 2).toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.name}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 2 }}>{r.root}</div>
+                <div className="step1-recent__name">
+                  {r.pinned && <span className="step1-recent__pin" aria-label="已置顶">◆</span>}
+                  <span>{r.name}</span>
+                  {!r.available && <span className="step1-recent__unavailable">{unavailableLabel(r.unavailableReason)}</span>}
+                </div>
+                <div className="step1-recent__path">{r.root}</div>
               </div>
               {r.lastGenerated && (
                 <div style={{ textAlign: 'right' }}>
@@ -123,6 +305,39 @@ export default function Step1Import() {
           ))}
         </div>
       </section>
+
+      {recentMenu && (() => {
+        const project = s.recent.find((item) => item.root === recentMenu.root);
+        if (!project) return null;
+        return (
+          <div id="recent-project-menu" ref={recentMenuRef} className="step1-recent-menu" role="menu"
+            aria-label={`${project.name} 最近项目操作`} style={{ left: recentMenu.left, top: recentMenu.top }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                closeRecentMenu(true);
+                return;
+              }
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+              const nextIndex = nextRecentMenuIndex(
+                items.indexOf(document.activeElement as HTMLButtonElement),
+                event.key as RecentMenuNavigationKey,
+                items.length,
+              );
+              if (nextIndex !== null) items[nextIndex]?.focus();
+            }}>
+            <button type="button" role="menuitem" tabIndex={-1} onClick={() => { void setPinned(project); }}>
+              {project.pinned ? '取消置顶' : '置顶'}
+            </button>
+            <button type="button" role="menuitem" tabIndex={-1} className="is-danger" onClick={() => { void removeOne(project); }}>
+              从最近项目移除
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

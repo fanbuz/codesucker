@@ -20,6 +20,9 @@ import { ScanSessionGuard } from './scan-session';
 import {
   loadScanExcludeSnapshot, registerScanExcludesIpc, SCAN_EXCLUDES_CONFIG_NAME,
 } from './scan-excludes-config';
+import {
+  registerRecentProjectsIpc, touchRecentProject, type RecentProjectPatch,
+} from './recent-projects';
 import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, RenderWorkerRequest,
 } from './workers/protocol';
@@ -156,28 +159,8 @@ function loadProjectConfig(root: string): { config: Record<string, unknown> | nu
   }
 }
 
-interface RecentProject {
-  name: string;
-  root: string;
-  lastGenerated?: string;
-  pages?: number;
-  ok?: boolean;
-}
-
-function loadRecent(): RecentProject[] {
-  try { return JSON.parse(fs.readFileSync(recentFile(), 'utf8')); } catch { return []; }
-}
-
-function saveRecent(list: RecentProject[]) {
-  try { fs.writeFileSync(recentFile(), JSON.stringify(list.slice(0, 8), null, 2)); } catch { /* 忽略 */ }
-}
-
-function touchRecent(patch: RecentProject) {
-  const current = loadRecent();
-  const list = current.filter((item) => item.root !== patch.root);
-  const previous = current.find((item) => item.root === patch.root);
-  list.unshift({ ...previous, ...patch });
-  saveRecent(list);
+function touchRecent(patch: RecentProjectPatch) {
+  try { touchRecentProject(recentFile(), patch); } catch { /* 最近记录失败不得中断扫描或导出。 */ }
 }
 
 interface ProcessPayload {
@@ -347,7 +330,7 @@ export function registerPipelineIpc() {
     shell.showItemInFolder(resolveRecentExportFile(lastExportFile));
   });
 
-  ipcMain.handle('recent:list', () => loadRecent());
+  registerRecentProjectsIpc(ipcMain, recentFile);
   registerScanExcludesIpc(ipcMain, scanExcludesFile);
   ipcMain.handle('project:cancel', (_event, jobId: string) => jobs.cancel(jobId));
 

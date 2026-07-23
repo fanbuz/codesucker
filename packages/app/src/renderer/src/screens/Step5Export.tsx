@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  cleanOptions, createJobId, isCancellation, orderedIncluded, runProcess, toast, useStore,
+  cleanOptions, createJobId, isCancellation, orderedIncluded, refreshRecent, runProcess, toast, useStore,
 } from '../store';
 import { settleExportState } from '../export-state';
 
@@ -46,7 +46,7 @@ export default function Step5Export() {
         return;
       }
       current.set({ exporting: false, exportResult: result, activeJobId: null, jobProgress: null });
-      window.cs.recentList().then((list) => s.set({ recent: list as typeof s.recent }));
+      await refreshRecent();
     } catch (e) {
       const current = useStore.getState();
       current.set(settleExportState(current.activeJobId, jobId));

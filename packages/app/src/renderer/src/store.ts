@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { UpdateCheckResult } from '../../shared/update-types';
 import { mergeRescannedFiles } from './scan-project-state';
 import { canStartScan } from './scan-guard';
+import { LatestRequestGuard } from './latest-request-guard';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
@@ -31,7 +32,17 @@ export interface ProcessData {
     removedComments: number; removedBlanks: number; masked: number;
   };
 }
-export interface RecentProject { name: string; root: string; lastGenerated?: string; pages?: number; ok?: boolean }
+export interface RecentProject {
+  name: string;
+  root: string;
+  lastGenerated?: string;
+  pages?: number;
+  ok?: boolean;
+  pinned: boolean;
+  lastOpenedAt: string;
+  available: boolean;
+  unavailableReason?: 'missing' | 'inaccessible' | 'not-directory';
+}
 
 export interface CleanToggles { removeComments: boolean; removeBlankLines: boolean; maskSensitive: boolean; wrapLongLines: boolean }
 export type ScanIntent = 'open' | 'rescan';
@@ -149,6 +160,25 @@ export function toast(text: string) {
   clearTimeout(toastTimer);
   useStore.getState().set({ toast: text });
   toastTimer = setTimeout(() => useStore.getState().set({ toast: null }), 1800);
+}
+
+const recentRequestGuard = new LatestRequestGuard();
+
+export async function updateRecent(
+  request: () => Promise<RecentProject[]>,
+): Promise<RecentProject[] | null> {
+  const { value, isLatest } = await recentRequestGuard.run(request);
+  if (!isLatest) return null;
+  useStore.getState().set({ recent: value });
+  return value;
+}
+
+export async function refreshRecent(): Promise<RecentProject[] | null> {
+  try {
+    return await updateRecent(() => window.cs.recentList());
+  } catch {
+    return null;
+  }
 }
 
 export async function checkForUpdates(force = false): Promise<void> {
@@ -331,6 +361,8 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       fmtTxt,
       outDir,
     });
+
+    await refreshRecent();
 
     if (result.errors.length > 0) toast(`${result.errors.length} 个文件扫描失败，已跳过`);
     else if (intent === 'rescan') toast('重新扫描完成，旧处理结果已失效');

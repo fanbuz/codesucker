@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { checkForUpdates, scanProject, useStore, toast, type RecentProject } from './store';
+import { checkForUpdates, refreshRecent, scanProject, useStore, toast } from './store';
 import Step1Import from './screens/Step1Import';
 import Step2Files from './screens/Step2Files';
 import Step3Clean from './screens/Step3Clean';
@@ -38,7 +38,7 @@ export default function App() {
   }, [s.theme]);
 
   useEffect(() => {
-    window.cs.recentList().then((r) => s.set({ recent: r as RecentProject[] }));
+    void refreshRecent();
     void checkForUpdates(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -154,7 +154,8 @@ export default function App() {
 
       {/* toast */}
       {s.toast && (
-        <div style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: 'var(--text)', color: 'var(--bg)', fontSize: 12.5, padding: '9px 18px', borderRadius: 9, boxShadow: '0 8px 24px rgba(0,0,0,.25)', animation: 'cs-fade .15s ease-out', zIndex: 60 }}>{s.toast}</div>
+        <div role="status" aria-live="polite" aria-atomic="true"
+          style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: 'var(--text)', color: 'var(--bg)', fontSize: 12.5, padding: '9px 18px', borderRadius: 9, boxShadow: '0 8px 24px rgba(0,0,0,.25)', animation: 'cs-fade .15s ease-out', zIndex: 60 }}>{s.toast}</div>
       )}
     </div>
   );

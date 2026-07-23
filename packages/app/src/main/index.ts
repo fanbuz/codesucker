@@ -1,19 +1,25 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron';
 import * as path from 'node:path';
 import { registerPipelineIpc, shutdownPipeline } from './pipeline';
 import { isTrustedExternalUrl } from './external-url';
 import { registerUpdateIpc } from './update-ipc';
+import {
+  loadWindowState, minimumSizeForBounds, showRestoredWindow,
+  WINDOW_STATE_CONFIG_NAME, WindowStateTracker,
+} from './window-state';
 
 let win: BrowserWindow | null = null;
 
 app.setName('CodeSucker');
 
 function createWindow() {
-  win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1160,
-    minHeight: 760,
+  const stateFile = path.join(app.getPath('userData'), WINDOW_STATE_CONFIG_NAME);
+  const restoredState = loadWindowState(stateFile, screen);
+  const minimumSize = minimumSizeForBounds(restoredState.bounds);
+  const createdWindow = new BrowserWindow({
+    ...restoredState.bounds,
+    minWidth: minimumSize.width,
+    minHeight: minimumSize.height,
     frame: false,
     show: false,
     icon: path.join(__dirname, '../../build/icon.png'),
@@ -25,13 +31,17 @@ function createWindow() {
       sandbox: false,
     },
   });
+  win = createdWindow;
 
-  win.on('ready-to-show', () => win?.show());
+  new WindowStateTracker(stateFile, createdWindow, screen, restoredState);
+  createdWindow.on('ready-to-show', () => {
+    showRestoredWindow(createdWindow, restoredState);
+  });
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    win.loadURL(process.env.ELECTRON_RENDERER_URL);
+    createdWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    win.loadFile(path.join(__dirname, '../renderer/index.html'));
+    createdWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 }
 
