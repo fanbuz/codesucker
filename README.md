@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/screenshots/codesucker-v0.3.0-file-tree.png" alt="CodeSucker v0.3.0 — 真实目录树、目录级选择、全局反选、文件类型统计与固定操作区" width="920" />
+<img src="packages/app/build/icon-256.png" width="110" alt="CodeSucker" />
 
 # CodeSucker · 软著代码抽取器
 
@@ -13,6 +13,10 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](#下载)
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#参与贡献)
+
+<br/>
+
+<img src="docs/screenshots/codesucker-v0.3.0-file-tree.png" alt="CodeSucker v0.3.0 — 真实目录树、目录级选择、全局反选、文件类型统计与固定操作区" width="920" />
 
 <br/>
 
