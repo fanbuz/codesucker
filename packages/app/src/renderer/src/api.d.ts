@@ -1,3 +1,5 @@
+import type { UpdateCheckResult } from '../../shared/update-types';
+
 export {};
 
 declare global {
@@ -21,6 +23,7 @@ declare global {
       pickOutDir: () => Promise<string | null>;
       resolveDroppedPath: (file: File) => Promise<{ path: string | null; error: string | null }>;
       recentList: () => Promise<unknown>;
+      checkForUpdates: (force?: boolean) => Promise<UpdateCheckResult>;
       scan: (root: string, jobId: string) => Promise<unknown>;
       process: (payload: unknown, jobId: string) => Promise<unknown>;
       export: (payload: unknown, jobId: string) => Promise<unknown>;

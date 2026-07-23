@@ -109,8 +109,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME" release-assets/*
-          --verify-tag
-          --title "CodeSucker $GITHUB_REF_NAME · MVP"
-          --generate-notes
+        run: |
+          release_options=()
+          version_without_build="${GITHUB_REF_NAME%%+*}"
+          if [[ "$version_without_build" == *-* ]]; then
+            release_options+=(--prerelease)
+          fi
+
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --verify-tag \
+            --title "CodeSucker $GITHUB_REF_NAME · MVP" \
+            --generate-notes \
+            "${release_options[@]}"

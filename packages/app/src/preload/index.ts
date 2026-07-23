@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { UpdateCheckResult } from '../shared/update-types';
 
 interface ProgressEvent {
   jobId: string;
@@ -20,6 +21,7 @@ const api = {
     return ipcRenderer.invoke('path:validateDroppedDirectory', inputPath);
   },
   recentList: () => ipcRenderer.invoke('recent:list'),
+  checkForUpdates: (force = false): Promise<UpdateCheckResult> => ipcRenderer.invoke('update:check', force),
   scan: (root: string, jobId: string) => ipcRenderer.invoke('project:scan', { root, jobId }),
   process: (payload: unknown, jobId: string) => ipcRenderer.invoke('project:process', { payload, jobId }),
   export: (payload: unknown, jobId: string) => ipcRenderer.invoke('project:export', { payload, jobId }),

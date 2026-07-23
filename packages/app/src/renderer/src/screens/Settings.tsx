@@ -1,4 +1,4 @@
-import { toast, useStore } from '../store';
+import { checkForUpdates, toast, useStore } from '../store';
 
 const EXCLUDE_RULES = ['node_modules/', 'build/', '.git/', 'dist/', '.gradle/', 'vendor/', '*.min.js', '*.lock'];
 const LINKS = {
@@ -10,45 +10,90 @@ const LINKS = {
 
 export default function Settings() {
   const s = useStore();
+  const update = s.updateResult;
+  const hasUpdate = update?.status === 'available';
+  const updateTitle = s.updateChecking
+    ? '正在检查 GitHub Release…'
+    : hasUpdate
+      ? `发现新版本 v${update.latestVersion}`
+      : update?.status === 'up-to-date'
+        ? '已是最新版本'
+        : update?.status === 'error'
+          ? '暂时无法检查更新'
+          : '检查新版本';
+  const updateDetail = s.updateChecking
+    ? '只查询公开版本元数据，不会上传项目或源码'
+    : hasUpdate
+      ? `当前 v${update.currentVersion}${update.publishedAt ? ` · 发布于 ${new Date(update.publishedAt).toLocaleDateString('zh-CN')}` : ''}`
+      : update?.status === 'up-to-date'
+        ? `当前 v${update.currentVersion} · GitHub 最新 v${update.latestVersion}`
+        : update?.status === 'error'
+          ? update.message
+          : `当前 v${__APP_VERSION__} · 启动时自动检查正式 Release`;
+
+  const handleUpdateAction = async () => {
+    if (hasUpdate) {
+      try { await window.cs.openExternal(update.releaseUrl); } catch { toast('无法打开 GitHub Release 页面'); }
+      return;
+    }
+    await checkForUpdates(true);
+  };
+
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '22px 32px', animation: 'cs-fade .18s ease-out' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-        <button className="btn-ghost" style={{ width: 28, height: 28, fontSize: 13 }} onClick={() => s.set({ view: 'wizard' })}>←</button>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>设置</div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 640 }}>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, boxShadow: 'var(--shadow)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: 13.5, fontWeight: 600 }}>软件更新</div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>当前 v{__APP_VERSION__} · MVP 暂不包含自动更新</div>
+    <div className="settings-page">
+      <div className="settings-shell">
+        <header className="settings-heading">
+          <button className="btn-ghost settings-heading__back" onClick={() => s.set({ view: 'wizard' })} aria-label="返回工作区">←</button>
+          <div>
+            <h1>设置</h1>
+            <p>管理版本状态、默认规则与应用信息</p>
+          </div>
+        </header>
+
+        <div className="settings-grid">
+        <section className={`update-card${hasUpdate ? ' update-card--available' : ''}`} aria-live="polite">
+          <div className="update-card__content">
+            <div className="update-card__eyebrow">SOFTWARE UPDATE · 软件更新</div>
+            <div className="update-card__title">
+              {updateTitle}
+              {hasUpdate && <span className="update-card__badge">NEW</span>}
             </div>
-            <button className="btn-ghost" style={{ height: 32, padding: '0 16px', fontSize: 12.5 }}
-              onClick={() => toast('自动更新将在后续版本开放')}>后续版本开放</button>
+            <div className="update-card__detail">{updateDetail}</div>
+            {hasUpdate && update.notes.length > 0 && (
+              <ul className="update-card__notes">
+                {update.notes.map((note) => <li key={note}>{note}</li>)}
+              </ul>
+            )}
           </div>
-        </div>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, boxShadow: 'var(--shadow)' }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600 }}>默认排除规则</div>
-          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4, marginBottom: 10 }}>匹配的目录与文件在导入时自动排除（.gitignore 亦生效）</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {EXCLUDE_RULES.map((e) => (
-              <span key={e} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono)', fontSize: 11.5, background: 'var(--panel2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px' }}>{e}</span>
-            ))}
-            <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: 11.5, color: 'var(--text3)', border: '1px dashed var(--border)', borderRadius: 6, padding: '4px 10px' }}>自定义规则将在后续版本开放</span>
+          <button className={hasUpdate ? 'btn-primary update-card__action' : 'btn-ghost update-card__action'}
+            disabled={s.updateChecking} onClick={handleUpdateAction}>
+            {s.updateChecking ? '检查中…' : hasUpdate ? '查看并下载' : update?.status === 'up-to-date' ? '重新检查' : '检查更新'}
+          </button>
+        </section>
+
+          <div className="settings-stack">
+            <section className="settings-card">
+              <div className="settings-card__title">默认排除规则</div>
+              <div className="settings-card__description">匹配的目录与文件在导入时自动排除（.gitignore 亦生效）</div>
+              <div className="settings-rule-list">
+                {EXCLUDE_RULES.map((e) => <span key={e}>{e}</span>)}
+                <span className="settings-rule-list__future">自定义规则将在后续版本开放</span>
+              </div>
+            </section>
+
+            <section className="settings-card settings-card--privacy">
+              <div className="settings-card__title settings-card__title--with-icon">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" strokeWidth="1.4" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" strokeWidth="1.4" /></svg>
+                隐私说明
+              </div>
+              <div className="settings-card__body">
+                CodeSucker 的扫描、清洗、脱敏、排版与导出全部在本机完成，您的源代码<span>永远不会离开这台电脑</span>。应用启动或您手动检查更新时，只向 GitHub 请求公开的 Release 版本元数据，不会发送项目路径、源码或配置。
+              </div>
+            </section>
           </div>
-        </div>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, boxShadow: 'var(--shadow)' }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 7 }}>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" strokeWidth="1.4" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" strokeWidth="1.4" /></svg>
-            隐私说明
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8, lineHeight: 1.9 }}>
-            CodeSucker 在本机完成全部处理：扫描、清洗、脱敏、排版、导出均不产生任何网络请求。您的源代码<span style={{ color: 'var(--text)', fontWeight: 600 }}>永远不会离开这台电脑</span>。
-          </div>
-        </div>
+
         <section className="about-card" aria-labelledby="about-codesucker">
           <div className="about-card__header">
-            <div className="about-card__mark" aria-hidden="true">{'</>'}</div>
             <div style={{ minWidth: 0 }}>
               <div className="about-card__eyebrow">ABOUT · 关于</div>
               <div id="about-codesucker" className="about-card__title">CodeSucker</div>
@@ -95,6 +140,7 @@ export default function Settings() {
             </button>
           </div>
         </section>
+        </div>
       </div>
     </div>
   );

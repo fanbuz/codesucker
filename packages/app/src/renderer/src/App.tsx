@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useStore, toast, type RecentProject } from './store';
+import { checkForUpdates, useStore, toast, type RecentProject } from './store';
 import Step1Import from './screens/Step1Import';
 import Step2Files from './screens/Step2Files';
 import Step3Clean from './screens/Step3Clean';
@@ -9,8 +9,26 @@ import Settings from './screens/Settings';
 
 const STEP_TITLES = ['导入项目', '文件与排序', '清洗与排版', '分页预览', '校验与导出'];
 
+function ThemeToggleIcon({ target }: { target: 'light' | 'dark' }) {
+  if (target === 'dark') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" fill="currentColor" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+      <path d="M12 2.3v2.1M12 19.6v2.1M4.3 4.3l1.5 1.5M18.2 18.2l1.5 1.5M2.3 12h2.1M19.6 12h2.1M4.3 19.7l1.5-1.5M18.2 5.8l1.5-1.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function App() {
   const s = useStore();
+  const nextTheme = s.theme === 'light' ? 'dark' : 'light';
+  const themeLabel = nextTheme === 'dark' ? '切换到深色模式' : '切换到浅色模式';
 
   useEffect(() => {
     document.body.classList.toggle('dark', s.theme === 'dark');
@@ -18,6 +36,7 @@ export default function App() {
 
   useEffect(() => {
     window.cs.recentList().then((r) => s.set({ recent: r as RecentProject[] }));
+    void checkForUpdates(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -64,7 +83,10 @@ export default function App() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button className="btn-ghost" style={{ height: 30, padding: '0 12px', fontSize: 12 }} onClick={saveConfig}>保存配置</button>
-          <button className="btn-ghost" style={{ width: 30, height: 30 }} title="切换主题" onClick={() => s.set({ theme: s.theme === 'light' ? 'dark' : 'light' })}>{s.theme === 'light' ? '☾' : '☀'}</button>
+          <button className="btn-ghost theme-toggle" title={themeLabel} aria-label={themeLabel}
+            onClick={() => s.set({ theme: nextTheme })}>
+            <ThemeToggleIcon target={nextTheme} />
+          </button>
           <button className="btn-ghost" style={{ width: 30, height: 30 }} title="设置" onClick={() => s.set({ view: 'settings' })}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.4 7.4 0 0 0-1.64-.94l-.36-2.54a.49.49 0 0 0-.48-.41h-3.84a.49.49 0 0 0-.47.41l-.36 2.54c-.6.24-1.15.57-1.64.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.5.5 0 0 0 .12.61l2.03 1.58c-.05.31-.09.65-.09.94s.03.63.08.94l-2.03 1.58a.5.5 0 0 0-.12.61l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.38 1.04.7 1.64.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.6-.24 1.15-.56 1.64-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.5.5 0 0 0-.12-.61l-2.03-1.58ZM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2Z" />
@@ -94,9 +116,9 @@ export default function App() {
           <div style={{ padding: 10, borderRadius: 8, background: 'var(--panel2)', border: '1px solid var(--border2)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)' }}>
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" strokeWidth="1.4" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" strokeWidth="1.4" /></svg>
-              完全离线处理
+              源码处理全程离线
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>代码不会离开这台电脑，零网络请求</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>版本检测仅查询 GitHub，不上传代码</div>
           </div>
         </div>
 

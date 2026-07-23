@@ -1,15 +1,10 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'node:path';
 import { registerPipelineIpc, shutdownPipeline } from './pipeline';
+import { isTrustedExternalUrl } from './external-url';
+import { registerUpdateIpc } from './update-ipc';
 
 let win: BrowserWindow | null = null;
-
-const TRUSTED_EXTERNAL_URLS = new Set([
-  'https://github.com/fanbuz',
-  'https://github.com/fanbuz/codesucker',
-  'https://github.com/fanbuz/codesucker/blob/main/LICENSE',
-  'https://github.com/fanbuz/mochi-issue-flow-skill',
-]);
 
 app.setName('CodeSucker');
 
@@ -42,13 +37,14 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerPipelineIpc();
+  registerUpdateIpc();
 
   ipcMain.on('win:minimize', () => win?.minimize());
   ipcMain.on('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()));
   ipcMain.on('win:close', () => win?.close());
   ipcMain.handle('shell:showItem', (_e, p: string) => shell.showItemInFolder(p));
   ipcMain.handle('shell:openExternal', async (_e, url: string) => {
-    if (!TRUSTED_EXTERNAL_URLS.has(url)) throw new Error('不允许打开未受信任的外部链接');
+    if (!isTrustedExternalUrl(url)) throw new Error('不允许打开未受信任的外部链接');
     await shell.openExternal(url);
   });
 
