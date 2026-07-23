@@ -21,6 +21,9 @@ const api = {
     return ipcRenderer.invoke('path:validateDroppedDirectory', inputPath);
   },
   recentList: () => ipcRenderer.invoke('recent:list'),
+  setRecentPinned: (root: string, pinned: boolean) => ipcRenderer.invoke('recent:setPinned', root, pinned),
+  removeRecent: (root: string) => ipcRenderer.invoke('recent:remove', root),
+  removeRecentMany: (roots: string[]) => ipcRenderer.invoke('recent:removeMany', roots),
   checkForUpdates: (force = false): Promise<UpdateCheckResult> => ipcRenderer.invoke('update:check', force),
   getScanExcludes: () => ipcRenderer.invoke('settings:scanExcludes:get'),
   saveScanExcludes: (rules: string[]) => ipcRenderer.invoke('settings:scanExcludes:save', rules),
