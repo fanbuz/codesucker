@@ -95,15 +95,17 @@ assert.equal(source[2].included, false, '目录批量操作不得修改输入');
 
 const whitespacePaths = [
   file('src/a.ts', true),
+  file('src/a.ts ', true),
   file(' src/a.ts', true),
   file('src /a.ts', true),
 ];
 const whitespaceTree = buildFileTree(whitespacePaths);
 assert.equal(whitespaceTree.children.filter((node) => node.kind === 'directory').length, 3);
+assert.equal(directory(whitespaceTree, 'src').children.length, 2, '文件名后置空格不得与普通文件合并');
 const whitespaceSelection = setDirectoryIncluded(whitespacePaths, 'src', false);
 assert.deepEqual(
   whitespaceSelection.map((item) => item.included),
-  [false, true, true],
+  [false, false, true, true],
   '目录选择不得合并带前置或后置空格的合法路径',
 );
 
