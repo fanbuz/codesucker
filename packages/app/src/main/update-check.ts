@@ -107,7 +107,11 @@ function parseRelease(value: unknown): GitHubRelease {
   if (!isRecord(value) || typeof value.tag_name !== 'string' || typeof value.html_url !== 'string') {
     throw new Error('GitHub Release 响应格式无效');
   }
-  if (value.draft === true || value.prerelease === true) throw new Error('最新 Release 不是正式版本');
+  const version = parseVersion(value.tag_name);
+  if (!version) throw new Error('GitHub Release 版本号格式无效');
+  if (value.draft === true || value.prerelease === true || version.prerelease.length > 0) {
+    throw new Error('最新 Release 不是正式版本');
+  }
   if (!isTrustedReleaseUrl(value.html_url)) throw new Error('GitHub Release 下载地址无效');
   return {
     tag_name: value.tag_name,

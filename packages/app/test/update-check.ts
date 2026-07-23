@@ -65,6 +65,18 @@ async function main() {
   const current = await checkLatestRelease('0.2.0', async () => releaseResponse(), { now });
   assert.equal(current.status, 'up-to-date');
 
+  const mislabeledPrerelease = await checkLatestRelease('0.1.0', async () => releaseResponse({
+    tag_name: 'v0.2.0-beta.1',
+    html_url: 'https://github.com/fanbuz/codesucker/releases/tag/v0.2.0-beta.1',
+    prerelease: false,
+  }), { now });
+  assert.equal(mislabeledPrerelease.status, 'error');
+  if (mislabeledPrerelease.status === 'error') assert.match(mislabeledPrerelease.message, /不是正式版本/);
+
+  const markedPrerelease = await checkLatestRelease('0.1.0', async () => releaseResponse({ prerelease: true }), { now });
+  assert.equal(markedPrerelease.status, 'error');
+  if (markedPrerelease.status === 'error') assert.match(markedPrerelease.message, /不是正式版本/);
+
   const invalid = await checkLatestRelease('0.1.0', async () => releaseResponse({ html_url: 'https://evil.example/release' }), { now });
   assert.equal(invalid.status, 'error');
   if (invalid.status === 'error') assert.match(invalid.message, /下载地址无效/);
