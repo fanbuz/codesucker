@@ -1,26 +1,6 @@
 import {
-  createJobId, isCancellation, useStore, toast,
-  type FileRow, type FileTaskError, type RecentProject,
+  cancelActiveScan, scanProject, useStore, toast, type RecentProject,
 } from '../store';
-
-interface ScanResult {
-  jobId: string;
-  pathSeparator: '/' | '\\';
-  files: FileRow[];
-  errors: FileTaskError[];
-  workerCount: number;
-  langCounts: Record<string, number>;
-  entryOrder: string[];
-  mtimeOrder: string[];
-  savedConfigWarning?: string | null;
-  savedConfig: null | {
-    schemaVersion?: number; appVersion?: string; rulesVersion?: string;
-    title?: string; owner?: string; sortMode?: 'entry' | 'mtime' | 'manual';
-    order?: string[]; excludedRelPaths?: string[];
-    clean?: { removeComments: boolean; removeBlankLines: boolean; maskSensitive: boolean; wrapLongLines: boolean };
-    fmtDocx?: boolean; fmtTxt?: boolean; outDir?: string;
-  };
-}
 
 function scanPercent(progress: JobProgress | null): number {
   if (!progress) return 2;
@@ -42,80 +22,9 @@ export default function Step1Import() {
   const progress = s.jobProgress?.jobKind === 'scan' ? s.jobProgress : null;
   const pct = scanPercent(progress);
 
-  const doScan = async (root: string) => {
-    const jobId = createJobId('scan');
-    s.set({
-      scanPhase: 'scanning',
-      scanError: null,
-      scanErrors: [],
-      activeJobId: jobId,
-      jobProgress: null,
-      processing: false,
-      exporting: false,
-      root,
-      projName: root.split('/').pop() ?? root,
-    });
-    try {
-      const r = (await window.cs.scan(root, jobId)) as ScanResult;
-      if (useStore.getState().activeJobId !== jobId) return;
-      if (r.files.length === 0) {
-        s.set({
-          scanPhase: 'error',
-          scanError: r.errors.length > 0 ? `扫描失败 ${r.errors.length} 个文件，未发现可用源码` : '未发现可用源代码文件',
-          scanErrors: r.errors,
-          activeJobId: null,
-          jobProgress: null,
-        });
-        return;
-      }
-      const cfg = r.savedConfig;
-      const excluded = new Set(cfg?.excludedRelPaths ?? []);
-      const files = r.files.map((f) => ({ ...f, included: !excluded.has(f.relPath) }));
-      const known = new Set(files.map((f) => f.relPath));
-      const order = (cfg?.order ?? []).filter((p) => known.has(p));
-      for (const p of (cfg?.sortMode === 'mtime' ? r.mtimeOrder : r.entryOrder)) if (!order.includes(p)) order.push(p);
-      s.set({
-        scanPhase: 'idle', loaded: true, step: 2,
-        scanErrors: r.errors,
-        activeJobId: null,
-        jobProgress: null,
-        pathSeparator: r.pathSeparator,
-        files, entryOrder: r.entryOrder, mtimeOrder: r.mtimeOrder, order,
-        sortMode: cfg?.sortMode ?? 'entry',
-        swName: cfg?.title ?? s.swName,
-        owner: cfg?.owner ?? s.owner,
-        clean: cfg?.clean ?? s.clean,
-        fmtDocx: cfg?.fmtDocx ?? true, fmtTxt: cfg?.fmtTxt ?? false,
-        outDir: cfg?.outDir ?? '',
-        processData: null, page: 1,
-      });
-      if (r.errors.length > 0) toast(`${r.errors.length} 个文件扫描失败，已跳过`);
-      else if (r.savedConfigWarning) toast(r.savedConfigWarning);
-      else if (cfg) toast('已恢复项目配置（.codesucker.json）');
-    } catch (e) {
-      if (useStore.getState().activeJobId !== jobId) return;
-      if (isCancellation(e)) {
-        s.set({ scanPhase: 'idle', activeJobId: null, jobProgress: null });
-        return;
-      }
-      const message = e instanceof Error ? e.message : String(e);
-      s.set({ scanPhase: 'error', scanError: message, activeJobId: null, jobProgress: null });
-      toast('扫描失败：' + message);
-    }
-  };
-
-  const cancelScan = async () => {
-    const jobId = s.activeJobId;
-    if (!jobId) return;
-    await window.cs.cancel(jobId);
-    if (useStore.getState().activeJobId === jobId) {
-      s.set({ scanPhase: 'idle', activeJobId: null, jobProgress: null });
-    }
-  };
-
   const pick = async () => {
     const root = await window.cs.pickFolder();
-    if (root) doScan(root);
+    if (root) void scanProject(root, 'open');
   };
 
   const onDrop = async (e: React.DragEvent) => {
@@ -123,12 +32,12 @@ export default function Step1Import() {
     const file = e.dataTransfer.files[0];
     if (!file) return;
     const result = await window.cs.resolveDroppedPath(file);
-    if (result.path) doScan(result.path);
+    if (result.path) void scanProject(result.path, 'open');
     else toast(result.error ?? '无法读取拖入的项目文件夹');
   };
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '32px 40px', animation: 'cs-fade .18s ease-out' }}>
+    <div className="step1-import">
       {s.scanPhase === 'idle' && (
         <div className="dropzone" onClick={pick} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}
           style={{ border: '1.5px dashed var(--accent-line)', borderRadius: 14, background: 'var(--accent-soft)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, cursor: 'pointer', transition: 'border-color .15s' }}>
@@ -164,7 +73,7 @@ export default function Step1Import() {
               {' · '}{progress.workerCount} workers
             </div>
           )}
-          <button className="btn-ghost" style={{ height: 28, padding: '0 12px', fontSize: 11.5 }} onClick={cancelScan}>取消扫描</button>
+          <button className="btn-ghost" style={{ height: 28, padding: '0 12px', fontSize: 11.5 }} onClick={() => { void cancelActiveScan(); }}>取消扫描</button>
         </div>
       )}
 
@@ -175,16 +84,27 @@ export default function Step1Import() {
           <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', lineHeight: 1.7 }}>
             该文件夹内没有可识别的源码。建议检查：<br />① 是否选错了目录（应选择包含 src/ 的项目根目录）　② 源码是否在压缩包内，需先解压
           </div>
-          <button className="btn-primary" style={{ marginTop: 6, height: 32, padding: '0 16px', fontSize: 13 }} onClick={() => s.set({ scanPhase: 'idle', scanError: null })}>重新选择文件夹</button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            {s.root && <button className="btn-primary" style={{ height: 32, padding: '0 16px', fontSize: 13 }}
+              onClick={() => { void scanProject(s.root!, s.scanIntent); }}>重试扫描</button>}
+            <button className="btn-ghost" style={{ height: 32, padding: '0 16px', fontSize: 13 }} onClick={() => s.set({ scanPhase: 'idle', scanError: null, scanIntent: 'open' })}>重新选择文件夹</button>
+          </div>
         </div>
       )}
 
-      <div style={{ marginTop: 28 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 10, letterSpacing: '.02em' }}>最近项目</div>
+      <section className="step1-recent" aria-label="最近项目">
+        <div className="step1-recent__heading">最近项目</div>
         {s.recent.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)' }}>暂无最近项目</div>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="step1-recent__list" tabIndex={s.recent.length > 0 ? 0 : undefined}>
           {s.recent.map((r: RecentProject) => (
-            <div key={r.root} className="card-hover" onClick={() => doScan(r.root)}
+            <div key={r.root} className="card-hover" role="button" tabIndex={0}
+              onClick={() => { void scanProject(r.root, 'open'); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  void scanProject(r.root, 'open');
+                }
+              }}
               style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 11, cursor: 'pointer', boxShadow: 'var(--shadow)' }}>
               <div style={{ width: 36, height: 36, flex: 'none', borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--accent)' }}>
                 {r.name.slice(0, 2).toUpperCase()}
@@ -202,7 +122,7 @@ export default function Step1Import() {
             </div>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

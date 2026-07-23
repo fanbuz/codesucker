@@ -1,6 +1,6 @@
 {
   "name": "@codesucker/app",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "离线生成符合软件著作权申报规范的源程序文档",
   "author": {
@@ -52,7 +52,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
-    "test": "tsx test/job-controller.ts && tsx test/worker-pool.ts && tsx test/export-guard.ts && tsx test/project-file.ts && tsx test/drop-path.ts && tsx test/file-type-stats.ts && tsx test/file-selection.ts && tsx test/scan-exclude-rules.ts && tsx test/scan-excludes-config.ts && tsx test/update-check.ts",
+    "test": "tsx test/job-controller.ts && tsx test/scan-session.ts && tsx test/scan-project-state.ts && tsx test/preview-layout.ts && tsx test/worker-pool.ts && tsx test/export-guard.ts && tsx test/project-file.ts && tsx test/drop-path.ts && tsx test/file-type-stats.ts && tsx test/file-selection.ts && tsx test/scan-exclude-rules.ts && tsx test/scan-excludes-config.ts && tsx test/update-check.ts",
     "test:workers": "tsx test/worker-integration.ts",
     "perf": "tsx test/performance.ts",
     "dist:mac:x64": "npm run build && electron-builder --mac dmg --x64 --publish never",

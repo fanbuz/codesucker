@@ -1,11 +1,27 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { runProcess, useStore, type PageData } from '../store';
+import { PREVIEW_PAPER_HEIGHT, PREVIEW_PAPER_WIDTH, previewPaperScale } from '../preview-layout';
 
 export default function Step4Preview() {
   const s = useStore();
   const p = s.processData;
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [paperScale, setPaperScale] = useState(1);
 
-  useEffect(() => { if (!p) runProcess(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!p) void runProcess(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !p) return;
+    const updateScale = () => {
+      const next = previewPaperScale(stage.clientWidth, stage.clientHeight);
+      setPaperScale((current) => Math.abs(current - next) < 0.002 ? current : next);
+    };
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [p]);
 
   if (!p) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)' }}>正在生成分页…</div>;
@@ -16,63 +32,71 @@ export default function Step4Preview() {
   const split = p.selection.splitAfterPage;
   const thumbsA = split ? pages.slice(0, split) : pages;
   const thumbsB = split ? pages.slice(split) : [];
+  const paperWidth = PREVIEW_PAPER_WIDTH * paperScale;
+  const paperHeight = PREVIEW_PAPER_HEIGHT * paperScale;
+  const detail = p.selection.truncated
+    ? `前段止于 ${p.selection.frontEndFile ?? '未知文件'} · 后段起于 ${p.selection.backStartFile ?? '未知文件'}`
+    : '完整代码已纳入分页';
 
   const Thumb = ({ pg }: { pg: PageData }) => {
     const active = pg.no === s.page;
     const tagged = pg.no === 1 || pg.no === pages.length;
     return (
-      <div onClick={() => s.set({ page: pg.no })} title={`第 ${pg.no} 页`}
-        style={{ flex: 'none', width: 15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, cursor: 'pointer' }}>
-        <span style={{ fontSize: 9, color: 'var(--green)', whiteSpace: 'nowrap', fontWeight: 600, visibility: tagged ? 'visible' : 'hidden' }}>
+      <button type="button" className="step4-thumb" onClick={() => s.set({ page: pg.no })}
+        title={`第 ${pg.no} 页`} aria-label={`查看第 ${pg.no} 页`} aria-current={active ? 'page' : undefined}>
+        <span className="step4-thumb__tag" style={{ visibility: tagged ? 'visible' : 'hidden' }}>
           {pg.no === 1 ? '模块开头 ✓' : '模块结尾 ✓'}
         </span>
-        <div style={{ width: 15, height: 21, borderRadius: 2, background: active ? 'var(--accent)' : 'var(--panel2)', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}` }} />
-        <span style={{ fontSize: 8, color: active ? 'var(--accent)' : 'var(--text3)', fontFamily: 'var(--mono)' }}>{pg.no}</span>
-      </div>
+        <span className={`step4-thumb__paper${active ? ' is-active' : ''}`} />
+        <span className={`step4-thumb__number${active ? ' is-active' : ''}`}>{pg.no}</span>
+      </button>
     );
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)', animation: 'cs-fade .18s ease-out' }}>
-      <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', padding: '12px 20px 0' }}>
-        <div style={{ fontSize: 11.5, color: 'var(--text2)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', boxShadow: 'var(--shadow)', fontFamily: 'var(--mono)' }}>
-          共 {pages.length} 页 · {p.selection.pickedLines.toLocaleString()} 行
-          {p.selection.truncated && ` · 前段止于 ${p.selection.frontEndFile} · 后段起于 ${p.selection.backStartFile}`}
+    <div className="step4-preview">
+      <header className="step4-info" title={`共 ${pages.length} 页 · ${p.selection.pickedLines.toLocaleString()} 行 · ${detail}`}>
+        <span className="step4-info__summary">共 {pages.length} 页 · {p.selection.pickedLines.toLocaleString()} 行</span>
+        <span className="step4-info__detail">{detail}</span>
+      </header>
+
+      <div className="step4-stage" ref={stageRef} tabIndex={0} aria-label="分页文档预览">
+        <div className="step4-stage__content" style={{ minWidth: paperWidth + 128, minHeight: paperHeight + 24 }}>
+          <div className="step4-paper-frame" style={{ width: paperWidth, height: paperHeight }}>
+            <button type="button" className="pagebtn step4-pagebtn step4-pagebtn--previous"
+              disabled={s.page <= 1} aria-label="上一页"
+              onClick={() => s.set({ page: Math.max(1, s.page - 1) })}>‹</button>
+
+            <div className="step4-paper" style={{ transform: `scale(${paperScale})` }}>
+              <div className="step4-paper__header">
+                <span>{s.swName || '（未填写软件名称）'}</span><span>{s.page}</span>
+              </div>
+              <div className="step4-paper__code">
+                {(cur?.lines ?? []).map((line, index) => (
+                  <div key={index}>{line || ' '}</div>
+                ))}
+              </div>
+            </div>
+
+            <button type="button" className="pagebtn step4-pagebtn step4-pagebtn--next"
+              disabled={s.page >= pages.length} aria-label="下一页"
+              onClick={() => s.set({ page: Math.min(pages.length, s.page + 1) })}>›</button>
+          </div>
         </div>
       </div>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 22, minHeight: 0, padding: '8px 0' }}>
-        <button className="pagebtn" onClick={() => s.set({ page: Math.max(1, s.page - 1) })}
-          style={{ width: 36, height: 36, borderRadius: '50%', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text2)', fontSize: 15, cursor: 'pointer', boxShadow: 'var(--shadow)' }}>‹</button>
-        {/* A4 纸 */}
-        <div style={{ width: 434, height: 614, background: '#ffffff', boxShadow: '0 10px 40px rgba(15,15,30,.22),0 2px 8px rgba(15,15,30,.12)', padding: '30px 36px 24px', display: 'flex', flexDirection: 'column', color: '#000' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '.5px solid #999', paddingBottom: 3, fontFamily: "SimSun,'Songti SC',serif", fontSize: 8.5, color: '#333' }}>
-            <span>{s.swName || '（未填写软件名称）'}</span><span>{s.page}</span>
-          </div>
-          <div style={{ flex: 1, paddingTop: 8, fontFamily: "SimSun,'Songti SC',serif", fontSize: 7.8, lineHeight: '10.6px', whiteSpace: 'pre', overflow: 'hidden', color: '#111' }}>
-            {(cur?.lines ?? []).map((ln, i) => (
-              <div key={i} style={{ height: '10.6px', overflow: 'hidden' }}>{ln || ' '}</div>
-            ))}
-          </div>
-        </div>
-        <button className="pagebtn" onClick={() => s.set({ page: Math.min(pages.length, s.page + 1) })}
-          style={{ width: 36, height: 36, borderRadius: '50%', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text2)', fontSize: 15, cursor: 'pointer', boxShadow: 'var(--shadow)' }}>›</button>
-      </div>
-      {/* 缩略页条 */}
-      <div style={{ flex: 'none', background: 'var(--panel)', borderTop: '1px solid var(--border2)', padding: '10px 16px 12px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, overflowX: 'auto', paddingBottom: 2 }}>
+
+      <footer className="step4-footer">
+        <div className="step4-thumbs" tabIndex={0} aria-label="分页缩略图">
           {thumbsA.map((pg) => <Thumb key={pg.no} pg={pg} />)}
           {p.selection.truncated && (
-            <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, margin: '0 3px', alignSelf: 'center' }}>
-              <span style={{ fontSize: 10 }}>✂️</span>
-              <div style={{ width: 1.5, height: 20, background: 'repeating-linear-gradient(var(--orange) 0 3px,transparent 3px 6px)' }} />
-              <span style={{ fontSize: 8.5, color: 'var(--orange)', whiteSpace: 'nowrap', fontWeight: 600 }}>前后段分界</span>
+            <div className="step4-split" aria-label="前后段分界">
+              <span>✂️</span><i /><strong>前后段分界</strong>
             </div>
           )}
           {thumbsB.map((pg) => <Thumb key={pg.no} pg={pg} />)}
-          <div style={{ flex: 1 }} />
-          <button className="btn-primary" style={{ height: 32, padding: '0 16px', fontSize: 12.5, alignSelf: 'center' }} onClick={() => s.set({ step: 5 })}>下一步：校验与导出</button>
         </div>
-      </div>
+        <button className="btn-primary step4-next" onClick={() => s.set({ step: 5 })}>下一步：校验与导出</button>
+      </footer>
     </div>
   );
 }

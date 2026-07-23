@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { checkForUpdates, useStore, toast, type RecentProject } from './store';
+import { checkForUpdates, scanProject, useStore, toast, type RecentProject } from './store';
 import Step1Import from './screens/Step1Import';
 import Step2Files from './screens/Step2Files';
 import Step3Clean from './screens/Step3Clean';
@@ -58,6 +58,14 @@ export default function App() {
     toast('配置已保存到项目（.codesucker.json）');
   };
 
+  const rescan = () => {
+    if (!s.root || !s.loaded || s.scanPhase === 'scanning') return;
+    const confirmed = window.confirm(
+      '重新扫描会读取当前磁盘源码，并使旧的处理预览、分页、校验和导出结果立即失效。\n\n软件信息、文件选择、排序、清洗与导出配置会保留。是否继续？',
+    );
+    if (confirmed) void scanProject(s.root, 'rescan');
+  };
+
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg)' }}>
       {/* 标题栏 */}
@@ -82,7 +90,11 @@ export default function App() {
           {s.root && <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{s.root}</span>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button className="btn-ghost" style={{ height: 30, padding: '0 12px', fontSize: 12 }} onClick={saveConfig}>保存配置</button>
+          <button className="btn-ghost" style={{ height: 30, padding: '0 12px', fontSize: 12 }}
+            disabled={!s.loaded || s.scanPhase === 'scanning'} onClick={rescan}>
+            {s.scanPhase === 'scanning' ? '正在扫描…' : '重新扫描'}
+          </button>
+          <button className="btn-ghost" style={{ height: 30, padding: '0 12px', fontSize: 12 }} disabled={!s.loaded} onClick={saveConfig}>保存配置</button>
           <button className="btn-ghost theme-toggle" title={themeLabel} aria-label={themeLabel}
             onClick={() => s.set({ theme: nextTheme })}>
             <ThemeToggleIcon target={nextTheme} />
@@ -102,7 +114,7 @@ export default function App() {
             const n = i + 1;
             const active = s.view === 'wizard' && s.step === n;
             const done = s.loaded && n < s.step;
-            const enabled = n === 1 || s.loaded;
+            const enabled = n === 1 || (s.loaded && n <= s.step);
             return (
               <div key={n} className={`step-item${enabled ? '' : ' disabled'}`}
                 onClick={() => enabled && s.set({ step: n, view: 'wizard' })}
