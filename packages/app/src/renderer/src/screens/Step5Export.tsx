@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   cleanOptions, createJobId, isCancellation, orderedIncluded, runProcess, toast, useStore,
 } from '../store';
+import { settleExportState } from '../export-state';
 
 export default function Step5Export() {
   const s = useStore();
@@ -43,8 +44,8 @@ export default function Step5Export() {
       s.set({ exporting: false, exportResult: result, activeJobId: null, jobProgress: null });
       window.cs.recentList().then((list) => s.set({ recent: list as typeof s.recent }));
     } catch (e) {
-      if (useStore.getState().activeJobId !== jobId) return;
-      s.set({ exporting: false, activeJobId: null, jobProgress: null });
+      const current = useStore.getState();
+      current.set(settleExportState(current.activeJobId, jobId));
       if (!isCancellation(e)) toast('导出失败：' + (e instanceof Error ? e.message : String(e)));
     }
   };
