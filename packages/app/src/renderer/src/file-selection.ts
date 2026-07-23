@@ -36,12 +36,11 @@ interface MutableDirectory<T extends SelectableFile> {
 
 /**
  * Normalize a scanner-provided relative path without changing the source FileRow.
- * Both Windows and POSIX separators become `/`; redundant separators and `.`
- * segments are removed.
+ * Scanner paths already use `/` on every platform. Redundant separators and
+ * `.` segments are removed, while backslashes remain part of legal POSIX names.
  */
 export function normalizeRelativePath(relPath: string): string {
   return relPath
-    .replace(/\\/g, '/')
     .split('/')
     .filter((part) => part.length > 0 && part !== '.')
     .join('/');

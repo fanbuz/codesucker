@@ -30,14 +30,15 @@ function directory(
   return current;
 }
 
-assert.equal(normalizeRelativePath('.\\src\\main//App.ts'), 'src/main/App.ts');
+assert.equal(normalizeRelativePath('./src/main//App.ts'), 'src/main/App.ts');
 assert.equal(normalizeRelativePath('./README.md'), 'README.md');
 assert.equal(normalizeRelativePath(' src/a.ts'), ' src/a.ts', '目录名前置空格必须保留');
 assert.equal(normalizeRelativePath('src/a.ts '), 'src/a.ts ', '文件名后置空格必须保留');
+assert.equal(normalizeRelativePath('foo\\bar.ts'), 'foo\\bar.ts', 'POSIX 文件名中的反斜杠必须保留');
 
 const source = [
   file('README.md', true, 1),
-  file('src\\App.ts', true, 2),
+  file('src/App.ts', true, 2),
   file('src/components/Button.tsx', false, 3),
   file('src/components/Input.tsx', true, 4),
   file('test/components/Button.tsx', false, 5),
@@ -74,7 +75,7 @@ assert.notEqual(
   '不同路径下的同名目录必须拥有不同稳定 key',
 );
 
-assert.deepEqual(getDirectorySelection(source, 'src\\components'), {
+assert.deepEqual(getDirectorySelection(source, 'src/components'), {
   totalFiles: 2,
   includedFiles: 1,
   selectionState: 'mixed',
@@ -107,6 +108,18 @@ assert.deepEqual(
   whitespaceSelection.map((item) => item.included),
   [false, false, true, true],
   '目录选择不得合并带前置或后置空格的合法路径',
+);
+
+const backslashPaths = [file('foo\\bar.ts', true), file('foo/bar.ts', true)];
+const backslashTree = buildFileTree(backslashPaths);
+const fooDirectory = directory(backslashTree, 'foo');
+const rootBackslashFile = backslashTree.children.find((node) => node.kind === 'file');
+assert.ok(rootBackslashFile, '带反斜杠的 POSIX 文件应保留在根目录');
+assert.notEqual(rootBackslashFile.key, fooDirectory.children[0]?.key, '合法文件与嵌套文件的 key 不得冲突');
+assert.deepEqual(
+  setDirectoryIncluded(backslashPaths, 'foo', false).map((item) => item.included),
+  [true, false],
+  '目录选择不得包含名称中带反斜杠的根文件',
 );
 
 const selectedRoot = setDirectoryIncluded(source, '.', true);
