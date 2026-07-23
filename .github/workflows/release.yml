@@ -118,6 +118,6 @@ jobs:
 
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --verify-tag \
-            --title "CodeSucker $GITHUB_REF_NAME · MVP" \
+            --title "CodeSucker $GITHUB_REF_NAME" \
             --generate-notes \
             "${release_options[@]}"

@@ -34,17 +34,17 @@ CodeSucker 把常见的软件著作权源程序材料规则整理成一套本地
 
 ## 下载
 
-前往 [GitHub Releases](https://github.com/fanbuz/codesucker/releases/latest) 下载与你的电脑匹配的 MVP 安装包：
+前往 [GitHub Releases](https://github.com/fanbuz/codesucker/releases/latest) 下载与你的电脑匹配的安装包：
 
 | 系统 | 架构 | 安装包 |
 |---|---|---|
-| macOS | Apple Silicon（M1/M2/M3/M4） | `CodeSucker-0.1.0-mac-arm64.dmg` |
-| macOS | Intel | `CodeSucker-0.1.0-mac-x64.dmg` |
-| Windows | x64 | `CodeSucker-0.1.0-win-x64.exe` |
+| macOS | Apple Silicon（M1/M2/M3/M4） | `CodeSucker-0.2.0-mac-arm64.dmg` |
+| macOS | Intel | `CodeSucker-0.2.0-mac-x64.dmg` |
+| Windows | x64 | `CodeSucker-0.2.0-win-x64.exe` |
 
 每个 Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件是否完整。
 
-> **macOS MVP 说明**：当前安装包尚未进行 Apple Developer ID 签名与公证。首次打开如果被 Gatekeeper 拦截，请先尝试打开一次，再进入“系统设置 → 隐私与安全性”，在安全提示旁选择“仍要打开”。不要从非本项目 Release 的来源下载安装包。正式签名与公证将在后续版本接入。
+> **macOS 安装说明**：当前安装包尚未进行 Apple Developer ID 签名与公证。首次打开如果被 Gatekeeper 拦截，请先尝试打开一次，再进入“系统设置 → 隐私与安全性”，在安全提示旁选择“仍要打开”。不要从非本项目 Release 的来源下载安装包。正式签名与公证将在后续版本接入。
 >
 > 如果仍提示应用“已损坏”或需要“移到废纸篓”，请先确认安装包来自本项目 Release 并核对 SHA-256，然后在终端执行：
 >
@@ -130,16 +130,17 @@ scripts/    图标生成等工具脚本
 生成的 docx 已按应用内置规则排版，可作为源程序鉴别材料的准备稿。提交前仍应查看第 5 步报告、清零「退回风险」，并以登记机构最新要求和申请主体的实际情况为准。本工具不构成法律建议。
 
 **Q：macOS 提示无法验证开发者，怎么办？**
-v0.1.0 MVP 尚未签名与公证，请确认安装包来自本项目 Release 并核对 SHA-256，然后按照下载章节的 Gatekeeper 指引手动放行；如果系统仍提示移到废纸篓，可使用该章节提供的 `xattr` 命令移除本应用的下载隔离标记。后续版本会接入 Developer ID 签名与 Apple 公证。
+当前 macOS 安装包尚未签名与公证，请确认安装包来自本项目 Release 并核对 SHA-256，然后按照下载章节的 Gatekeeper 指引手动放行；如果系统仍提示移到废纸篓，可使用该章节提供的 `xattr` 命令移除本应用的下载隔离标记。后续版本会接入 Developer ID 签名与 Apple 公证。
 
 **Q：我的代码会被上传吗？**
-不会。扫描、清洗、排版和导出全部在本机完成。v0.1.0 安装包不包含更新检查；后续版本启动时会向 GitHub 查询公开的 Release 版本号、发布日期和更新说明，但不会发送项目路径、源码、配置或用户身份数据。只有你点击“查看并下载”或其他 GitHub 链接时，系统浏览器才会打开对应网页。
+不会。扫描、清洗、排版和导出全部在本机完成。版本检测只会向 GitHub 查询公开的 Release 版本号、发布日期和更新说明，不会发送项目路径、源码、配置或用户身份数据。只有你点击“查看并下载”或其他 GitHub 链接时，系统浏览器才会打开对应网页。
 
 ## 路线图
 
-- [x] **V1（MVP）**：五段流水线 · 5 步向导 · docx/txt 导出 · 多项风险校验 · 配置持久化 · macOS/Windows 安装包
-- [ ] **V2（v0.2.0）**：文件类型统计与按后缀导出 · GitHub Release 更新检测 · 多目录导入 · 成立日期输入 · 自定义排除/脱敏规则 · 校验项一键修复
-- [ ] **后续版本**：Linux 安装包 · macOS 签名与公证 · 应用内下载/安装更新 · CLI 版本
+- [x] **v0.1.0（MVP）**：五段流水线 · 5 步向导 · docx/txt 导出 · 多项风险校验 · 配置持久化 · macOS/Windows 安装包
+- [x] **v0.2.0**：文件类型统计与按后缀导出 · GitHub Release 更新检测 · 设置页布局优化
+- [ ] **v0.3.0**：默认路径排除配置 · 自定义扫描排除规则
+- [ ] **后续版本**：多目录导入 · 成立日期输入 · 自定义脱敏规则 · 校验项一键修复 · Linux 安装包 · macOS 签名与公证 · 应用内下载/安装更新 · CLI 版本
 - [ ] **V3**：用户手册/设计说明书模板化生成 · 例外交存模式（黑斜线覆盖）· 多申报主体管理
 
 ## 版本与发布

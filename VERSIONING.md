@@ -128,8 +128,8 @@ tag 校验会拒绝缺少对应版本日期标题的发布。
 8. 推送 main 与 tag；CI 再次校验 tag、版本和 CHANGELOG 一致
 9. `Package and Release` 工作流生成 macOS x64、macOS arm64、Windows x64 安装包与 SHA-256 校验文件，并创建 GitHub Release
 
-MVP 暂不产出 Linux 安装包；macOS 安装包未签名、未公证，必须在 Release 说明和 README 中保留 Gatekeeper 指引。正式签名凭据只能存放在 GitHub Secrets，不得写入仓库或构建日志。
+当前发布流程暂不产出 Linux 安装包；macOS 安装包未签名、未公证，必须在 Release 说明和 README 中保留 Gatekeeper 指引。正式签名凭据只能存放在 GitHub Secrets，不得写入仓库或构建日志。
 
 ## 当前版本
 
-`0.1.0` 是当前 MVP 的目标版本，尚未因源码中的版本字段而自动视为正式发布。只有存在通过校验的 `v0.1.0` tag 和对应 GitHub Release 时，才表示该版本已正式发布。
+源码当前产品版本为 `0.2.0`。正式发布状态以通过校验的 `v0.2.0` tag 和对应 GitHub Release 为准；仅修改源码中的版本字段不代表已经发布。
