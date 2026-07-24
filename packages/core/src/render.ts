@@ -64,14 +64,14 @@ export async function renderDocx(pages: Page[], opts: RenderOptions): Promise<st
 
   const buf = await Packer.toBuffer(doc);
   fs.mkdirSync(opts.outDir, { recursive: true });
-  const file = path.join(opts.outDir, `${opts.baseName ?? '源程序_' + sanitize(opts.title)}.docx`);
+  const file = path.join(opts.outDir, `${opts.baseName ?? 'SourceCode_' + sanitize(opts.title)}.docx`);
   fs.writeFileSync(file, buf);
   return file;
 }
 
 export function renderTxt(pages: Page[], opts: RenderOptions): string {
   fs.mkdirSync(opts.outDir, { recursive: true });
-  const file = path.join(opts.outDir, `${opts.baseName ?? '源程序_' + sanitize(opts.title)}.txt`);
+  const file = path.join(opts.outDir, `${opts.baseName ?? 'SourceCode_' + sanitize(opts.title)}.txt`);
   const text = pages.map((p) => p.lines.join('\n')).join('\n');
   fs.writeFileSync(file, text, 'utf8');
   return file;
@@ -79,12 +79,12 @@ export function renderTxt(pages: Page[], opts: RenderOptions): string {
 
 export async function renderTxtAsync(pages: Page[], opts: RenderOptions): Promise<string> {
   await fs.promises.mkdir(opts.outDir, { recursive: true });
-  const file = path.join(opts.outDir, `${opts.baseName ?? '源程序_' + sanitize(opts.title)}.txt`);
+  const file = path.join(opts.outDir, `${opts.baseName ?? 'SourceCode_' + sanitize(opts.title)}.txt`);
   const text = pages.map((p) => p.lines.join('\n')).join('\n');
   await fs.promises.writeFile(file, text, 'utf8');
   return file;
 }
 
 function sanitize(name: string): string {
-  return name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || '未命名';
+  return name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'Untitled';
 }

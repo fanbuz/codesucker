@@ -45,22 +45,22 @@ export function validateExcludeRule(input: string): ExcludeRuleValidation {
   const original = input;
   let value = input.trim().replace(/\\/g, '/');
 
-  if (!value) return invalid(original, 'empty', '排除规则不能为空');
+  if (!value) return invalid(original, 'empty', 'Exclusion rule cannot be empty');
   if (value.startsWith('/') || /^[A-Za-z]:\//.test(value)) {
-    return invalid(original, 'absolute-path', '排除规则必须是项目相对路径，不能使用绝对路径');
+    return invalid(original, 'absolute-path', 'Exclusion rule must be relative to project path, not absolute');
   }
   if (CONTROL_CHARACTERS.test(value) || WINDOWS_RESERVED_CHARACTERS.test(value) || value.startsWith('!')) {
-    return invalid(original, 'invalid-character', '排除规则包含不支持的字符');
+    return invalid(original, 'invalid-character', 'Exclusion rule contains unsupported characters');
   }
 
   value = value.replace(/\/{2,}/g, '/');
   const segments = value.split('/');
   if (segments.includes('..')) {
-    return invalid(original, 'parent-traversal', '排除规则不能包含父目录跳转（..）');
+    return invalid(original, 'parent-traversal', 'Exclusion rule cannot contain parent directory traversal (..)');
   }
 
   value = segments.filter((segment) => segment !== '.' && segment !== '').join('/');
-  if (!value) return invalid(original, 'root-directory', '排除规则不能指向项目根目录');
+  if (!value) return invalid(original, 'root-directory', 'Exclusion rule cannot point to project root directory');
 
   return {
     valid: true,

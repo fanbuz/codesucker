@@ -22,20 +22,20 @@ export interface ProjectRootSnapshot {
 }
 
 export function captureProjectRoot(root: string): ProjectRootSnapshot {
-  if (!path.isAbsolute(root)) throw new Error('项目目录无效，请重新导入项目');
+  if (!path.isAbsolute(root)) throw new Error('Invalid project directory, please re-import project');
   try {
     const realPath = fs.realpathSync.native(root);
     const stat = fs.statSync(realPath);
     if (!stat.isDirectory()) throw new Error('NOT_DIRECTORY');
     return { inputPath: path.resolve(root), realPath, device: stat.dev, inode: stat.ino };
   } catch {
-    throw new Error('项目目录无效，请重新导入项目');
+    throw new Error('Invalid project directory, please re-import project');
   }
 }
 
 export function validateProjectRoot(snapshot: ProjectRootSnapshot, root: unknown): string {
   if (typeof root !== 'string' || !path.isAbsolute(root) || path.resolve(root) !== snapshot.inputPath) {
-    throw new Error('项目目录与最近扫描结果不一致，请重新扫描项目');
+    throw new Error('Project directory mismatch with recent scan results, please rescan project');
   }
   try {
     const realPath = fs.realpathSync.native(root);
@@ -45,23 +45,22 @@ export function validateProjectRoot(snapshot: ProjectRootSnapshot, root: unknown
     }
     return realPath;
   } catch {
-    throw new Error('项目目录与最近扫描结果不一致，请重新扫描项目');
+    throw new Error('Project directory mismatch with recent scan results, please rescan project');
   }
 }
 
 /**
- * 将渲染进程提供的项目相对路径解析为受控的真实文件路径。
- * 返回 realpath，避免在校验完成后继续沿用可能被替换的项目内符号链接。
+ * Resolve project-relative path provided by renderer into a controlled real file path.
  */
 export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: unknown, relPath: unknown): string {
   if (!snapshot) {
-    throw new Error('请先重新扫描项目，再定位问题文件');
+    throw new Error('Please rescan project first before locating file');
   }
   if (typeof relPath !== 'string' || relPath.trim() === '' || relPath.includes('\0')) {
-    throw new Error('问题文件相对路径无效');
+    throw new Error('Invalid target file relative path');
   }
   if (isAbsoluteOnAnyPlatform(relPath) || relPath.split(/[\\/]+/).includes('..')) {
-    throw new Error('问题文件必须是项目目录内的相对路径');
+    throw new Error('Target file must be a relative path inside project directory');
   }
 
   const realRoot = validateProjectRoot(snapshot, root);
@@ -69,30 +68,30 @@ export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: u
   try {
     realFile = fs.realpathSync.native(path.resolve(realRoot, relPath));
   } catch {
-    throw new Error('问题文件不存在，可能已被移动或删除');
+    throw new Error('Target file does not exist, it may have been moved or deleted');
   }
 
   if (!isPathInside(realRoot, realFile)) {
-    throw new Error('问题文件不在项目目录内，已拒绝定位');
+    throw new Error('Target file is outside project directory, access denied');
   }
   if (!fs.statSync(realFile).isFile()) {
-    throw new Error('问题路径不是普通文件，无法定位');
+    throw new Error('Target path is not a regular file, unable to locate');
   }
   return realFile;
 }
 
-/** 仅允许重新定位主进程最近一次真实生成并记录的导出文件。 */
+/** Only allow relocating export files generated and recorded by main process. */
 export function resolveRecentExportFile(exportedFile: string | null): string {
-  if (!exportedFile) throw new Error('暂无可定位的导出文件，请先生成申报文档');
+  if (!exportedFile) throw new Error('No export file available to locate, please generate documentation first');
 
   let realFile: string;
   try {
     realFile = fs.realpathSync.native(exportedFile);
   } catch {
-    throw new Error('导出文件不存在，可能已被移动或删除');
+    throw new Error('Export file does not exist, it may have been moved or deleted');
   }
   if (realFile !== exportedFile || !fs.statSync(realFile).isFile()) {
-    throw new Error('导出文件已发生变化，无法安全定位');
+    throw new Error('Export file has changed, unable to safely locate');
   }
   return realFile;
 }

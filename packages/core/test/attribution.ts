@@ -43,7 +43,7 @@ function run(files: Array<{ relPath: string; text: string }>, owner: string, rem
 }
 
 function conflict(items: ReturnType<typeof run>) {
-  return items.find((item) => item.name === '检测到疑似他人署名');
+  return items.find((item) => item.name === 'Suspected third-party attribution detected');
 }
 
 const authorText = [
@@ -52,12 +52,12 @@ const authorText = [
   ' */',
   'export const answer = 42;',
 ].join('\n');
-const authorWithCommentsRemoved = conflict(run([{ relPath: 'src/main.ts', text: authorText }], '示例科技有限公司', true));
-const authorWithCommentsKept = conflict(run([{ relPath: 'src/main.ts', text: authorText }], '示例科技有限公司', false));
+const authorWithCommentsRemoved = conflict(run([{ relPath: 'src/main.ts', text: authorText }], 'Acme Technology Co., Ltd.', true));
+const authorWithCommentsKept = conflict(run([{ relPath: 'src/main.ts', text: authorText }], 'Acme Technology Co., Ltd.', false));
 
-assert.ok(authorWithCommentsRemoved, '默认删除注释时仍应发现 @author 冲突');
-assert.ok(authorWithCommentsKept, '保留注释时也应发现相同 @author 冲突');
-assert.equal(authorWithCommentsRemoved.detail, authorWithCommentsKept.detail, '删除注释开关不应改变署名结论');
+assert.ok(authorWithCommentsRemoved, 'Should detect @author conflict when comments removed by default');
+assert.ok(authorWithCommentsKept, 'Should detect @author conflict when comments kept');
+assert.equal(authorWithCommentsRemoved.detail, authorWithCommentsKept.detail, 'Removing comments toggle should not change attribution verdict');
 assert.deepEqual(authorWithCommentsRemoved.location, { file: 'src/main.ts', line: 2 });
 assert.deepEqual(authorWithCommentsRemoved.evidence?.[0], {
   location: { file: 'src/main.ts', line: 2 },
@@ -67,17 +67,17 @@ assert.deepEqual(authorWithCommentsRemoved.evidence?.[0], {
 const copyright = conflict(run([{
   relPath: 'src/service.py',
   text: '# COPYRIGHT (c) 2022-2026 Bob Labs. All rights reserved.\nprint("ready")',
-}], '示例科技有限公司'));
-assert.ok(copyright, '大小写不同的 Copyright 仍应被识别');
+}], 'Acme Technology Co., Ltd.'));
+assert.ok(copyright, 'Case-insensitive Copyright should still be recognized');
 assert.match(copyright.detail, /Bob Labs/);
 
 const multiple = conflict(run([
   { relPath: 'src/Main.java', text: '/** @author Carol */\nclass Main {}' },
   { relPath: 'web/index.xml', text: '<!-- Copyright © 2026 Delta Studio -->\n<root />' },
   { relPath: 'scripts/run.sh', text: '# @AUTHOR Eve\necho ready' },
-], '示例科技有限公司'));
-assert.ok(multiple, '多语言注释中的署名都应识别');
-assert.match(multiple.detail, /共 3 处/);
+], 'Acme Technology Co., Ltd.'));
+assert.ok(multiple, 'Attributions in multi-language comments should all be recognized');
+assert.match(multiple.detail, /total 3 location\(s\)/);
 assert.equal(multiple.evidence?.length, 3);
 
 assert.equal(

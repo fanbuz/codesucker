@@ -15,17 +15,17 @@ export function normalizeScanExcludeRule(value: string): string {
 export function validateScanExcludeRule(value: string): ScanExcludeRuleValidation {
   const pathLikeValue = value.trim().replaceAll('\\', '/');
   const normalized = normalizeScanExcludeRule(value);
-  if (!pathLikeValue) return { normalized, error: '规则不能为空' };
+  if (!pathLikeValue) return { normalized, error: 'Rule cannot be empty' };
   if (pathLikeValue.startsWith('/') || WINDOWS_DRIVE_PATH.test(pathLikeValue)) {
-    return { normalized, error: '仅支持项目内的相对路径，不能使用绝对路径' };
+    return { normalized, error: 'Only relative paths within project are allowed, not absolute paths' };
   }
   if (pathLikeValue.split('/').includes('..')) {
-    return { normalized, error: '不能使用 .. 访问项目目录之外' };
+    return { normalized, error: 'Cannot use .. to navigate outside project directory' };
   }
   if (ILLEGAL_PATH_CHARACTERS.test(pathLikeValue) || pathLikeValue.startsWith('!')) {
-    return { normalized, error: '包含路径规则不支持的字符' };
+    return { normalized, error: 'Contains unsupported characters for path rules' };
   }
-  if (!normalized) return { normalized, error: '规则不能指向项目根目录' };
+  if (!normalized) return { normalized, error: 'Rule cannot point to project root directory' };
   return { normalized, error: null };
 }
 
@@ -39,7 +39,7 @@ export function getScanExcludeRuleErrors(rules: string[]): Array<string | null> 
   return rules.map((rule) => {
     const result = validateScanExcludeRule(rule);
     if (result.error) return result.error;
-    return (normalizedCounts.get(result.normalized) ?? 0) > 1 ? '规则重复，请保留一条' : null;
+    return (normalizedCounts.get(result.normalized) ?? 0) > 1 ? 'Duplicate rule, please keep only one' : null;
   });
 }
 

@@ -75,7 +75,10 @@ const DEFAULT_CLEAN: CleanToggles = {
   wrapLongLines: true,
 };
 
+import { getInitialLanguage, setSavedLanguage, type Language } from './i18n';
+
 interface State {
+  lang: Language;
   theme: 'light' | 'dark';
   view: 'wizard' | 'settings';
   step: number;
@@ -113,16 +116,18 @@ interface State {
   exportResult: null | { scanSessionId: string; docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
   toast: string | null;
   set: (p: Partial<State>) => void;
+  setLang: (lang: Language) => void;
 }
 
 export const useStore = create<State>((set) => ({
+  lang: getInitialLanguage(),
   theme: 'light',
   view: 'wizard',
   step: 1,
   maxUnlockedStep: 1,
   loaded: false,
   root: null,
-  projName: '未打开项目',
+  projName: 'No project open',
   scanPhase: 'idle',
   scanIntent: 'open',
   scanError: null,
@@ -153,6 +158,10 @@ export const useStore = create<State>((set) => ({
   exportResult: null,
   toast: null,
   set: (p) => set(p),
+  setLang: (lang: Language) => {
+    setSavedLanguage(lang);
+    set({ lang });
+  },
 }));
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -195,7 +204,7 @@ export async function checkForUpdates(force = false): Promise<void> {
         status: 'error',
         currentVersion: __APP_VERSION__,
         checkedAt: new Date().toISOString(),
-        message: error instanceof Error ? error.message : '检查更新失败，请稍后重试',
+        message: error instanceof Error ? error.message : 'Check update failed, please try again later',
         fromCache: false,
       },
     });
@@ -246,7 +255,7 @@ export function createJobId(kind: 'scan' | 'process' | 'export'): string {
 
 export function isCancellation(error: unknown): boolean {
   const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  return /AbortError|任务已取消|已由新任务替代/.test(text);
+  return /AbortError|Task cancelled|Replaced by new task|任务已取消|已由新任务替代/.test(text);
 }
 
 function projectName(root: string): string {
@@ -288,8 +297,8 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       current.set({
         scanPhase: 'error',
         scanError: result.errors.length > 0
-          ? `扫描失败 ${result.errors.length} 个文件，未发现可用源码`
-          : '未发现可用源代码文件',
+          ? `Scan failed for ${result.errors.length} file(s), no usable source code found`
+          : 'No usable source code files found',
         scanErrors: result.errors,
         activeJobId: null,
         jobProgress: null,
@@ -364,16 +373,16 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
 
     await refreshRecent();
 
-    if (result.errors.length > 0) toast(`${result.errors.length} 个文件扫描失败，已跳过`);
-    else if (intent === 'rescan') toast('重新扫描完成，旧处理结果已失效');
+    if (result.errors.length > 0) toast(`${result.errors.length} file(s) failed scanning and were skipped`);
+    else if (intent === 'rescan') toast('Rescan completed, previous results invalidated');
     else if (result.savedConfigWarning) toast(result.savedConfigWarning);
-    else if (result.savedConfig) toast('已恢复项目配置（.codesucker.json）');
+    else if (result.savedConfig) toast('Restored project configuration (.codesucker.json)');
   } catch (error) {
     const current = useStore.getState();
     if (current.activeJobId !== jobId) return;
     const cancelled = isCancellation(error);
     const message = cancelled
-      ? (intent === 'rescan' ? '重新扫描已取消，旧结果已失效，请重试扫描' : '扫描已取消')
+      ? (intent === 'rescan' ? 'Rescan cancelled, previous results invalidated, please rescan' : 'Scan cancelled')
       : (error instanceof Error ? error.message : String(error));
     current.set({
       scanPhase: intent === 'rescan' || !cancelled ? 'error' : 'idle',
@@ -381,7 +390,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       activeJobId: null,
       jobProgress: null,
     });
-    if (!cancelled) toast('扫描失败：' + message);
+    if (!cancelled) toast('Scan failed: ' + message);
   }
 }
 
@@ -395,7 +404,7 @@ export async function cancelActiveScan(): Promise<void> {
   if (latest.activeJobId !== jobId) return;
   latest.set({
     scanPhase: intent === 'rescan' ? 'error' : 'idle',
-    scanError: intent === 'rescan' ? '重新扫描已取消，旧结果已失效，请重试扫描' : null,
+    scanError: intent === 'rescan' ? 'Rescan cancelled, previous results invalidated, please rescan' : null,
     activeJobId: null,
     jobProgress: null,
   });
@@ -418,10 +427,10 @@ export async function runProcess() {
     }, jobId)) as ProcessData;
     if (useStore.getState().activeJobId !== jobId || data.scanSessionId !== scanSessionId) return;
     useStore.getState().set({ processData: data, processing: false, activeJobId: null, jobProgress: null });
-    if (data.errors.length > 0) toast(`${data.errors.length} 个文件处理失败，已跳过`);
+    if (data.errors.length > 0) toast(`${data.errors.length} file(s) failed processing and were skipped`);
   } catch (e) {
     if (useStore.getState().activeJobId !== jobId) return;
     useStore.getState().set({ processing: false, activeJobId: null, jobProgress: null });
-    if (!isCancellation(e)) toast('处理失败：' + (e instanceof Error ? e.message : String(e)));
+    if (!isCancellation(e)) toast('Processing failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 }

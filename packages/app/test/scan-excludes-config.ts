@@ -30,21 +30,21 @@ if (process.platform !== 'win32') assert.equal(fs.statSync(configFile).mode & 0o
 assert.deepEqual(fs.readdirSync(path.dirname(configFile)), ['scan-excludes.json'], '原子保存不应遗留临时文件');
 
 const beforeInvalidSave = fs.readFileSync(configFile, 'utf8');
-assert.throws(() => saveScanExcludes(configFile, ['../outside']), /父目录|\.\./);
+assert.throws(() => saveScanExcludes(configFile, ['../outside']), /parent directory|\.\./i);
 assert.equal(fs.readFileSync(configFile, 'utf8'), beforeInvalidSave, '非法规则不得覆盖已有配置');
-assert.throws(() => saveScanExcludes(configFile, 'node_modules'), /字符串列表/);
+assert.throws(() => saveScanExcludes(configFile, 'node_modules'), /list of strings/i);
 
 fs.writeFileSync(configFile, '{broken json');
 const damaged = loadScanExcludes(configFile);
 assert.deepEqual(damaged.rules, defaults);
 assert.equal(damaged.source, 'default');
-assert.match(damaged.warning ?? '', /损坏|无法读取/);
+assert.match(damaged.warning ?? '', /corrupted|unreadable/i);
 
 fs.writeFileSync(configFile, JSON.stringify({ version: 99, rules: ['dist'] }));
 const futureVersion = loadScanExcludes(configFile);
 assert.deepEqual(futureVersion.rules, defaults);
 assert.equal(futureVersion.source, 'default');
-assert.match(futureVersion.warning ?? '', /更高版本|不受支持/);
+assert.match(futureVersion.warning ?? '', /newer version|unsupported/i);
 
 saveScanExcludes(configFile, []);
 assert.deepEqual(loadScanExcludes(configFile).rules, [], '空列表表示用户明确不添加应用级排除规则');

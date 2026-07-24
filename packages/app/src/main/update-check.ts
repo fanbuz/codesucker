@@ -78,7 +78,7 @@ export function normalizeVersion(input: string): string | null {
 export function compareVersions(left: string, right: string): number {
   const a = parseVersion(left);
   const b = parseVersion(right);
-  if (!a || !b) throw new Error('版本号格式无效');
+  if (!a || !b) throw new Error('Invalid version format');
   for (const key of ['major', 'minor', 'patch'] as const) {
     if (a[key] !== b[key]) return a[key] > b[key] ? 1 : -1;
   }
@@ -105,14 +105,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseRelease(value: unknown): GitHubRelease {
   if (!isRecord(value) || typeof value.tag_name !== 'string' || typeof value.html_url !== 'string') {
-    throw new Error('GitHub Release 响应格式无效');
+    throw new Error('Invalid GitHub Release response format');
   }
   const version = parseVersion(value.tag_name);
-  if (!version) throw new Error('GitHub Release 版本号格式无效');
+  if (!version) throw new Error('Invalid GitHub Release version format');
   if (value.draft === true || value.prerelease === true || version.prerelease.length > 0) {
-    throw new Error('最新 Release 不是正式版本');
+    throw new Error('Latest Release is not a formal release');
   }
-  if (!isTrustedReleaseUrl(value.html_url)) throw new Error('GitHub Release 下载地址无效');
+  if (!isTrustedReleaseUrl(value.html_url)) throw new Error('Invalid GitHub Release download URL');
   return {
     tag_name: value.tag_name,
     html_url: value.html_url,
@@ -141,11 +141,11 @@ function summarizeNotes(markdown: string | null | undefined): string[] {
 
 function userMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (/AbortError|aborted|timeout/i.test(message)) return '连接 GitHub 超时，请稍后重试';
-  if (/403|rate limit/i.test(message)) return 'GitHub 请求频率受限，请稍后重试';
-  if (/404/.test(message)) return '暂未找到可用的正式 Release';
-  if (/fetch|network|ENOTFOUND|ECONN/i.test(message)) return '无法连接 GitHub，请检查网络后重试';
-  return message || '检查更新失败，请稍后重试';
+  if (/AbortError|aborted|timeout/i.test(message)) return 'Connection to GitHub timed out, please try again later';
+  if (/403|rate limit/i.test(message)) return 'GitHub request rate limit exceeded, please try again later';
+  if (/404/.test(message)) return 'No formal Release found';
+  if (/fetch|network|ENOTFOUND|ECONN/i.test(message)) return 'Unable to connect to GitHub, please check your network and try again';
+  return message || 'Check update failed, please try again later';
 }
 
 export async function checkLatestRelease(
@@ -157,7 +157,7 @@ export async function checkLatestRelease(
   const checkedAt = new Date(now()).toISOString();
   const normalizedCurrent = normalizeVersion(currentVersion);
   if (!normalizedCurrent) {
-    return { status: 'error', currentVersion, checkedAt, message: '当前应用版本号格式无效', fromCache: false };
+    return { status: 'error', currentVersion, checkedAt, message: 'Current app version format is invalid', fromCache: false };
   }
 
   const controller = new AbortController();
@@ -175,12 +175,12 @@ export async function checkLatestRelease(
     });
     if (!response.ok) throw new Error(`GitHub API ${response.status}`);
     const contentLength = Number.parseInt(response.headers.get('content-length') ?? '0', 10);
-    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) throw new Error('GitHub Release 响应过大');
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) throw new Error('GitHub Release response too large');
     const text = await response.text();
-    if (text.length > MAX_RESPONSE_BYTES) throw new Error('GitHub Release 响应过大');
+    if (text.length > MAX_RESPONSE_BYTES) throw new Error('GitHub Release response too large');
     const release = parseRelease(JSON.parse(text));
     const latestVersion = normalizeVersion(release.tag_name);
-    if (!latestVersion) throw new Error('GitHub Release 版本号格式无效');
+    if (!latestVersion) throw new Error('Invalid GitHub Release version format');
 
     return {
       status: compareVersions(latestVersion, normalizedCurrent) > 0 ? 'available' : 'up-to-date',

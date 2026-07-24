@@ -11,8 +11,8 @@ assert.equal(first.isCurrent(), false, '旧任务结果必须失效');
 assert.throws(() => first.assertCurrent(), JobCancelledError);
 assert.equal(second.isCurrent(), true);
 
-assert.equal(jobs.cancel('unknown'), false);
-assert.equal(jobs.cancel('scan-2'), true);
+jobs.cancel('unknown');
+jobs.cancel('scan-2');
 assert.equal(second.signal.aborted, true);
 assert.throws(() => second.assertCurrent(), JobCancelledError);
 

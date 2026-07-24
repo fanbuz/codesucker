@@ -22,22 +22,22 @@ assert.equal(
 );
 
 for (const input of ['/etc/passwd', 'C:\\Windows\\system.ini', '../outside.ts', 'src/../../outside.ts']) {
-  assert.throws(() => resolveProjectFile(rootSnapshot, root, input), /相对路径|项目目录/);
+  assert.throws(() => resolveProjectFile(rootSnapshot, root, input), /relative path|project directory/i);
 }
 
-assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/missing.ts'), /不存在/);
-assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/folder'), /普通文件/);
-assert.throws(() => resolveProjectFile(rootSnapshot, root, ''), /相对路径/);
-assert.throws(() => resolveProjectFile(null, root, 'src/main.ts'), /重新扫描/);
-assert.throws(() => resolveProjectFile(rootSnapshot, sandbox, 'outside.ts'), /扫描结果/);
+assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/missing.ts'), /does not exist/i);
+assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/folder'), /regular file/i);
+assert.throws(() => resolveProjectFile(rootSnapshot, root, ''), /relative path/i);
+assert.throws(() => resolveProjectFile(null, root, 'src/main.ts'), /rescan/i);
+assert.throws(() => resolveProjectFile(rootSnapshot, sandbox, 'outside.ts'), /mismatch/i);
 assert.equal(resolveRecentExportFile(fs.realpathSync(outside)), fs.realpathSync(outside));
-assert.throws(() => resolveRecentExportFile(null), /暂无可定位/);
-assert.throws(() => resolveRecentExportFile(path.join(sandbox, 'missing.txt')), /不存在/);
-assert.throws(() => resolveRecentExportFile(fs.realpathSync(path.join(root, 'src'))), /发生变化/);
+assert.throws(() => resolveRecentExportFile(null), /No export file/i);
+assert.throws(() => resolveRecentExportFile(path.join(sandbox, 'missing.txt')), /does not exist/i);
+assert.throws(() => resolveRecentExportFile(fs.realpathSync(path.join(root, 'src'))), /changed/i);
 
 try {
   fs.symlinkSync(outside, path.join(root, 'src', 'outside-link.ts'));
-  assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/outside-link.ts'), /项目目录/);
+  assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/outside-link.ts'), /project directory/i);
 } catch (error) {
   if (!(error instanceof Error) || !('code' in error) || error.code !== 'EPERM') throw error;
 }
@@ -47,7 +47,7 @@ fs.mkdirSync(replaceableRoot);
 const replaceableSnapshot = captureProjectRoot(replaceableRoot);
 fs.renameSync(replaceableRoot, `${replaceableRoot}-old`);
 fs.mkdirSync(replaceableRoot);
-assert.throws(() => validateProjectRoot(replaceableSnapshot, replaceableRoot), /扫描结果/);
+assert.throws(() => validateProjectRoot(replaceableSnapshot, replaceableRoot), /mismatch/i);
 
 try {
   const alternateRoot = path.join(sandbox, 'alternate-root');
@@ -57,7 +57,7 @@ try {
   const linkedSnapshot = captureProjectRoot(linkedRoot);
   fs.unlinkSync(linkedRoot);
   fs.symlinkSync(alternateRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
-  assert.throws(() => validateProjectRoot(linkedSnapshot, linkedRoot), /扫描结果/);
+  assert.throws(() => validateProjectRoot(linkedSnapshot, linkedRoot), /mismatch/i);
 } catch (error) {
   if (!(error instanceof Error) || !('code' in error) || error.code !== 'EPERM') throw error;
 }

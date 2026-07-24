@@ -6,7 +6,7 @@ import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, WorkerEnvelope, WorkerReply,
 } from './protocol.ts';
 
-if (!parentPort) throw new Error('pipeline worker 缺少 parentPort');
+if (!parentPort) throw new Error('pipeline worker missing parentPort');
 
 async function execute(payload: PipelineWorkerRequest): Promise<PipelineWorkerResult> {
   if (payload.type === 'scan') return scanFileCandidate(payload.candidate);

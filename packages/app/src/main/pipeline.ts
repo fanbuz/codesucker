@@ -138,24 +138,24 @@ function loadProjectConfig(root: string): { config: Record<string, unknown> | nu
 
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-    if (!isRecord(parsed)) return { config: null, warning: '项目配置格式无效，已忽略 .codesucker.json' };
+    if (!isRecord(parsed)) return { config: null, warning: 'Invalid project config format, ignored .codesucker.json' };
 
     const schema = parsed.schemaVersion;
     if (schema === undefined) {
-      return { config: parsed, warning: `检测到旧版项目配置，将在下次保存时升级到 schema ${CONFIG_SCHEMA_VERSION}` };
+      return { config: parsed, warning: `Legacy project config detected, will be upgraded to schema ${CONFIG_SCHEMA_VERSION} on next save` };
     }
     if (!Number.isInteger(schema) || (schema as number) < 1) {
-      return { config: null, warning: '项目配置 schemaVersion 无效，已忽略该配置' };
+      return { config: null, warning: 'Invalid project config schemaVersion, ignored configuration' };
     }
     if ((schema as number) > CONFIG_SCHEMA_VERSION) {
       return {
         config: null,
-        warning: `项目配置来自更新版本（schema ${schema}），当前仅支持 ${CONFIG_SCHEMA_VERSION}，请升级 CodeSucker`,
+        warning: `Project config from newer version (schema ${schema}), currently supporting ${CONFIG_SCHEMA_VERSION}, please update CodeSucker`,
       };
     }
     return { config: parsed, warning: null };
   } catch {
-    return { config: null, warning: '项目配置无法解析，已忽略 .codesucker.json' };
+    return { config: null, warning: 'Failed to parse project config, ignored .codesucker.json' };
   }
 }
 
@@ -349,7 +349,7 @@ export function registerPipelineIpc() {
       const audit = result.errors.length > 0
         ? [{
             status: 'warn' as const,
-            name: `${result.errors.length} 个文件处理失败，已跳过`,
+            name: `${result.errors.length} file(s) failed processing and were skipped`,
             detail: result.errors[0].message,
             location: { file: result.errors[0].file },
             evidence: result.errors.slice(0, 5).map((error) => ({
@@ -441,7 +441,7 @@ export function registerPipelineIpc() {
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       const exportedFile = output.docx ?? output.txt;
-      if (!exportedFile) throw new Error('请至少选择一种输出格式');
+      if (!exportedFile) throw new Error('Please select at least one output format');
       lastExportFile = fs.realpathSync.native(exportedFile);
       touchRecent({
         name: path.basename(request.payload.root),

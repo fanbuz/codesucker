@@ -39,9 +39,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parsePersistedConfig(value: unknown): string[] {
   if (!isRecord(value) || value.version !== SCAN_EXCLUDES_CONFIG_VERSION || !Array.isArray(value.rules)) {
-    throw new Error('配置结构或版本无效');
+    throw new Error('Invalid config structure or version');
   }
-  if (!value.rules.every((rule) => typeof rule === 'string')) throw new Error('规则列表格式无效');
+  if (!value.rules.every((rule) => typeof rule === 'string')) throw new Error('Invalid rules format');
   return normalizeExcludeRules(value.rules);
 }
 
@@ -56,10 +56,10 @@ export function loadScanExcludes(configFile: string): ScanExcludesState {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return defaultState();
-    if (error instanceof Error && error.message === '配置结构或版本无效') {
-      return defaultState('排除规则配置来自更高版本或结构不受支持，当前已使用内置默认规则');
+    if (error instanceof Error && error.message === 'Invalid config structure or version') {
+      return defaultState('Exclusion rules config came from a newer version or unsupported structure, built-in defaults applied');
     }
-    return defaultState('默认排除规则配置已损坏或无法读取，当前已使用内置默认规则');
+    return defaultState('Default exclusion rules config is corrupted or unreadable, built-in defaults applied');
   }
 }
 
@@ -69,9 +69,9 @@ export function loadScanExcludeSnapshot(configFile: string): string[] {
 }
 
 function validatedRules(input: unknown): string[] {
-  if (!Array.isArray(input)) throw new Error('排除规则必须是字符串列表');
+  if (!Array.isArray(input)) throw new Error('Exclusion rules must be a list of strings');
   for (const rule of input) {
-    if (typeof rule !== 'string') throw new Error('排除规则必须是字符串列表');
+    if (typeof rule !== 'string') throw new Error('Exclusion rules must be a list of strings');
     const validation = validateExcludeRule(rule);
     if (!validation.valid) throw new Error(validation.message);
   }
