@@ -10,9 +10,9 @@ fs.writeFileSync(filePath, 'export const ok = true;');
 
 async function main() {
   assert.deepEqual(await validateDroppedDirectory(root), { path: root, error: null });
-  assert.match((await validateDroppedDirectory(filePath)).error ?? '', /项目文件夹/);
-  assert.match((await validateDroppedDirectory(path.join(root, 'missing'))).error ?? '', /无法访问/);
-  assert.match((await validateDroppedDirectory('')).error ?? '', /无法读取/);
+  assert.match((await validateDroppedDirectory(filePath)).error ?? '', /project folder/);
+  assert.match((await validateDroppedDirectory(path.join(root, 'missing'))).error ?? '', /Unable to access/);
+  assert.match((await validateDroppedDirectory('')).error ?? '', /Unable to read/);
 
   console.log('✅ drop path validation 全部通过');
 }

@@ -6,13 +6,13 @@ export interface DroppedPathResult {
 }
 
 export async function validateDroppedDirectory(inputPath: string): Promise<DroppedPathResult> {
-  if (!inputPath) return { path: null, error: '无法读取拖入项目的本地路径，请改用“点击选择”' };
+  if (!inputPath) return { path: null, error: 'Unable to read dropped project path, please select manually' };
 
   try {
     const stat = await fs.promises.stat(inputPath);
-    if (!stat.isDirectory()) return { path: null, error: '请拖入项目文件夹，而不是单个文件' };
+    if (!stat.isDirectory()) return { path: null, error: 'Please drag in a project folder, not a single file' };
     return { path: inputPath, error: null };
   } catch {
-    return { path: null, error: '无法访问拖入的文件夹，请检查权限后重试' };
+    return { path: null, error: 'Unable to access dropped folder, please check permissions and retry' };
   }
 }

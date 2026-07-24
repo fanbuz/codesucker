@@ -85,11 +85,11 @@ function normalizeBounds(bounds: WindowBounds): WindowBounds {
 function parseWindowState(value: unknown): WindowState {
   if (!isRecord(value) || value.schemaVersion !== WINDOW_STATE_SCHEMA_VERSION
     || typeof value.isMaximized !== 'boolean' || !isRecord(value.bounds)) {
-    throw new Error('窗口状态结构或版本无效');
+    throw new Error('Invalid window state structure or version');
   }
   const { x, y, width, height } = value.bounds;
   if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(width) || !isFiniteNumber(height)
-    || width <= 0 || height <= 0) throw new Error('窗口 bounds 无效');
+    || width <= 0 || height <= 0) throw new Error('Invalid window bounds');
   return {
     schemaVersion: WINDOW_STATE_SCHEMA_VERSION,
     bounds: normalizeBounds({ x, y, width, height }),

@@ -7,16 +7,16 @@ import {
 assert.equal(normalizeScanExcludeRule('  .\\dist\\**\\  '), 'dist/**');
 assert.equal(validateScanExcludeRule('packages/*/build/').error, null);
 assert.equal(validateScanExcludeRule('src/**/*.min.js').error, null);
-assert.match(validateScanExcludeRule('').error ?? '', /不能为空/);
-assert.match(validateScanExcludeRule('/tmp/cache').error ?? '', /相对路径/);
-assert.match(validateScanExcludeRule('C:\\temp\\cache').error ?? '', /相对路径/);
-assert.match(validateScanExcludeRule('..\\secrets').error ?? '', /项目目录之外/);
-assert.match(validateScanExcludeRule('src/../secrets').error ?? '', /项目目录之外/);
-assert.match(validateScanExcludeRule('src/<cache>').error ?? '', /不支持的字符/);
-assert.match(validateScanExcludeRule('!dist').error ?? '', /不支持的字符/);
-assert.match(validateScanExcludeRule('./').error ?? '', /项目根目录/);
+assert.match(validateScanExcludeRule('').error ?? '', /empty/i);
+assert.match(validateScanExcludeRule('/tmp/cache').error ?? '', /relative path/i);
+assert.match(validateScanExcludeRule('C:\\temp\\cache').error ?? '', /relative path/i);
+assert.match(validateScanExcludeRule('..\\secrets').error ?? '', /outside project/i);
+assert.match(validateScanExcludeRule('src/../secrets').error ?? '', /outside project/i);
+assert.match(validateScanExcludeRule('src/<cache>').error ?? '', /unsupported/i);
+assert.match(validateScanExcludeRule('!dist').error ?? '', /unsupported/i);
+assert.match(validateScanExcludeRule('./').error ?? '', /root directory/i);
 assert.deepEqual(getScanExcludeRuleErrors(['dist/', ' ./dist/ ', 'build/']), [
-  '规则重复，请保留一条', '规则重复，请保留一条', null,
+  'Duplicate rule, please keep only one', 'Duplicate rule, please keep only one', null,
 ]);
 assert.deepEqual(normalizeScanExcludeRules([' dist/ ', '.\\build\\', './dist']), ['dist', 'build']);
 assert.equal(sameScanExcludeRules(['dist/'], ['dist/']), true);

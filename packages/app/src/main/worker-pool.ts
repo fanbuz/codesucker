@@ -52,7 +52,7 @@ export class WorkerPool<Input, Output> {
   }
 
   run(payload: Input, signal?: AbortSignal): Promise<Output> {
-    if (this.closing) return Promise.reject(new Error('worker 池已关闭'));
+    if (this.closing) return Promise.reject(new Error('Worker pool closed'));
     if (signal?.aborted) return Promise.reject(abortError(signal.reason));
 
     return new Promise<Output>((resolve, reject) => {
@@ -71,7 +71,7 @@ export class WorkerPool<Input, Output> {
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    const error = new Error('worker 池已关闭');
+    const error = new Error('Worker pool closed');
     for (const task of this.queue.splice(0)) this.rejectTask(task, error);
     for (const slot of this.slots) {
       if (slot.task) this.rejectTask(slot.task, error);
@@ -88,7 +88,7 @@ export class WorkerPool<Input, Output> {
     worker.on('error', (error) => this.replaceSlot(slot, error));
     worker.on('exit', (code) => {
       if (!slot.dead && !this.closing) {
-        this.replaceSlot(slot, new Error(`worker 异常退出（code ${code}）`));
+        this.replaceSlot(slot, new Error(`Worker exited abnormally (code ${code})`));
       }
     });
     return slot;
@@ -100,7 +100,7 @@ export class WorkerPool<Input, Output> {
     slot.task = null;
     task.slot = undefined;
     if (message.error) {
-      const error = new Error(message.error.message ?? 'worker 任务失败');
+      const error = new Error(message.error.message ?? 'Worker task failed');
       if (message.error.stack) error.stack = message.error.stack;
       this.rejectTask(task, error);
     } else {

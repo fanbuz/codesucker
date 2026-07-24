@@ -3,7 +3,7 @@ import { assertExportableSelection } from '../src/main/export-guard.ts';
 
 assert.throws(
   () => assertExportableSelection({ pages: [], totalLines: 0, pickedLines: 0 }),
-  /没有可导出的代码内容/,
+  /No code content to export/,
 );
 
 assert.doesNotThrow(() => assertExportableSelection({

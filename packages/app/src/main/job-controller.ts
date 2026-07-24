@@ -1,18 +1,18 @@
 export type JobKind = 'scan' | 'process' | 'export';
 
 export class JobCancelledError extends Error {
-  constructor(message = '任务已取消') {
+  constructor(message = 'Task cancelled') {
     super(message);
     this.name = 'AbortError';
   }
 }
 
 export interface JobHandle {
-  id: string;
-  kind: JobKind;
-  signal: AbortSignal;
-  isCurrent: () => boolean;
-  assertCurrent: () => void;
+  readonly id: string;
+  readonly kind: JobKind;
+  readonly signal: AbortSignal;
+  isCurrent(): boolean;
+  assertCurrent(): void;
 }
 
 interface ActiveJob {
@@ -26,41 +26,39 @@ export class JobController {
   private active: ActiveJob | null = null;
 
   start(id: string, kind: JobKind): JobHandle {
-    if (!id.trim()) throw new Error('jobId 不能为空');
-    this.active?.controller.abort(new JobCancelledError('已由新任务替代'));
-    const job: ActiveJob = { id, kind, controller: new AbortController() };
-    this.active = job;
+    if (!id.trim()) throw new Error('jobId cannot be empty');
+    this.active?.controller.abort(new JobCancelledError('Replaced by new task'));
+    const controller = new AbortController();
+    const current: ActiveJob = { id, kind, controller };
+    this.active = current;
 
     return {
       id,
       kind,
-      signal: job.controller.signal,
-      isCurrent: () => this.active === job && !job.controller.signal.aborted,
+      signal: controller.signal,
+      isCurrent: () => this.active?.id === id,
       assertCurrent: () => {
-        if (this.active !== job || job.controller.signal.aborted) {
+        if (this.active?.id !== id || controller.signal.aborted) {
           throw new JobCancelledError();
         }
       },
     };
   }
 
-  cancel(id: string): boolean {
-    if (!this.active || this.active.id !== id) return false;
-    this.active.controller.abort(new JobCancelledError());
+  cancel(id: string): void {
+    if (this.active?.id !== id) return;
+    const current = this.active;
     this.active = null;
-    return true;
+    current.controller.abort(new JobCancelledError());
   }
 
   finish(id: string): void {
     if (this.active?.id === id) this.active = null;
   }
 
-  isCurrent(id: string): boolean {
-    return this.active?.id === id && !this.active.controller.signal.aborted;
-  }
-
   cancelAll(): void {
-    this.active?.controller.abort(new JobCancelledError('应用正在退出'));
+    const current = this.active;
     this.active = null;
+    current?.controller.abort(new JobCancelledError('App is exiting'));
   }
 }

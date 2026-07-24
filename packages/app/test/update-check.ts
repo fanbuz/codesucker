@@ -71,26 +71,26 @@ async function main() {
     prerelease: false,
   }), { now });
   assert.equal(mislabeledPrerelease.status, 'error');
-  if (mislabeledPrerelease.status === 'error') assert.match(mislabeledPrerelease.message, /不是正式版本/);
+  if (mislabeledPrerelease.status === 'error') assert.match(mislabeledPrerelease.message, /formal release/i);
 
   const markedPrerelease = await checkLatestRelease('0.1.0', async () => releaseResponse({ prerelease: true }), { now });
   assert.equal(markedPrerelease.status, 'error');
-  if (markedPrerelease.status === 'error') assert.match(markedPrerelease.message, /不是正式版本/);
+  if (markedPrerelease.status === 'error') assert.match(markedPrerelease.message, /formal release/i);
 
   const invalid = await checkLatestRelease('0.1.0', async () => releaseResponse({ html_url: 'https://evil.example/release' }), { now });
   assert.equal(invalid.status, 'error');
-  if (invalid.status === 'error') assert.match(invalid.message, /下载地址无效/);
+  if (invalid.status === 'error') assert.match(invalid.message, /download URL/i);
 
   const limited = await checkLatestRelease('0.1.0', async () => new Response('', { status: 403 }), { now });
   assert.equal(limited.status, 'error');
-  if (limited.status === 'error') assert.match(limited.message, /频率受限/);
+  if (limited.status === 'error') assert.match(limited.message, /rate limit/i);
 
   const timeoutFetcher: FetchLike = async (_url, init) => new Promise((_resolve, reject) => {
     init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
   });
   const timedOut = await checkLatestRelease('0.1.0', timeoutFetcher, { now, timeoutMs: 5 });
   assert.equal(timedOut.status, 'error');
-  if (timedOut.status === 'error') assert.match(timedOut.message, /超时/);
+  if (timedOut.status === 'error') assert.match(timedOut.message, /timed out/i);
 
   let secondaryRequests = 0;
   const slowPrimary: FetchLike = async (_url, init) => new Promise((_resolve, reject) => {

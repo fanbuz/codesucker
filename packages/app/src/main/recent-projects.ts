@@ -196,14 +196,14 @@ async function decorateProjects(projects: StoredRecentProject[]): Promise<Recent
 }
 
 function assertRoot(root: unknown): string {
-  if (typeof root !== 'string' || !path.isAbsolute(root)) throw new Error('最近项目路径无效');
+  if (typeof root !== 'string' || !path.isAbsolute(root)) throw new Error('Invalid recent project path');
   return path.normalize(root);
 }
 
 function mutableProjects(configFile: string, now: Date): StoredRecentProject[] {
   const loaded = readRecentProjects(configFile, now);
   if (loaded.source === 'unsupported') {
-    throw new Error('最近项目数据来自更高版本，请升级 CodeSucker 后再修改');
+    throw new Error('Recent project data comes from a newer version, please update CodeSucker');
   }
   return loaded.projects;
 }
@@ -211,7 +211,7 @@ function mutableProjects(configFile: string, now: Date): StoredRecentProject[] {
 export async function loadRecentProjects(configFile: string, now = new Date()): Promise<RecentProject[]> {
   const loaded = readRecentProjects(configFile, now);
   if (loaded.source === 'legacy') {
-    try { atomicSave(configFile, loaded.projects); } catch { /* 列表仍可使用；迁移将在下次修改时重试。 */ }
+    try { atomicSave(configFile, loaded.projects); } catch { /* Ignore migration errors */ }
   }
   return decorateProjects(loaded.projects);
 }
@@ -225,7 +225,7 @@ export function touchRecentProject(
   if (typeof patch.name !== 'string' || patch.name.trim().length === 0
     || !optionalString(patch.lastGenerated)
     || !optionalPages(patch.pages)
-    || !optionalBoolean(patch.ok)) throw new Error('最近项目记录无效');
+    || !optionalBoolean(patch.ok)) throw new Error('Invalid recent project record');
   const current = mutableProjects(configFile, now);
   const previous = current.find((project) => project.root === root);
   const next: StoredRecentProject = {
@@ -245,9 +245,9 @@ export async function setRecentProjectPinned(
   now = new Date(),
 ): Promise<RecentProject[]> {
   const root = assertRoot(rootInput);
-  if (typeof pinned !== 'boolean') throw new Error('置顶状态无效');
+  if (typeof pinned !== 'boolean') throw new Error('Invalid pinned state');
   const current = mutableProjects(configFile, now);
-  if (!current.some((project) => project.root === root)) throw new Error('最近项目记录不存在');
+  if (!current.some((project) => project.root === root)) throw new Error('Recent project record does not exist');
   const next = sortAndLimit(current.map((project) => project.root === root ? { ...project, pinned } : project));
   atomicSave(configFile, next);
   return decorateProjects(next);
@@ -266,7 +266,7 @@ export async function removeRecentProject(
 export async function removeRecentProjects(
   configFile: string, rootsInput: unknown, now = new Date(),
 ): Promise<RecentProject[]> {
-  if (!Array.isArray(rootsInput)) throw new Error('最近项目路径列表无效');
+  if (!Array.isArray(rootsInput)) throw new Error('Invalid recent project path list');
   const roots = new Set(rootsInput.map(assertRoot));
   const current = mutableProjects(configFile, now);
   const next = sortAndLimit(current.filter((project) => !roots.has(project.root)));

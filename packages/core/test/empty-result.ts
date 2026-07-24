@@ -44,13 +44,13 @@ for (const result of [
 ]) {
   assert.equal(result.selection.pages.length, 0);
   assert.equal(result.selection.pickedLines, 0);
-  assert.ok(result.auditItems.some((item) => item.status === 'fail' && item.name.includes('没有可用于申报')));
-  assert.ok(!result.auditItems.some((item) => item.status === 'pass' && item.name.includes('每页行数')));
+  assert.ok(result.auditItems.some((item) => item.status === 'fail' && item.name.includes('No code content')));
+  assert.ok(!result.auditItems.some((item) => item.status === 'pass' && item.name.includes('Lines per page')));
 }
 
 const normal = processFiles([entry('normal.ts', 'export const answer = 42;')], config);
 assert.equal(normal.selection.pages.length, 1);
 assert.equal(normal.selection.pickedLines, 1);
-assert.ok(!normal.auditItems.some((item) => item.name.includes('没有可用于申报')));
+assert.ok(!normal.auditItems.some((item) => item.name.includes('No code content')));
 
 console.log('✅ empty result regression 全部通过');

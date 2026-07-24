@@ -2,7 +2,7 @@ import { parentPort } from 'node:worker_threads';
 import { renderDocx } from '@codesucker/core';
 import type { RenderWorkerRequest, WorkerEnvelope, WorkerReply } from './protocol.ts';
 
-if (!parentPort) throw new Error('render worker 缺少 parentPort');
+if (!parentPort) throw new Error('render worker missing parentPort');
 
 parentPort.on('message', async ({ id, payload }: WorkerEnvelope<RenderWorkerRequest>) => {
   const reply: WorkerReply<string> = { id };

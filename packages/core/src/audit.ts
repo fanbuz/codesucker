@@ -23,13 +23,13 @@ export function audit(
   const { pages } = selection;
   const lpp = config.linesPerPage;
 
-  // 1. 页眉（软件名称）
+  // 1. Header (Software Name)
   if (!config.title.trim()) {
-    items.push({ status: 'fail', name: '缺少软件全称+版本号', detail: '页眉为空会被直接退回，请在「清洗与排版」中填写，须与申请表完全一致' });
+    items.push({ status: 'fail', name: 'Missing software name and version number', detail: 'Header is empty and will be rejected. Please fill in "Clean & Layout", matching application form exactly' });
   } else if (!/[vV]?\d/.test(config.title)) {
-    items.push({ status: 'warn', name: '软件名称未包含版本号', detail: `「${config.title}」中未检测到版本号（如 V1.0），申请表与页眉需一致` });
+    items.push({ status: 'warn', name: 'Software name missing version number', detail: `No version number (e.g. V1.0) detected in "${config.title}". Application form and header must match` });
   } else {
-    items.push({ status: 'pass', name: '页眉与软件名称一致', detail: `页眉「${config.title}」将逐页出现，与申请表保持一致即可` });
+    items.push({ status: 'pass', name: 'Header matches software name', detail: `Header "${config.title}" will appear on every page, matching application form` });
   }
 
   const hasCodeContent = files.some((file) => file.lines.length > 0)
@@ -40,44 +40,44 @@ export function audit(
   if (!hasCodeContent) {
     items.push({
       status: 'fail',
-      name: '没有可用于申报的代码内容',
-      detail: '所选文件在清洗后为 0 行、0 页，请调整文件选择或关闭部分清洗规则后重新校验',
+      name: 'No code content available for filing',
+      detail: 'Selected files have 0 lines/0 pages after cleaning. Please adjust file selection or disable clean rules and re-check',
     });
   } else {
-    // 2. 每页行数
+    // 2. Lines per page
     const shortPages = pages.filter((p, i) => i < pages.length - 1 && p.lines.length < lpp);
     if (shortPages.length > 0) {
-      items.push({ status: 'fail', name: `${shortPages.length} 页行数不足 ${lpp} 行`, detail: `第 ${shortPages.map((p) => p.no).join('、')} 页行数不足（仅末页允许不满）` });
+      items.push({ status: 'fail', name: `${shortPages.length} page(s) have fewer than ${lpp} lines`, detail: `Page ${shortPages.map((p) => p.no).join(', ')} has insufficient lines (only last page allows fewer)` });
     } else {
-      items.push({ status: 'pass', name: `每页行数均 ≥ ${lpp} 行`, detail: `共 ${pages.length} 页，${selection.truncated ? '每页恰好' : '除末页外每页'} ${lpp} 行` });
+      items.push({ status: 'pass', name: `Lines per page ≥ ${lpp}`, detail: `Total ${pages.length} pages, ${selection.truncated ? 'exactly' : 'every page except last'} ${lpp} lines` });
     }
 
-    // 3. 末页 2/3
+    // 3. Last page 2/3 requirement
     const last = pages[pages.length - 1];
     if (last.lines.length < Math.ceil((lpp * 2) / 3)) {
-      items.push({ status: 'warn', name: `末页仅 ${last.lines.length} 行，不足页面 2/3`, detail: '建议补充或调整截取点，避免末页过短被认定为凑页' });
+      items.push({ status: 'warn', name: `Last page has only ${last.lines.length} lines, less than 2/3 of page`, detail: 'Recommend adjusting truncation point to avoid short last page being flagged' });
     } else {
-      items.push({ status: 'pass', name: '末页行数满足 2/3 要求', detail: `末页 ${last.lines.length} 行` });
+      items.push({ status: 'pass', name: 'Last page line count meets 2/3 requirement', detail: `Last page ${last.lines.length} lines` });
     }
 
-    // 4. 首末页模块边界（由截取策略保证，明示给用户）
+    // 4. First and last page module boundaries
     items.push({
-      status: 'pass', name: '首页为模块开头、末页为模块结尾',
-      detail: `第 1 页起于 ${pages[0].startFile}，第 ${pages.length} 页止于 ${last.endFile}` +
-        (selection.truncated ? `；第 ${selection.splitAfterPage}/${selection.splitAfterPage! + 1} 页间为前后段分界（规范允许不连续）` : ''),
+      status: 'pass', name: 'First page starts at module, last page ends at module',
+      detail: `Page 1 starts at ${pages[0].startFile}, Page ${pages.length} ends at ${last.endFile}` +
+        (selection.truncated ? `; Page ${selection.splitAfterPage}/${selection.splitAfterPage! + 1} is split point (discontinuity allowed by spec)` : ''),
     });
   }
 
-  // 5. 空行残留
+  // 5. Blank line residuals
   if (config.clean.removeBlankLines) {
     let blankCount = 0;
     for (const p of pages) for (const l of p.lines) if (l.trim() === '') blankCount++;
     if (blankCount > 0) {
-      items.push({ status: 'warn', name: `检测到 ${blankCount} 个残留空行`, detail: '空行会摊薄有效代码行数，建议开启「删除空行」后重新生成' });
+      items.push({ status: 'warn', name: `Detected ${blankCount} residual blank lines`, detail: 'Blank lines reduce effective code lines. Recommend enabling "Remove blank lines" and re-generating' });
     }
   }
 
-  // 6. 署名/版权冲突扫描：证据在清洗前提取，只检查最终分页涉及的文件。
+  // 6. Attribution / copyright conflict scan
   if (config.owner) {
     const selected = new Set(selection.selectedRelPaths);
     const hits = files
@@ -87,8 +87,8 @@ export function audit(
     if (hits.length > 0) {
       const h = hits[0];
       items.push({
-        status: 'fail', name: '检测到疑似他人署名',
-        detail: `检测到署名主体「${h.subject}」，与著作权人「${config.owner}」不一致，共 ${hits.length} 处`,
+        status: 'fail', name: 'Suspected third-party attribution detected',
+        detail: `Attribution entity "${h.subject}" does not match copyright holder "${config.owner}", total ${hits.length} location(s)`,
         location: { file: h.file, line: h.line },
         evidence: hits.slice(0, 5).map((item) => ({
           location: { file: item.file, line: item.line },
@@ -96,22 +96,22 @@ export function audit(
         })),
       });
     } else {
-      items.push({ status: 'pass', name: '未检测到他人署名', detail: `入选代码中没有与著作权人「${config.owner}」冲突的 @author / Copyright 声明` });
+      items.push({ status: 'pass', name: 'No third-party attribution detected', detail: `No @author / Copyright statements conflicting with copyright holder "${config.owner}" in selected code` });
     }
   }
 
-  // 7. 文件时间早于成立日期
+  // 7. File mtime earlier than founding date
   if (config.foundedDate) {
     const founded = new Date(config.foundedDate).getTime();
     const early = files.filter((f) => f.entry.included && f.entry.mtimeMs < founded);
     if (early.length > 0) {
       items.push({
-        status: 'warn', name: `${early.length} 个文件修改时间早于成立日期`,
-        detail: `${early.slice(0, 3).map((f) => f.entry.name).join('、')} 等文件早于 ${config.foundedDate}，如存在前期开发行为需提交《前期开发说明》`,
+        status: 'warn', name: `${early.length} file(s) modified prior to company founding date`,
+        detail: `Files such as ${early.slice(0, 3).map((f) => f.entry.name).join(', ')} predated ${config.foundedDate}. If early dev occurred, submit an "Early Development Explanation"`,
         location: { file: early[0].entry.relPath },
         evidence: early.slice(0, 5).map((file) => ({
           location: { file: file.entry.relPath },
-          detail: `修改时间 ${new Date(file.entry.mtimeMs).toISOString().slice(0, 10)}，早于成立日期 ${config.foundedDate}`,
+          detail: `Modified date ${new Date(file.entry.mtimeMs).toISOString().slice(0, 10)}, earlier than founding date ${config.foundedDate}`,
         })),
       });
     }

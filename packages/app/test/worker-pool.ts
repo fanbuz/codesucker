@@ -27,11 +27,11 @@ async function main() {
   assert.ok(Date.now() - started < 1000, '运行中任务取消应在 1 秒内返回');
   assert.equal((await pool.run({ action: 'echo', value: 100 })).value, 100, '取消后替换 worker 应可继续工作');
 
-  await assert.rejects(pool.run({ action: 'crash' }), /worker 异常退出/);
+  await assert.rejects(pool.run({ action: 'crash' }), /Worker exited abnormally/i);
   assert.equal((await pool.run({ action: 'echo', value: 101 })).value, 101, 'worker 崩溃后应自动重建');
 
   await pool.close();
-  await assert.rejects(pool.run({ action: 'echo' }), /worker 池已关闭/);
+  await assert.rejects(pool.run({ action: 'echo' }), /Worker pool closed/i);
 
   console.log('✅ worker pool 全部通过');
 }
