@@ -75,7 +75,10 @@ const DEFAULT_CLEAN: CleanToggles = {
   wrapLongLines: true,
 };
 
+import { getInitialLanguage, setSavedLanguage, type Language } from './i18n';
+
 interface State {
+  lang: Language;
   theme: 'light' | 'dark';
   view: 'wizard' | 'settings';
   step: number;
@@ -113,16 +116,18 @@ interface State {
   exportResult: null | { scanSessionId: string; docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
   toast: string | null;
   set: (p: Partial<State>) => void;
+  setLang: (lang: Language) => void;
 }
 
 export const useStore = create<State>((set) => ({
+  lang: getInitialLanguage(),
   theme: 'light',
   view: 'wizard',
   step: 1,
   maxUnlockedStep: 1,
   loaded: false,
   root: null,
-  projName: '未打开项目',
+  projName: 'No project open',
   scanPhase: 'idle',
   scanIntent: 'open',
   scanError: null,
@@ -153,6 +158,10 @@ export const useStore = create<State>((set) => ({
   exportResult: null,
   toast: null,
   set: (p) => set(p),
+  setLang: (lang: Language) => {
+    setSavedLanguage(lang);
+    set({ lang });
+  },
 }));
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;

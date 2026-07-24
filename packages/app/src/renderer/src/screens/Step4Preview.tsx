@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { runProcess, useStore, type PageData } from '../store';
 import { PREVIEW_PAPER_HEIGHT, PREVIEW_PAPER_WIDTH, previewPaperScale } from '../preview-layout';
 import { unlockStep } from '../wizard-progress';
+import { t } from '../i18n';
 
 export default function Step4Preview() {
   const s = useStore();
+  const lang = s.lang;
   const p = s.processData;
   const stageRef = useRef<HTMLDivElement>(null);
   const [paperScale, setPaperScale] = useState(1);
@@ -25,7 +27,7 @@ export default function Step4Preview() {
   }, [p]);
 
   if (!p) {
-    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)' }}>正在生成分页…</div>;
+    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)' }}>{t('paginating', lang)}</div>;
   }
 
   const pages = p.selection.pages;
@@ -36,17 +38,17 @@ export default function Step4Preview() {
   const paperWidth = PREVIEW_PAPER_WIDTH * paperScale;
   const paperHeight = PREVIEW_PAPER_HEIGHT * paperScale;
   const detail = p.selection.truncated
-    ? `前段止于 ${p.selection.frontEndFile ?? '未知文件'} · 后段起于 ${p.selection.backStartFile ?? '未知文件'}`
-    : '完整代码已纳入分页';
+    ? t('frontBackSplit', lang, { front: p.selection.frontEndFile ?? 'Unknown', back: p.selection.backStartFile ?? 'Unknown' })
+    : t('fullCodeIncluded', lang);
 
   const Thumb = ({ pg }: { pg: PageData }) => {
     const active = pg.no === s.page;
     const tagged = pg.no === 1 || pg.no === pages.length;
     return (
       <button type="button" className="step4-thumb" onClick={() => s.set({ page: pg.no })}
-        title={`第 ${pg.no} 页`} aria-label={`查看第 ${pg.no} 页`} aria-current={active ? 'page' : undefined}>
+        title={`Page ${pg.no}`} aria-label={`View page ${pg.no}`} aria-current={active ? 'page' : undefined}>
         <span className="step4-thumb__tag" style={{ visibility: tagged ? 'visible' : 'hidden' }}>
-          {pg.no === 1 ? '模块开头 ✓' : '模块结尾 ✓'}
+          {pg.no === 1 ? t('moduleStart', lang) : t('moduleEnd', lang)}
         </span>
         <span className={`step4-thumb__paper${active ? ' is-active' : ''}`} />
         <span className={`step4-thumb__number${active ? ' is-active' : ''}`}>{pg.no}</span>
@@ -56,21 +58,21 @@ export default function Step4Preview() {
 
   return (
     <div className="step4-preview">
-      <header className="step4-info" title={`共 ${pages.length} 页 · ${p.selection.pickedLines.toLocaleString()} 行 · ${detail}`}>
-        <span className="step4-info__summary">共 {pages.length} 页 · {p.selection.pickedLines.toLocaleString()} 行</span>
+      <header className="step4-info" title={`${t('totalPagesSummary', lang, { pages: pages.length, lines: p.selection.pickedLines.toLocaleString() })} · ${detail}`}>
+        <span className="step4-info__summary">{t('totalPagesSummary', lang, { pages: pages.length, lines: p.selection.pickedLines.toLocaleString() })}</span>
         <span className="step4-info__detail">{detail}</span>
       </header>
 
-      <div className="step4-stage" ref={stageRef} tabIndex={0} aria-label="分页文档预览">
+      <div className="step4-stage" ref={stageRef} tabIndex={0} aria-label="Page Preview">
         <div className="step4-stage__content" style={{ minWidth: paperWidth + 128, minHeight: paperHeight + 24 }}>
           <div className="step4-paper-frame" style={{ width: paperWidth, height: paperHeight }}>
             <button type="button" className="pagebtn step4-pagebtn step4-pagebtn--previous"
-              disabled={s.page <= 1} aria-label="上一页"
+              disabled={s.page <= 1} aria-label={t('prevPage', lang)}
               onClick={() => s.set({ page: Math.max(1, s.page - 1) })}>‹</button>
 
             <div className="step4-paper" style={{ transform: `scale(${paperScale})` }}>
               <div className="step4-paper__header">
-                <span>{s.swName || '（未填写软件名称）'}</span><span>{s.page}</span>
+                <span>{s.swName || '(Software Title)'}</span><span>{s.page}</span>
               </div>
               <div className="step4-paper__code">
                 {(cur?.lines ?? []).map((line, index) => (
@@ -80,24 +82,24 @@ export default function Step4Preview() {
             </div>
 
             <button type="button" className="pagebtn step4-pagebtn step4-pagebtn--next"
-              disabled={s.page >= pages.length} aria-label="下一页"
+              disabled={s.page >= pages.length} aria-label={t('nextPage', lang)}
               onClick={() => s.set({ page: Math.min(pages.length, s.page + 1) })}>›</button>
           </div>
         </div>
       </div>
 
       <footer className="step4-footer">
-        <div className="step4-thumbs" tabIndex={0} aria-label="分页缩略图">
+        <div className="step4-thumbs" tabIndex={0} aria-label="Page Thumbnails">
           {thumbsA.map((pg) => <Thumb key={pg.no} pg={pg} />)}
           {p.selection.truncated && (
-            <div className="step4-split" aria-label="前后段分界">
-              <span>✂️</span><i /><strong>前后段分界</strong>
+            <div className="step4-split" aria-label="Split">
+              <span>✂️</span><i /><strong>{t('frontBackSectionSplit', lang)}</strong>
             </div>
           )}
           {thumbsB.map((pg) => <Thumb key={pg.no} pg={pg} />)}
         </div>
         <button className="btn-primary step4-next"
-          onClick={() => s.set({ step: 5, maxUnlockedStep: unlockStep(s.maxUnlockedStep, 5) })}>下一步：校验与导出</button>
+          onClick={() => s.set({ step: 5, maxUnlockedStep: unlockStep(s.maxUnlockedStep, 5) })}>{t('nextAuditExport', lang)}</button>
       </footer>
     </div>
   );

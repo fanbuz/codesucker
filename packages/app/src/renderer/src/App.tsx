@@ -8,8 +8,9 @@ import Step5Export from './screens/Step5Export';
 import Settings from './screens/Settings';
 import { canStartScan } from './scan-guard';
 import { canVisitStep } from './wizard-progress';
+import { t, type TranslationKey } from './i18n';
 
-const STEP_TITLES = ['导入项目', '文件与排序', '清洗与排版', '分页预览', '校验与导出'];
+const STEP_KEYS: TranslationKey[] = ['step1Title', 'step2Title', 'step3Title', 'step4Title', 'step5Title'];
 
 function ThemeToggleIcon({ target }: { target: 'light' | 'dark' }) {
   if (target === 'dark') {
@@ -29,9 +30,10 @@ function ThemeToggleIcon({ target }: { target: 'light' | 'dark' }) {
 
 export default function App() {
   const s = useStore();
+  const lang = s.lang;
   const rescanEnabled = !!s.root && s.loaded && canStartScan(s);
   const nextTheme = s.theme === 'light' ? 'dark' : 'light';
-  const themeLabel = nextTheme === 'dark' ? '切换到深色模式' : '切换到浅色模式';
+  const themeLabel = nextTheme === 'dark' ? t('themeSwitchDark', lang) : t('themeSwitchLight', lang);
 
   useEffect(() => {
     document.body.classList.toggle('dark', s.theme === 'dark');
@@ -52,20 +54,18 @@ export default function App() {
   }, []);
 
   const saveConfig = async () => {
-    if (!s.root) { toast('请先导入项目'); return; }
+    if (!s.root) { toast(t('pleaseFillSwName', lang)); return; }
     await window.cs.saveConfig(s.root, {
       title: s.swName, owner: s.owner, sortMode: s.sortMode,
       order: s.order, excludedRelPaths: s.files.filter((f) => !f.included).map((f) => f.relPath),
       clean: s.clean, fmtDocx: s.fmtDocx, fmtTxt: s.fmtTxt, outDir: s.outDir,
     });
-    toast('配置已保存到项目（.codesucker.json）');
+    toast(t('configSavedToast', lang));
   };
 
   const rescan = () => {
     if (!s.root || !rescanEnabled) return;
-    const confirmed = window.confirm(
-      '重新扫描会读取当前磁盘源码，并使旧的处理预览、分页、校验和导出结果立即失效。\n\n软件信息、文件选择、排序、清洗与导出配置会保留。是否继续？',
-    );
+    const confirmed = window.confirm(t('rescanConfirmMsg', lang));
     if (confirmed) void scanProject(s.root, 'rescan');
   };
 
@@ -75,8 +75,8 @@ export default function App() {
       <div className="titlebar" style={{ height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px 0 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600 }}>{'</>'}</div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>CodeSucker</div>
-          <div style={{ fontSize: 12, color: 'var(--text3)' }}>软著代码抽取器</div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('appName', lang)}</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)' }}>{t('appSubtitle', lang)}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <button className="winbtn" onClick={() => window.cs.win('minimize')}><svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" strokeWidth="1.2" /></svg></button>
@@ -89,21 +89,26 @@ export default function App() {
       <div style={{ height: 48, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border2)', position: 'relative', zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontWeight: 500 }}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l2 2h5A1.5 1.5 0 0 1 14.5 6v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V4Z" stroke="var(--accent)" strokeWidth="1.3" /></svg>
-          <span>{s.projName}</span>
+          <span>{s.projName === '未打开项目' ? t('projName' as TranslationKey, lang) || s.projName : s.projName}</span>
           {s.root && <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{s.root}</span>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button className="btn-ghost" style={{ height: 30, padding: '0 12px', fontSize: 12 }}
             disabled={!rescanEnabled} onClick={rescan}
-            title={s.exporting ? '请等待导出写盘完成后再重新扫描' : undefined}>
-            {s.scanPhase === 'scanning' ? '正在扫描…' : s.exporting ? '导出完成后可重扫' : '重新扫描'}
+            title={s.exporting ? t('rescanTooltipExporting', lang) : undefined}>
+            {s.scanPhase === 'scanning' ? t('rescanning', lang) : s.exporting ? t('rescanWhenExportDone', lang) : t('rescan', lang)}
           </button>
-          <button className="btn-ghost" style={{ height: 30, padding: '0 12px', fontSize: 12 }} disabled={!s.loaded} onClick={saveConfig}>保存配置</button>
+          <button className="btn-ghost" style={{ height: 30, padding: '0 12px', fontSize: 12 }} disabled={!s.loaded} onClick={saveConfig}>{t('saveConfig', lang)}</button>
+          <button className="btn-ghost" style={{ height: 30, padding: '0 8px', fontSize: 12, fontWeight: 600 }}
+            title={t('languageSetting', lang)}
+            onClick={() => s.setLang(lang === 'en' ? 'zh' : 'en')}>
+            {lang === 'en' ? 'EN' : '中文'}
+          </button>
           <button className="btn-ghost theme-toggle" title={themeLabel} aria-label={themeLabel}
             onClick={() => s.set({ theme: nextTheme })}>
             <ThemeToggleIcon target={nextTheme} />
           </button>
-          <button className="btn-ghost" style={{ width: 30, height: 30 }} title="设置" onClick={() => s.set({ view: 'settings' })}>
+          <button className="btn-ghost" style={{ width: 30, height: 30 }} title={t('settings', lang)} onClick={() => s.set({ view: 'settings' })}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.4 7.4 0 0 0-1.64-.94l-.36-2.54a.49.49 0 0 0-.48-.41h-3.84a.49.49 0 0 0-.47.41l-.36 2.54c-.6.24-1.15.57-1.64.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.5.5 0 0 0 .12.61l2.03 1.58c-.05.31-.09.65-.09.94s.03.63.08.94l-2.03 1.58a.5.5 0 0 0-.12.61l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.38 1.04.7 1.64.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.6-.24 1.15-.56 1.64-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.5.5 0 0 0-.12-.61l-2.03-1.58ZM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2Z" />
             </svg>
@@ -114,8 +119,9 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         {/* 步骤导航 */}
         <div style={{ width: 196, flex: 'none', background: 'var(--panel)', borderRight: '1px solid var(--border2)', padding: '14px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {STEP_TITLES.map((title, i) => {
+          {STEP_KEYS.map((key, i) => {
             const n = i + 1;
+            const title = t(key, lang);
             const active = s.view === 'wizard' && s.step === n;
             const done = s.loaded && n < s.maxUnlockedStep;
             const enabled = canVisitStep(n, s.loaded, s.maxUnlockedStep);
@@ -132,9 +138,9 @@ export default function App() {
           <div style={{ padding: 10, borderRadius: 8, background: 'var(--panel2)', border: '1px solid var(--border2)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)' }}>
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" strokeWidth="1.4" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" strokeWidth="1.4" /></svg>
-              源码处理全程离线
+              {t('offlineBadge', lang)}
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>版本检测仅查询 GitHub，不上传代码</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>{t('offlineSub', lang)}</div>
           </div>
         </div>
 

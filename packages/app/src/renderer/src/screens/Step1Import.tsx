@@ -6,6 +6,7 @@ import {
   clampRecentMenuPosition, nextRecentMenuIndex, reconcileRecentSelection,
   selectAllRecent, toggleRecentSelection as toggleSelectedRoot, type RecentMenuNavigationKey,
 } from '../recent-project-state';
+import { t, type Language } from '../i18n';
 
 interface RecentContextMenu {
   root: string;
@@ -13,10 +14,10 @@ interface RecentContextMenu {
   top: number;
 }
 
-function unavailableLabel(reason: RecentProject['unavailableReason']): string {
-  if (reason === 'missing') return '项目路径不存在';
-  if (reason === 'not-directory') return '该路径不是文件夹';
-  return '项目路径无法访问';
+function unavailableLabel(reason: RecentProject['unavailableReason'], lang: Language): string {
+  if (reason === 'missing') return t('folderMissing', lang);
+  if (reason === 'not-directory') return t('folderNotDir', lang);
+  return t('folderInaccessible', lang);
 }
 
 function scanPercent(progress: JobProgress | null): number {
@@ -36,6 +37,7 @@ function formatBytes(bytes = 0): string {
 
 export default function Step1Import() {
   const s = useStore();
+  const lang = s.lang;
   const [managingRecent, setManagingRecent] = useState(false);
   const [selectedRecent, setSelectedRecent] = useState<Set<string>>(() => new Set());
   const [recentMenu, setRecentMenu] = useState<RecentContextMenu | null>(null);
@@ -103,23 +105,23 @@ export default function Step1Import() {
   const setPinned = async (project: RecentProject) => {
     try {
       await updateRecent(() => window.cs.setRecentPinned(project.root, !project.pinned));
-      toast(project.pinned ? '已取消置顶' : '已置顶最近项目');
+      toast(project.pinned ? t('unpinnedToast', lang) : t('pinnedToast', lang));
     } catch (error) {
       await refreshRecent();
-      toast(`操作失败：${error instanceof Error ? error.message : String(error)}`);
+      toast(t('opFailed', lang, { msg: error instanceof Error ? error.message : String(error) }));
     } finally {
       closeRecentMenu(true);
     }
   };
 
   const removeOne = async (project: RecentProject) => {
-    if (!window.confirm(`只会从最近项目中移除“${project.name}”的记录，不会删除磁盘上的项目文件。确定移除吗？`)) return;
+    if (!window.confirm(t('removeConfirmOne', lang, { name: project.name }))) return;
     try {
       await updateRecent(() => window.cs.removeRecent(project.root));
-      toast('已从最近项目移除，项目文件未受影响');
+      toast(t('removedOneToast', lang));
     } catch (error) {
       await refreshRecent();
-      toast(`移除失败：${error instanceof Error ? error.message : String(error)}`);
+      toast(t('removeFailed', lang, { msg: error instanceof Error ? error.message : String(error) }));
     } finally {
       closeRecentMenu(true);
     }
@@ -128,15 +130,15 @@ export default function Step1Import() {
   const removeSelected = async () => {
     const roots = [...selectedRecent];
     if (roots.length === 0) return;
-    if (!window.confirm(`只会移除选中的 ${roots.length} 条最近记录，不会删除任何项目文件。确定继续吗？`)) return;
+    if (!window.confirm(t('removeConfirmMany', lang, { count: roots.length }))) return;
     try {
       await updateRecent(() => window.cs.removeRecentMany(roots));
       setSelectedRecent(new Set());
       setManagingRecent(false);
-      toast(`已移除 ${roots.length} 条最近记录，项目文件未受影响`);
+      toast(t('removedManyToast', lang, { count: roots.length }));
     } catch (error) {
       await refreshRecent();
-      toast(`批量移除失败：${error instanceof Error ? error.message : String(error)}`);
+      toast(t('bulkRemoveFailed', lang, { msg: error instanceof Error ? error.message : String(error) }));
     }
   };
 
@@ -148,12 +150,12 @@ export default function Step1Import() {
     if (!project.available) {
       const refreshed = await refreshRecent();
       if (!refreshed) {
-        toast('暂时无法刷新项目状态，请稍后重试');
+        toast(t('cannotRefreshRecent', lang));
         return;
       }
       const current = refreshed?.find((item) => item.root === project.root);
       if (!current?.available) {
-        toast(`${unavailableLabel(current?.unavailableReason)}，可从管理模式移除该记录`);
+        toast(t('removeUnavailableHint', lang, { reason: unavailableLabel(current?.unavailableReason, lang) }));
         return;
       }
     }
@@ -171,7 +173,7 @@ export default function Step1Import() {
     if (!file) return;
     const result = await window.cs.resolveDroppedPath(file);
     if (result.path) void scanProject(result.path, 'open');
-    else toast(result.error ?? '无法读取拖入的项目文件夹');
+    else toast(result.error ?? 'Unable to read dropped folder');
   };
 
   return (
@@ -182,9 +184,9 @@ export default function Step1Import() {
           <div style={{ width: 52, height: 52, borderRadius: 14, background: 'var(--panel)', boxShadow: 'var(--shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'cs-float 2.6s ease-in-out infinite' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 0 1 2-2h4l2.5 2.5H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="var(--accent)" strokeWidth="1.6" /><path d="M12 15.5v-5M9.8 12.6 12 10.4l2.2 2.2" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </div>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>拖入项目文件夹，或点击选择</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>{t('dropTitle', lang)}</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 5 }}>
-            完全离线处理，代码不会离开这台电脑
+            {t('dropSub', lang)}
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.4" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" strokeWidth="1.4" /></svg>
           </div>
         </div>
@@ -194,7 +196,7 @@ export default function Step1Import() {
         <div style={{ border: '1.5px solid var(--border)', borderRadius: 14, background: 'var(--panel)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
           <svg width="30" height="30" viewBox="0 0 30 30" style={{ animation: 'cs-spin 1s linear infinite' }}><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" strokeWidth="3" /><path d="M15 3a12 12 0 0 1 12 12" fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" /></svg>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
-            {progress?.stage === 'discovering' ? '正在发现源代码文件…' : '正在并发扫描项目…'}
+            {progress?.stage === 'discovering' ? t('discoveringFiles', lang) : t('scanningProject', lang)}
           </div>
           <div style={{ width: 360, height: 6, borderRadius: 3, background: 'var(--border2)', overflow: 'hidden' }}>
             <div style={{ height: '100%', borderRadius: 3, background: 'var(--accent)', width: `${pct}%`, transition: 'width .12s', position: 'relative', overflow: 'hidden' }}>
@@ -206,50 +208,50 @@ export default function Step1Import() {
           </div>
           {progress?.stage === 'scanning' && (
             <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'var(--mono)' }}>
-              {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} 个文件
+              {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} {t('filesScanned', lang)}
               {' · '}{formatBytes(progress.bytes)}
               {' · '}{progress.workerCount} workers
             </div>
           )}
-          <button className="btn-ghost" style={{ height: 28, padding: '0 12px', fontSize: 11.5 }} onClick={() => { void cancelActiveScan(); }}>取消扫描</button>
+          <button className="btn-ghost" style={{ height: 28, padding: '0 12px', fontSize: 11.5 }} onClick={() => { void cancelActiveScan(); }}>{t('cancelScan', lang)}</button>
         </div>
       )}
 
       {s.scanPhase === 'error' && (
         <div style={{ border: '1.5px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 14, background: 'var(--red-soft)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, animation: 'cs-fade .18s ease-out' }}>
           <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--red)', boxShadow: 'var(--shadow)' }}>✕</div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{s.scanError ?? '未发现可用源代码文件'}</div>
-          <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', lineHeight: 1.7 }}>
-            该文件夹内没有可识别的源码。建议检查：<br />① 是否选错了目录（应选择包含 src/ 的项目根目录）　② 源码是否在压缩包内，需先解压
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{s.scanError ?? t('noValidFilesFound', lang)}</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', lineHeight: 1.7, whiteSpace: 'pre-line' }}>
+            {t('noValidFilesSub', lang)}
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             {s.root && <button className="btn-primary" style={{ height: 32, padding: '0 16px', fontSize: 13 }}
-              onClick={() => { void scanProject(s.root!, s.scanIntent); }}>重试扫描</button>}
-            <button className="btn-ghost" style={{ height: 32, padding: '0 16px', fontSize: 13 }} onClick={() => s.set({ scanPhase: 'idle', scanError: null, scanIntent: 'open' })}>重新选择文件夹</button>
+              onClick={() => { void scanProject(s.root!, s.scanIntent); }}>{t('retryScan', lang)}</button>}
+            <button className="btn-ghost" style={{ height: 32, padding: '0 16px', fontSize: 13 }} onClick={() => s.set({ scanPhase: 'idle', scanError: null, scanIntent: 'open' })}>{t('reselectFolder', lang)}</button>
           </div>
         </div>
       )}
 
-      <section className="step1-recent" aria-label="最近项目">
+      <section className="step1-recent" aria-label={t('recentProjects', lang)}>
         <div className="step1-recent__heading">
-          <span>最近项目</span>
+          <span>{t('recentProjects', lang)}</span>
           {s.recent.length > 0 && !managingRecent && (
-            <button type="button" onClick={() => { setManagingRecent(true); setRecentMenu(null); }}>管理</button>
+            <button type="button" onClick={() => { setManagingRecent(true); setRecentMenu(null); }}>{t('manage', lang)}</button>
           )}
         </div>
         {managingRecent && (
-          <div className="step1-recent__manage" aria-label="最近项目批量管理">
-            <span>已选 {selectedRecent.size} 项</span>
+          <div className="step1-recent__manage" aria-label="Manage Recent Projects">
+            <span>{t('selectedCount', lang, { count: selectedRecent.size })}</span>
             <div>
               <button type="button" onClick={() => setSelectedRecent(selectAllRecent(s.recent))}
-                disabled={selectedRecent.size === s.recent.length}>全选当前列表</button>
+                disabled={selectedRecent.size === s.recent.length}>{t('selectAll', lang)}</button>
               <button type="button" className="is-danger" disabled={selectedRecent.size === 0}
-                onClick={() => { void removeSelected(); }}>批量移除</button>
-              <button type="button" onClick={() => { setManagingRecent(false); setSelectedRecent(new Set()); }}>取消</button>
+                onClick={() => { void removeSelected(); }}>{t('bulkRemove', lang)}</button>
+              <button type="button" onClick={() => { setManagingRecent(false); setSelectedRecent(new Set()); }}>{t('cancel', lang)}</button>
             </div>
           </div>
         )}
-        {s.recent.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)' }}>暂无最近项目</div>}
+        {s.recent.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)' }}>{t('noRecentProjects', lang)}</div>}
         <div className="step1-recent__list" tabIndex={s.recent.length > 0 ? 0 : undefined}>
           {s.recent.map((r: RecentProject) => (
             <div key={r.root} className={`step1-recent__item card-hover${r.available ? '' : ' is-unavailable'}${selectedRecent.has(r.root) ? ' is-selected' : ''}`}
@@ -289,16 +291,16 @@ export default function Step1Import() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="step1-recent__name">
-                  {r.pinned && <span className="step1-recent__pin" aria-label="已置顶">◆</span>}
+                  {r.pinned && <span className="step1-recent__pin" aria-label={t('pin', lang)}>◆</span>}
                   <span>{r.name}</span>
-                  {!r.available && <span className="step1-recent__unavailable">{unavailableLabel(r.unavailableReason)}</span>}
+                  {!r.available && <span className="step1-recent__unavailable">{unavailableLabel(r.unavailableReason, lang)}</span>}
                 </div>
                 <div className="step1-recent__path">{r.root}</div>
               </div>
               {r.lastGenerated && (
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>上次生成 {r.lastGenerated}</div>
-                  <div style={{ fontSize: 12, marginTop: 3, fontWeight: 600, color: r.ok ? 'var(--green)' : 'var(--orange)' }}>{r.pages} 页 {r.ok ? '✅' : '⚠️'}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('lastGenerated', lang)} {r.lastGenerated}</div>
+                  <div style={{ fontSize: 12, marginTop: 3, fontWeight: 600, color: r.ok ? 'var(--green)' : 'var(--orange)' }}>{r.pages} {t('pagesUnit', lang)} {r.ok ? '✅' : '⚠️'}</div>
                 </div>
               )}
             </div>
@@ -311,7 +313,7 @@ export default function Step1Import() {
         if (!project) return null;
         return (
           <div id="recent-project-menu" ref={recentMenuRef} className="step1-recent-menu" role="menu"
-            aria-label={`${project.name} 最近项目操作`} style={{ left: recentMenu.left, top: recentMenu.top }}
+            aria-label={`${project.name}`} style={{ left: recentMenu.left, top: recentMenu.top }}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault();
@@ -330,10 +332,10 @@ export default function Step1Import() {
               if (nextIndex !== null) items[nextIndex]?.focus();
             }}>
             <button type="button" role="menuitem" tabIndex={-1} onClick={() => { void setPinned(project); }}>
-              {project.pinned ? '取消置顶' : '置顶'}
+              {project.pinned ? t('unpin', lang) : t('pin', lang)}
             </button>
             <button type="button" role="menuitem" tabIndex={-1} className="is-danger" onClick={() => { void removeOne(project); }}>
-              从最近项目移除
+              {t('removeFromRecent', lang)}
             </button>
           </div>
         );
