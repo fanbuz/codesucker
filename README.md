@@ -174,3 +174,8 @@ npm run verify                           # 发布前完整校验
 [Apache-2.0](LICENSE) © fanbuz
 
 本项目允许使用、修改、分发及闭源商用；再分发时须附带 Apache-2.0 许可证、保留适用的版权与 [NOTICE](NOTICE) 声明，并标明对文件所作的修改。
+
+## 延伸阅读与社区
+
+- [我为什么做 CodeSucker：一篇 X 长文](https://x.com/fanbuz_/status/2080468029784379675?s=20)，来自 [@fanbuz_](https://x.com/fanbuz_)
+- [LINUX DO](https://linux.do/)：社区精神——**真诚**、**友善**、**团结**、**专业**，共建你我引以为荣之社区。
