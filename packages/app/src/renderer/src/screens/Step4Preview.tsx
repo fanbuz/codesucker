@@ -1,6 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { runProcess, useStore, type PageData } from '../store';
-import { PREVIEW_PAPER_HEIGHT, PREVIEW_PAPER_WIDTH, previewPaperScale } from '../preview-layout';
+import {
+  PREVIEW_PAPER_HEIGHT,
+  PREVIEW_PAPER_WIDTH,
+  previewPaperScale,
+  previewThumbnailTag,
+} from '../preview-layout';
 import { unlockStep } from '../wizard-progress';
 
 export default function Step4Preview() {
@@ -41,12 +46,12 @@ export default function Step4Preview() {
 
   const Thumb = ({ pg }: { pg: PageData }) => {
     const active = pg.no === s.page;
-    const tagged = pg.no === 1 || pg.no === pages.length;
+    const tag = previewThumbnailTag(pg.no, pages.length);
     return (
-      <button type="button" className="step4-thumb" onClick={() => s.set({ page: pg.no })}
+      <button type="button" className={`step4-thumb${tag ? ' is-tagged' : ''}`} onClick={() => s.set({ page: pg.no })}
         title={`第 ${pg.no} 页`} aria-label={`查看第 ${pg.no} 页`} aria-current={active ? 'page' : undefined}>
-        <span className="step4-thumb__tag" style={{ visibility: tagged ? 'visible' : 'hidden' }}>
-          {pg.no === 1 ? '模块开头 ✓' : '模块结尾 ✓'}
+        <span className="step4-thumb__tag" style={{ visibility: tag ? 'visible' : 'hidden' }} aria-hidden={!tag}>
+          {tag ?? '模块结尾 ✓'}
         </span>
         <span className={`step4-thumb__paper${active ? ' is-active' : ''}`} />
         <span className={`step4-thumb__number${active ? ' is-active' : ''}`}>{pg.no}</span>

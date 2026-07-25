@@ -104,6 +104,7 @@ input,button{font-family:inherit}
 .step4-footer{position:relative;z-index:3;display:flex;min-width:0;min-height:64px;align-items:center;gap:14px;padding:9px 16px 11px;border-top:1px solid var(--border2);background:var(--panel)}
 .step4-thumbs{display:flex;min-width:0;min-height:44px;flex:1;align-items:flex-end;gap:3px;overflow-x:auto;overflow-y:hidden;padding:0 2px 2px;overscroll-behavior-x:contain;scrollbar-gutter:stable}
 .step4-thumb{display:flex;width:15px;flex:none;flex-direction:column;align-items:center;gap:2px;padding:0;border:0;background:transparent;cursor:pointer}
+.step4-thumb.is-tagged{width:max-content;min-width:15px}
 .step4-thumb:focus-visible{border-radius:3px;outline:2px solid var(--accent);outline-offset:2px}
 .step4-thumb__tag{color:var(--green);font-size:9px;font-weight:600;white-space:nowrap}
 .step4-thumb__paper{display:block;width:15px;height:21px;border:1px solid var(--border);border-radius:2px;background:var(--panel2)}
