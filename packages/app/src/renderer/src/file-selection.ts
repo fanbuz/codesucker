@@ -13,6 +13,8 @@ export interface FileTreeFileNode<T extends SelectableFile = SelectableFile> {
   key: string;
   relPath: string;
   name: string;
+  /** Pre-normalized once when the tree is built and reused by search queries. */
+  searchText: string;
   file: T;
 }
 
@@ -22,6 +24,8 @@ export interface FileTreeDirectoryNode<T extends SelectableFile = SelectableFile
   key: string;
   relPath: string;
   name: string;
+  /** Pre-normalized once when the tree is built and reused by search queries. */
+  searchText: string;
   children: Array<FileTreeDirectoryNode<T> | FileTreeFileNode<T>>;
   totalFiles: number;
   includedFiles: number;
@@ -33,6 +37,14 @@ interface MutableDirectory<T extends SelectableFile> {
   relPath: string;
   directories: Map<string, MutableDirectory<T>>;
   files: FileTreeFileNode<T>[];
+}
+
+export interface FileTreeSearchResult<T extends SelectableFile = SelectableFile> {
+  tree: FileTreeDirectoryNode<T>;
+  matchedNodes: number;
+  visibleFiles: number;
+  /** Directories that must be open for every matching row to be visible. */
+  expandedDirectories: ReadonlySet<string>;
 }
 
 /**
@@ -57,6 +69,10 @@ function selectionStateForCounts(includedFiles: number, totalFiles: number): Sel
 
 function makeMutableDirectory<T extends SelectableFile>(name: string, relPath: string): MutableDirectory<T> {
   return { name, relPath, directories: new Map(), files: [] };
+}
+
+function normalizeSearchText(...values: string[]): string {
+  return values.join('\n').toLowerCase();
 }
 
 function compareTreeNodes<T extends SelectableFile>(
@@ -90,6 +106,7 @@ function finalizeDirectory<T extends SelectableFile>(directory: MutableDirectory
     key: `directory:${directory.relPath}`,
     relPath: directory.relPath,
     name: directory.name,
+    searchText: normalizeSearchText(directory.name, directory.relPath),
     children,
     totalFiles,
     includedFiles,
@@ -125,11 +142,91 @@ export function buildFileTree<T extends SelectableFile>(
       key: `file:${normalizedPath}`,
       relPath: normalizedPath,
       name: file.name || normalizedName,
+      searchText: normalizeSearchText(file.name || normalizedName, normalizedPath),
       file,
     });
   }
 
   return finalizeDirectory(root);
+}
+
+/** Normalize user input consistently without changing any file-system path. */
+export function normalizeFileTreeSearchQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
+/**
+ * Derive a filtered view while retaining each match's ancestors. A matching
+ * directory keeps its complete subtree so directory selection semantics and
+ * browsing remain based on the full project.
+ */
+export function filterFileTree<T extends SelectableFile>(
+  tree: FileTreeDirectoryNode<T>,
+  query: string,
+): FileTreeSearchResult<T> {
+  const normalizedQuery = normalizeFileTreeSearchQuery(query);
+  if (!normalizedQuery) {
+    return {
+      tree,
+      matchedNodes: 0,
+      visibleFiles: tree.totalFiles,
+      expandedDirectories: new Set(),
+    };
+  }
+
+  const expandedDirectories = new Set<string>();
+
+  function filterNode(
+    node: FileTreeDirectoryNode<T> | FileTreeFileNode<T>,
+  ): { node: FileTreeDirectoryNode<T> | FileTreeFileNode<T>; matchedNodes: number; visibleFiles: number } | null {
+    if (node.kind === 'file') {
+      return node.searchText.includes(normalizedQuery)
+        ? { node, matchedNodes: 1, visibleFiles: 1 }
+        : null;
+    }
+
+    if (node.searchText.includes(normalizedQuery)) {
+      if (node.relPath) expandedDirectories.add(node.relPath);
+      return { node, matchedNodes: 1, visibleFiles: node.totalFiles };
+    }
+
+    const children: Array<FileTreeDirectoryNode<T> | FileTreeFileNode<T>> = [];
+    let matchedNodes = 0;
+    let visibleFiles = 0;
+    for (const child of node.children) {
+      const result = filterNode(child);
+      if (!result) continue;
+      children.push(result.node);
+      matchedNodes += result.matchedNodes;
+      visibleFiles += result.visibleFiles;
+    }
+
+    if (children.length === 0) return null;
+    if (node.relPath) expandedDirectories.add(node.relPath);
+    return {
+      node: { ...node, children },
+      matchedNodes,
+      visibleFiles,
+    };
+  }
+
+  const children: Array<FileTreeDirectoryNode<T> | FileTreeFileNode<T>> = [];
+  let matchedNodes = 0;
+  let visibleFiles = 0;
+  for (const child of tree.children) {
+    const result = filterNode(child);
+    if (!result) continue;
+    children.push(result.node);
+    matchedNodes += result.matchedNodes;
+    visibleFiles += result.visibleFiles;
+  }
+
+  return {
+    tree: { ...tree, children },
+    matchedNodes,
+    visibleFiles,
+    expandedDirectories,
+  };
 }
 
 function normalizeDirectoryPath(directoryPath: string, pathSeparator: PathSeparator): string {

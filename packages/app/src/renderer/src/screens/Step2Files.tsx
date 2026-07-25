@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { completeFileOrder, orderedIncluded, reorderIncludedPaths, useStore, type FileRow } from '../store';
 import { unlockStep } from '../wizard-progress';
 import {
@@ -7,9 +7,12 @@ import {
   type ExtensionStat, type StatMetric, type StatScope,
 } from '../file-type-stats';
 import {
-  buildFileTree, invertAllIncluded, setAllIncluded, setDirectoryIncluded,
+  buildFileTree, filterFileTree, invertAllIncluded, normalizeFileTreeSearchQuery,
+  setAllIncluded, setDirectoryIncluded,
   type FileTreeDirectoryNode, type FileTreeFileNode, type SelectionState,
 } from '../file-selection';
+
+const FILE_TREE_SEARCH_DEBOUNCE_MS = 180;
 
 const LANG_COLORS: Record<string, [string, string]> = {
   KT: ['#7c5cff', 'rgba(124,92,255,.12)'], JAVA: ['#e76f51', 'rgba(231,111,81,.12)'],
@@ -100,11 +103,54 @@ export default function Step2Files() {
   const [statMetric, setStatMetric] = useState<StatMetric>('rawLines');
   const [showAllTypes, setShowAllTypes] = useState(false);
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set());
+  const [fileTreeSearchInput, setFileTreeSearchInput] = useState('');
+  const [fileTreeSearchQuery, setFileTreeSearchQuery] = useState('');
+  const [searchExpansionOverrides, setSearchExpansionOverrides] = useState<{
+    query: string;
+    values: ReadonlyMap<string, boolean>;
+  }>(() => ({ query: '', values: new Map() }));
+  const [isFilteringFileTree, startFileTreeTransition] = useTransition();
 
   const byRel = useMemo(() => new Map(s.files.map((f) => [f.relPath, f])), [s.files]);
   const included = orderedIncluded(s);
 
   const tree = useMemo(() => buildFileTree(s.files, s.pathSeparator), [s.files, s.pathSeparator]);
+  const treeSearchResult = useMemo(
+    () => filterFileTree(tree, fileTreeSearchQuery),
+    [tree, fileTreeSearchQuery],
+  );
+  const normalizedSearchInput = normalizeFileTreeSearchQuery(fileTreeSearchInput);
+  const isFileTreeSearchActive = fileTreeSearchQuery.length > 0;
+  const isFileTreeSearchWaiting = normalizedSearchInput !== fileTreeSearchQuery;
+  const visibleExpandedDirectories = useMemo(() => {
+    if (!isFileTreeSearchActive) return expandedDirectories;
+    const next = new Set(expandedDirectories);
+    for (const relPath of treeSearchResult.expandedDirectories) next.add(relPath);
+    if (searchExpansionOverrides.query === fileTreeSearchQuery) {
+      for (const [relPath, expanded] of searchExpansionOverrides.values) {
+        if (expanded) next.add(relPath);
+        else next.delete(relPath);
+      }
+    }
+    return next;
+  }, [
+    expandedDirectories,
+    fileTreeSearchQuery,
+    isFileTreeSearchActive,
+    searchExpansionOverrides,
+    treeSearchResult.expandedDirectories,
+  ]);
+
+  useEffect(() => {
+    if (!normalizedSearchInput) {
+      startFileTreeTransition(() => setFileTreeSearchQuery(''));
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      startFileTreeTransition(() => setFileTreeSearchQuery(normalizedSearchInput));
+    }, FILE_TREE_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [normalizedSearchInput]);
 
   const fileTypes = useMemo(() => summarizeFileTypes(s.files), [s.files]);
   const rankedTypes = useMemo(
@@ -145,12 +191,28 @@ export default function Step2Files() {
   };
 
   const toggleExpanded = (relPath: string) => {
+    if (isFileTreeSearchActive) {
+      setSearchExpansionOverrides((current) => {
+        const values = current.query === fileTreeSearchQuery
+          ? new Map(current.values)
+          : new Map<string, boolean>();
+        values.set(relPath, !visibleExpandedDirectories.has(relPath));
+        return { query: fileTreeSearchQuery, values };
+      });
+      return;
+    }
     setExpandedDirectories((current) => {
       const next = new Set(current);
       if (next.has(relPath)) next.delete(relPath);
       else next.add(relPath);
       return next;
     });
+  };
+
+  const clearFileTreeSearch = () => {
+    setFileTreeSearchInput('');
+    setSearchExpansionOverrides({ query: '', values: new Map() });
+    startFileTreeTransition(() => setFileTreeSearchQuery(''));
   };
 
   const setEveryFile = (includedState: boolean) => updateFiles(setAllIncluded(s.files, includedState));
@@ -197,11 +259,38 @@ export default function Step2Files() {
             <button type="button" onClick={() => setEveryFile(false)}>清空</button>
             <button type="button" onClick={invertEveryFile} title="反选当前项目的全部扫描文件">反选</button>
           </div>
+          <div className="file-tree-search">
+            <span className="file-tree-search__icon" aria-hidden="true">⌕</span>
+            <input type="search" value={fileTreeSearchInput} placeholder="搜索目录、文件或相对路径"
+              aria-label="搜索项目文件" autoComplete="off" spellCheck={false}
+              onChange={(event) => setFileTreeSearchInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape' || !fileTreeSearchInput) return;
+                event.preventDefault();
+                clearFileTreeSearch();
+              }} />
+            {fileTreeSearchInput && (
+              <button type="button" aria-label="清空项目文件搜索" title="清空搜索（Esc）"
+                onClick={clearFileTreeSearch}>×</button>
+            )}
+          </div>
+          <div className="file-tree-search__status" role="status" aria-live="polite">
+            {isFileTreeSearchWaiting || isFilteringFileTree
+              ? '正在筛选…'
+              : isFileTreeSearchActive
+                ? `匹配 ${treeSearchResult.matchedNodes} 项 · 显示 ${treeSearchResult.visibleFiles} 个文件`
+                : '支持目录、文件名和相对路径'}
+          </div>
         </div>
         <div className="file-tree-scroll" aria-label="项目文件树">
-          {tree.children.map((node) => (
+          {isFileTreeSearchActive && treeSearchResult.tree.children.length === 0 ? (
+            <div className="file-tree-empty">
+              <strong>无匹配结果</strong>
+              <span>换个关键词，或按 Esc 清空搜索</span>
+            </div>
+          ) : treeSearchResult.tree.children.map((node) => (
             <FileTreeNode key={node.key} node={node} depth={0}
-              expandedDirectories={expandedDirectories} onToggleExpanded={toggleExpanded}
+              expandedDirectories={visibleExpandedDirectories} onToggleExpanded={toggleExpanded}
               onToggleDirectory={toggleDirectory} onToggleFile={toggleFile} />
           ))}
         </div>
