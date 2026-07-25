@@ -151,8 +151,12 @@ export function buildFileTree<T extends SelectableFile>(
 }
 
 /** Normalize user input consistently without changing any file-system path. */
-export function normalizeFileTreeSearchQuery(query: string): string {
-  return query.trim().toLowerCase();
+export function normalizeFileTreeSearchQuery(
+  query: string,
+  pathSeparator: PathSeparator = '/',
+): string {
+  const portableQuery = pathSeparator === '\\' ? query.replace(/\\/g, '/') : query;
+  return portableQuery.trim().toLowerCase();
 }
 
 /**
@@ -163,8 +167,9 @@ export function normalizeFileTreeSearchQuery(query: string): string {
 export function filterFileTree<T extends SelectableFile>(
   tree: FileTreeDirectoryNode<T>,
   query: string,
+  pathSeparator: PathSeparator = '/',
 ): FileTreeSearchResult<T> {
-  const normalizedQuery = normalizeFileTreeSearchQuery(query);
+  const normalizedQuery = normalizeFileTreeSearchQuery(query, pathSeparator);
   if (!normalizedQuery) {
     return {
       tree,

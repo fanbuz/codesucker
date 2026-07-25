@@ -177,6 +177,18 @@ const windowsPaths = [
 ];
 const windowsTree = buildFileTree(windowsPaths, '\\');
 assert.equal(directory(windowsTree, 'src').totalFiles, 2, 'Windows 原生分隔符应构建为目录层级');
+assert.equal(
+  normalizeFileTreeSearchQuery('  src\\components\\BUTTON.tsx  ', '\\'),
+  'src/components/button.tsx',
+  'Windows 原生分隔符查询应转换为可移植路径',
+);
+const windowsNativePathSearch = filterFileTree(windowsTree, 'src\\components\\Button.tsx', '\\');
+assert.equal(windowsNativePathSearch.matchedNodes, 1, 'Windows 原生相对路径应命中文件');
+assert.equal(windowsNativePathSearch.visibleFiles, 1);
+assert.equal(
+  directory(windowsNativePathSearch.tree, 'src/components').children[0]?.name,
+  'Button.tsx',
+);
 assert.deepEqual(
   getDirectorySelection(windowsPaths, 'src/components', '\\'),
   { totalFiles: 1, includedFiles: 0, selectionState: 'unchecked' },

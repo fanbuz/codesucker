@@ -116,10 +116,10 @@ export default function Step2Files() {
 
   const tree = useMemo(() => buildFileTree(s.files, s.pathSeparator), [s.files, s.pathSeparator]);
   const treeSearchResult = useMemo(
-    () => filterFileTree(tree, fileTreeSearchQuery),
-    [tree, fileTreeSearchQuery],
+    () => filterFileTree(tree, fileTreeSearchQuery, s.pathSeparator),
+    [tree, fileTreeSearchQuery, s.pathSeparator],
   );
-  const normalizedSearchInput = normalizeFileTreeSearchQuery(fileTreeSearchInput);
+  const normalizedSearchInput = normalizeFileTreeSearchQuery(fileTreeSearchInput, s.pathSeparator);
   const isFileTreeSearchActive = fileTreeSearchQuery.length > 0;
   const isFileTreeSearchWaiting = normalizedSearchInput !== fileTreeSearchQuery;
   const visibleExpandedDirectories = useMemo(() => {
