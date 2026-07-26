@@ -25,8 +25,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  license:
+    name: License compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check third-party licenses
+        run: npm run licenses:check
+
   package:
     name: Package ${{ matrix.label }}
+    needs: license
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
@@ -93,7 +114,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
+    needs: [license, package]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

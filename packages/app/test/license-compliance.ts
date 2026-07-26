@@ -8,6 +8,7 @@ const repoRoot = resolve(appRoot, '../..');
 const appPackage = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8'));
 const policy = JSON.parse(readFileSync(join(repoRoot, 'licenses/policy.json'), 'utf8'));
 const notices = readFileSync(join(repoRoot, 'THIRD_PARTY_NOTICES.txt'), 'utf8');
+const releaseWorkflow = readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8');
 
 assert.ok(
   appPackage.build.extraResources.some(
@@ -29,5 +30,8 @@ assert.doesNotMatch(jszipSection, /GNU GENERAL PUBLIC LICENSE/, 'JSZip 清单不
 assert.equal(policy.licenseChoices.jszip.selected, 'MIT', 'JSZip 策略必须固定选择 MIT');
 assert.ok(!policy.allowedLicenses.some((license: string) => /(?:A?GPL|LGPL)/.test(license)), '允许列表不得包含 GPL/AGPL/LGPL');
 assert.doesNotMatch(notices, /sharp-libvips|@img\/sharp/, '仅用于构建的 sharp/libvips 不得进入运行时归属清单');
+assert.match(releaseWorkflow, /name: License compliance[\s\S]*run: npm run licenses:check/, '发布工作流必须先执行许可证门禁');
+assert.match(releaseWorkflow, /package:\n\s+name: Package[^\n]+\n\s+needs: license/, '三平台打包必须依赖许可证门禁');
+assert.match(releaseWorkflow, /needs: \[license, package\]/, 'GitHub Release 必须同时依赖许可证门禁和三平台打包');
 
 console.log('✅ third-party license compliance 全部通过');

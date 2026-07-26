@@ -86,7 +86,11 @@ while (queue.length > 0) {
   if (packages.has(packageJsonPath)) continue;
   const manifest = readJson(packageJsonPath);
   packages.set(packageJsonPath, { manifest, packageJsonPath });
-  for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+  const runtimeDependencies = {
+    ...(manifest.dependencies ?? {}),
+    ...(manifest.optionalDependencies ?? {}),
+  };
+  for (const dependency of Object.keys(runtimeDependencies)) {
     queue.push({ name: dependency, from: packageJsonPath });
   }
 }
