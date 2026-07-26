@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "allowedLicenses": [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BlueOak-1.0.0",
+    "ISC",
+    "MIT",
+    "Zlib",
+    "(MIT AND Zlib)"
+  ],
+  "bundledRoots": [
+    "react",
+    "react-dom"
+  ],
+  "standalonePackages": [
+    "electron"
+  ],
+  "licenseChoices": {
+    "jszip": {
+      "selected": "MIT",
+      "startMarker": "The MIT License",
+      "endMarker": "GPL version 3"
+    }
+  },
+  "licenseTextOverrides": {
+    "isarray": {
+      "file": "README.md",
+      "startMarker": "## License"
+    }
+  },
+  "additionalLicenseFiles": {
+    "pako": [
+      "lib/zlib/README"
+    ]
+  }
+}

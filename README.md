@@ -177,6 +177,8 @@ npm run verify                           # 发布前完整校验
 
 本项目允许使用、修改、分发及闭源商用；再分发时须附带 Apache-2.0 许可证、保留适用的版权与 [NOTICE](NOTICE) 声明，并标明对文件所作的修改。
 
+安装包同时附带 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)，列出实际分发与打入应用 bundle 的第三方依赖、许可证选择和完整归属文本。
+
 ## 延伸阅读与社区
 
 - [我为什么做 CodeSucker：一篇 X 长文](https://x.com/fanbuz_/status/2080468029784379675?s=20)，来自 [@fanbuz_](https://x.com/fanbuz_)

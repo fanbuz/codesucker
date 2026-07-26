@@ -8,9 +8,12 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'design/icon/**'
+      - 'licenses/**'
       - 'packages/app/**'
       - 'packages/core/**'
       - 'scripts/gen-icons.mjs'
+      - 'scripts/gen-third-party-notices.mjs'
+      - 'THIRD_PARTY_NOTICES.txt'
   push:
     tags: ['v*']
 

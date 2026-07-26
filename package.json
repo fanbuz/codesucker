@@ -19,13 +19,15 @@
     "perf": "npm run build && npm run perf -w @codesucker/app",
     "icons:generate": "node scripts/gen-icons.mjs",
     "icons:check": "node scripts/gen-icons.mjs --check",
+    "licenses:generate": "node scripts/gen-third-party-notices.mjs",
+    "licenses:check": "node scripts/gen-third-party-notices.mjs --check",
     "dist:mac:x64": "npm run dist:mac:x64 -w @codesucker/app",
     "dist:mac:arm64": "npm run dist:mac:arm64 -w @codesucker/app",
     "dist:win:x64": "npm run dist:win:x64 -w @codesucker/app",
     "lockfile:check": "node scripts/check-lockfile-registry.mjs",
     "version:check": "node scripts/check-version.mjs",
     "version:set": "node scripts/set-version.mjs",
-    "verify": "npm run version:check && npm run lockfile:check && npm run icons:check && npm test && npm run build && npm run test:integration"
+    "verify": "npm run version:check && npm run lockfile:check && npm run icons:check && npm run licenses:check && npm test && npm run build && npm run test:integration"
   },
   "engines": {
     "node": ">=22.12.0"
