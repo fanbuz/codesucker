@@ -31,6 +31,7 @@ input,button{font-family:inherit}
 
 .titlebar{-webkit-app-region:drag}
 .titlebar button,.titlebar .nodrag{-webkit-app-region:no-drag}
+.titlebar-logo{display:block;width:22px;height:22px;flex:none;object-fit:contain}
 .winbtn{width:34px;height:28px;border:none;background:transparent;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text2);cursor:pointer}
 .winbtn:hover{background:var(--border2)}
 .winbtn.close:hover{background:#e5484d;color:#fff}

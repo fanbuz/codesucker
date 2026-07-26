@@ -7,8 +7,10 @@ on:
       - '.github/workflows/release.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'design/icon/**'
       - 'packages/app/**'
       - 'packages/core/**'
+      - 'scripts/gen-icons.mjs'
   push:
     tags: ['v*']
 

@@ -8,6 +8,7 @@ import Step5Export from './screens/Step5Export';
 import Settings from './screens/Settings';
 import { canStartScan } from './scan-guard';
 import { canVisitStep } from './wizard-progress';
+import { APP_ICON_URL } from './brand-icons';
 
 const STEP_TITLES = ['导入项目', '文件与排序', '清洗与排版', '分页预览', '校验与导出'];
 
@@ -74,7 +75,7 @@ export default function App() {
       {/* 标题栏 */}
       <div className="titlebar" style={{ height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px 0 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600 }}>{'</>'}</div>
+          <img className="titlebar-logo" src={APP_ICON_URL} alt="" aria-hidden="true" />
           <div style={{ fontSize: 13, fontWeight: 600 }}>CodeSucker</div>
           <div style={{ fontSize: 12, color: 'var(--text3)' }}>软著代码抽取器</div>
         </div>
