@@ -90,6 +90,9 @@ while (queue.length > 0) {
     ...(manifest.dependencies ?? {}),
     ...(manifest.optionalDependencies ?? {}),
   };
+  for (const peer of Object.keys(manifest.peerDependencies ?? {})) {
+    if (manifest.peerDependenciesMeta?.[peer]?.optional !== true) runtimeDependencies[peer] = manifest.peerDependencies[peer];
+  }
   for (const dependency of Object.keys(runtimeDependencies)) {
     queue.push({ name: dependency, from: packageJsonPath });
   }
