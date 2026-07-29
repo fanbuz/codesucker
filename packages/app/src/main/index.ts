@@ -7,6 +7,7 @@ import {
   loadWindowState, minimumSizeForBounds, showRestoredWindow,
   WINDOW_STATE_CONFIG_NAME, WindowStateTracker,
 } from './window-state';
+import { windowChromeOptions } from './window-chrome';
 
 let win: BrowserWindow | null = null;
 
@@ -20,7 +21,7 @@ function createWindow() {
     ...restoredState.bounds,
     minWidth: minimumSize.width,
     minHeight: minimumSize.height,
-    frame: false,
+    ...windowChromeOptions(process.platform),
     show: false,
     icon: path.join(__dirname, '../../build/icon.png'),
     backgroundColor: '#f4f4f5',

@@ -58,7 +58,7 @@ export default function Step3Clean() {
               <div style={{ fontSize: 13, fontWeight: 500 }}>排版参数</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 11, color: 'var(--text3)' }}>宋体 · 10.5pt · 每页 50 行</span>
-                <span style={{ fontSize: 10, color: 'var(--text3)', transform: `rotate(${s.layoutOpen ? 180 : 0}deg)`, transition: 'transform .15s' }}>▼</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)', transform: `rotate(${s.layoutOpen ? 180 : 0}deg)`, transition: 'transform .15s' }}>▼</span>
               </div>
             </button>
             {s.layoutOpen && (
@@ -69,7 +69,7 @@ export default function Step3Clean() {
                     <div style={{ height: 30, border: '1px solid var(--border)', borderRadius: 7, display: 'flex', alignItems: 'center', padding: '0 10px', fontSize: 12, background: 'var(--panel)' }}>{v}</div>
                   </div>
                 ))}
-                <div style={{ gridColumn: '1 / -1', fontSize: 10.5, color: 'var(--text3)', lineHeight: 1.6 }}>
+                <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--text3)', lineHeight: 1.6 }}>
                   V1 版本按申报通用规范固定；分页由分页符显式控制，不依赖排版凑页
                 </div>
               </div>

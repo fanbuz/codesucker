@@ -73,13 +73,13 @@ export default function App() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg)' }}>
       {/* 标题栏 */}
-      <div className="titlebar" style={{ height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px 0 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <div className="titlebar">
+        <div className="titlebar-brand">
           <img className="titlebar-logo" src={APP_ICON_URL} alt="" aria-hidden="true" />
           <div style={{ fontSize: 13, fontWeight: 600 }}>CodeSucker</div>
           <div style={{ fontSize: 12, color: 'var(--text3)' }}>软著代码抽取器</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <div className="window-controls">
           <button className="winbtn" onClick={() => window.cs.win('minimize')}><svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" strokeWidth="1.2" /></svg></button>
           <button className="winbtn" onClick={() => window.cs.win('maximize')}><svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg></button>
           <button className="winbtn close" onClick={() => window.cs.win('close')}><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5" stroke="currentColor" strokeWidth="1.2" /></svg></button>
@@ -135,7 +135,7 @@ export default function App() {
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--green)" strokeWidth="1.4" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="var(--green)" strokeWidth="1.4" /></svg>
               源码处理全程离线
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>版本检测仅查询 GitHub，不上传代码</div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3, lineHeight: 1.5 }}>版本检测仅查询 GitHub，不上传代码</div>
           </div>
         </div>
 

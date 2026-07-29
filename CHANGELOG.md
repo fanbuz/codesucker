@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [0.4.4-rc.1] - 2026-07-30
+
+### Added
+
+- macOS 恢复原生 `hiddenInset` 标题栏与左上角红黄绿交通灯，保留系统全屏、标题栏双击和窗口管理行为
+- 增加跨平台字体、普通 UI 最小字号、标准字重、macOS 窗口装饰和 DOCX 字体/字号/行距结构的自动化门禁
+
+### Changed
+
+- Windows 普通界面优先使用 Segoe UI Variable / Segoe UI / Microsoft YaHei UI，代码、路径与统计优先使用 Cascadia Mono 并提供中文回退
+- 普通 UI 文本字重收敛到 400 / 500 / 600，辅助信息提升到至少 11px；A4 申报文档继续使用独立宋体预览域
+- macOS 隐藏右上角自绘窗口按钮，为左上角原生交通灯保留安全区域；Windows 继续使用现有自绘窗口控件
+
 ## [0.4.3] - 2026-07-26
 
 ### Added

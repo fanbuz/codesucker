@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import './theme.css';
 import App from './App';
 
+document.documentElement.dataset.platform = window.cs.platform;
+
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />

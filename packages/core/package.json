@@ -1,6 +1,6 @@
 {
   "name": "@codesucker/core",
-  "version": "0.4.3",
+  "version": "0.4.4-rc.1",
   "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",
@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "jszip": "^3.10.1",
     "typescript": "^5.5.0"
   }
 }

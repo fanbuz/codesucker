@@ -13,6 +13,7 @@ interface ProgressEvent {
 }
 
 const api = {
+  platform: process.platform,
   win: (action: 'minimize' | 'maximize' | 'close') => ipcRenderer.send(`win:${action}`),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickFolder'),
   pickOutDir: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickOutDir'),

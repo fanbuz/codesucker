@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import assert from 'node:assert';
+import JSZip from 'jszip';
 import { annotate, defaultCleanOptions, DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, discover, processFiles, renderDocx, renderTxt, sortFiles, wrapLine } from '../src/index.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codesucker-'));
@@ -82,6 +83,25 @@ const docxPath = await renderDocx(pages, { title: config.title, fontName: 'SimSu
 const txtPath = renderTxt(pages, { title: config.title, fontName: 'SimSun', fontSizePt: 10.5, outDir });
 assert.ok(fs.statSync(docxPath).size > 10000, 'docx 应生成');
 assert.ok(fs.readFileSync(txtPath, 'utf8').split('\n').length === 3000, 'txt 应为 3000 行');
+
+// —— DOCX 申报排版结构 ——
+const docxZip = await JSZip.loadAsync(fs.readFileSync(docxPath));
+const documentXml = await docxZip.file('word/document.xml')!.async('string');
+const stylesXml = await docxZip.file('word/styles.xml')!.async('string');
+const headerXml = await docxZip.file('word/header1.xml')!.async('string');
+
+for (const [name, xml] of [['正文', documentXml], ['默认样式', stylesXml], ['页眉', headerXml]] as const) {
+  assert.match(xml, /w:rFonts[^>]*w:ascii="SimSun"/, `${name}必须声明西文字体 SimSun`);
+  assert.match(xml, /w:rFonts[^>]*w:eastAsia="SimSun"/, `${name}必须声明东亚字体 SimSun`);
+}
+assert.match(stylesXml, /w:sz w:val="21"/, '默认正文样式必须为 10.5pt');
+assert.match(documentXml, /w:sz w:val="21"/, '正文 run 必须为 10.5pt');
+assert.match(documentXml, /w:spacing[^>]*w:line="210"/, '正文固定行距必须为 10.5pt 对应的 210 twips');
+assert.match(documentXml, /w:spacing[^>]*w:lineRule="exact"/, '正文必须使用固定行距');
+assert.match(documentXml, /w:pageBreakBefore/, '多页文档必须包含显式分页边界');
+assert.match(documentXml, /w:pgSz[^>]*w:w="11906"[^>]*w:h="16838"/, '页面尺寸必须保持 A4');
+assert.match(headerXml, /测试系统V1\.0/, '页眉必须包含软件名称与版本号');
+assert.match(headerXml, /w:fldChar[^>]*w:fldCharType="begin"|PAGE/, '页眉必须包含自动页码域');
 
 console.log('✅ smoke 全部通过');
 console.log('   docx:', docxPath, Math.round(fs.statSync(docxPath).size / 1024) + 'KB');

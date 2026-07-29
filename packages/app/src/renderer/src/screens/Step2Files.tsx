@@ -319,8 +319,8 @@ export default function Step2Files() {
               <svg width="10" height="14" viewBox="0 0 10 14" style={{ flex: 'none', color: 'var(--text3)' }}>{[3, 7, 11].map((y) => [3, 7].map((x) => <circle key={`${x}${y}`} cx={x} cy={y} r="1.2" fill="currentColor" />))}</svg>
               <span style={{ width: 20, fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', textAlign: 'right' }}>{i + 1}</span>
               <span style={{ fontSize: 12.5, fontFamily: 'var(--mono)', fontWeight: 500, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
-              {i === 0 && <span className="step2-order-row__badge" style={{ fontSize: 10.5, color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', padding: '1px 7px', borderRadius: 5, fontWeight: 500 }}>📌 首页起点</span>}
-              {i === included.length - 1 && <span className="step2-order-row__badge" style={{ fontSize: 10.5, color: 'var(--green)', background: 'var(--green-soft)', padding: '1px 7px', borderRadius: 5, fontWeight: 500 }}>🏁 末页终点</span>}
+              {i === 0 && <span className="step2-order-row__badge" style={{ fontSize: 11, color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', padding: '1px 7px', borderRadius: 5, fontWeight: 500 }}>📌 首页起点</span>}
+              {i === included.length - 1 && <span className="step2-order-row__badge" style={{ fontSize: 11, color: 'var(--green)', background: 'var(--green-soft)', padding: '1px 7px', borderRadius: 5, fontWeight: 500 }}>🏁 末页终点</span>}
               <span className="step2-order-row__lines" style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{f.rawLines} 行</span>
             </div>
           ))}
@@ -333,7 +333,7 @@ export default function Step2Files() {
         {s.scanErrors.length > 0 && (
           <div className="step2-scan-error" style={{ background: 'var(--orange-soft)', border: '1px solid color-mix(in srgb, var(--orange) 35%, transparent)', borderRadius: 9, padding: 10 }}>
             <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--orange)' }}>{s.scanErrors.length} 个文件扫描失败，已跳过</div>
-            <div className="step2-scan-error__detail" title={`${s.scanErrors[0].file} · ${s.scanErrors[0].message}`} style={{ fontSize: 10.5, color: 'var(--text2)', marginTop: 4, fontFamily: 'var(--mono)' }}>
+            <div className="step2-scan-error__detail" title={`${s.scanErrors[0].file} · ${s.scanErrors[0].message}`} style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4, fontFamily: 'var(--mono)' }}>
               {s.scanErrors[0].file} · {s.scanErrors[0].message}
             </div>
           </div>
@@ -362,7 +362,7 @@ export default function Step2Files() {
           <div className="step2-type-card__heading">
             <div className="step2-type-card__heading-copy">
               <div style={{ fontSize: 11.5, fontWeight: 600 }}>文件类型构成</div>
-              <div style={{ fontSize: 10.5, color: 'var(--text3)', marginTop: 2 }}>勾选参与清洗与导出的后缀</div>
+              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>勾选参与清洗与导出的后缀</div>
             </div>
             <div className="step2-scope-switch" aria-label="文件类型统计范围">
               {([['all', '全部'], ['included', '已纳入']] as const).map(([value, label]) => (
@@ -402,7 +402,7 @@ export default function Step2Files() {
               return (
                 <div key={stat.key} className="file-type-row" style={{ opacity: statScope === 'included' && stat.includedFiles === 0 ? 0.5 : 1 }}>
                   <button onClick={() => toggleExtension(stat)} aria-label={`${stat.fullyIncluded ? '取消' : '选择'} ${stat.label}`} aria-pressed={stat.fullyIncluded}
-                    style={{ width: 15, height: 15, flex: 'none', padding: 0, border: `1.5px solid ${stat.includedFiles > 0 ? color : 'var(--border)'}`, borderRadius: 4, background: stat.includedFiles > 0 ? color : 'var(--panel)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>
+                    style={{ width: 15, height: 15, flex: 'none', padding: 0, border: `1.5px solid ${stat.includedFiles > 0 ? color : 'var(--border)'}`, borderRadius: 4, background: stat.includedFiles > 0 ? color : 'var(--panel)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                     {stat.fullyIncluded ? '✓' : stat.partiallyIncluded ? '−' : ''}
                   </button>
                   <button onClick={() => toggleExtension(stat)} className="file-type-row__main" title={`${stat.label} · ${values.files} 文件 · ${values.rawLines.toLocaleString()} 行 · ${formatBytes(values.bytes)}`}>
@@ -415,9 +415,9 @@ export default function Step2Files() {
                     </span>
                   </button>
                   <div className="file-type-row__aside">
-                    <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', fontWeight: 600, color }}>{(percentage * 100).toFixed(percentage > 0 && percentage < 0.01 ? 1 : 0)}%</div>
+                    <div style={{ fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 600, color }}>{(percentage * 100).toFixed(percentage > 0 && percentage < 0.01 ? 1 : 0)}%</div>
                     <button onClick={() => keepOnlyExtension(stat)} title={`只导出 ${stat.label} 文件`}
-                      style={{ border: 0, padding: 0, marginTop: 2, background: 'transparent', color: 'var(--text3)', fontSize: 9.5, cursor: 'pointer' }}>仅此类</button>
+                      style={{ border: 0, padding: 0, marginTop: 2, background: 'transparent', color: 'var(--text3)', fontSize: 11, cursor: 'pointer' }}>仅此类</button>
                   </div>
                 </div>
               );

@@ -36,6 +36,7 @@ declare global {
 
   interface Window {
     cs: {
+      platform: NodeJS.Platform;
       win: (action: 'minimize' | 'maximize' | 'close') => void;
       pickFolder: () => Promise<string | null>;
       pickOutDir: () => Promise<string | null>;

@@ -162,7 +162,7 @@ export default function Step5Export() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', marginBottom: 6, background: 'var(--panel2)' }}>
             <input type="checkbox" checked={s.fmtDocx} onChange={() => s.set({ fmtDocx: !s.fmtDocx })} style={{ accentColor: 'var(--accent)', margin: 0 }} />
             <span style={{ fontSize: 12.5, fontWeight: 500 }}>Word 文档（.docx）</span>
-            <span style={{ fontSize: 10, color: 'var(--accent)', background: 'var(--accent-soft)', padding: '1px 6px', borderRadius: 4, marginLeft: 'auto' }}>推荐</span>
+            <span style={{ fontSize: 11, color: 'var(--accent)', background: 'var(--accent-soft)', padding: '1px 6px', borderRadius: 4, marginLeft: 'auto' }}>推荐</span>
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', background: 'var(--panel2)' }}>
             <input type="checkbox" checked={s.fmtTxt} onChange={() => s.set({ fmtTxt: !s.fmtTxt })} style={{ accentColor: 'var(--accent)', margin: 0 }} />
@@ -200,8 +200,8 @@ export default function Step5Export() {
             <div style={{ fontSize: 12.5, color: 'var(--text2)', marginTop: 8, fontFamily: 'var(--mono)', wordBreak: 'break-all', lineHeight: 1.6, background: 'var(--panel2)', border: '1px solid var(--border2)', borderRadius: 8, padding: '9px 12px' }}>
               {(r.docx ?? r.txt ?? '').split('/').pop()}<br />
               <span style={{ color: 'var(--text3)' }}>{r.pages} 页 · {r.lines.toLocaleString()} 行{r.size > 0 && ` · ${Math.round(r.size / 1024)} KB`}</span>
-              <br /><span style={{ color: 'var(--text3)', fontSize: 10.5 }}>CodeSucker {r.appVersion} · 规则 {r.rulesVersion}</span>
-              {r.errors.length > 0 && <><br /><span style={{ color: 'var(--orange)', fontSize: 10.5 }}>已跳过 {r.errors.length} 个处理失败文件</span></>}
+              <br /><span style={{ color: 'var(--text3)', fontSize: 11 }}>CodeSucker {r.appVersion} · 规则 {r.rulesVersion}</span>
+              {r.errors.length > 0 && <><br /><span style={{ color: 'var(--orange)', fontSize: 11 }}>已跳过 {r.errors.length} 个处理失败文件</span></>}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
               <button className="btn-primary" style={{ flex: 1, height: 38, fontSize: 13 }}
