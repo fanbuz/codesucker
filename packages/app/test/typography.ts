@@ -16,8 +16,8 @@ assert.match(
 );
 assert.match(
   themeCss,
-  /:root\[data-platform="win32"\]\{[\s\S]*?--font-mono:"Cascadia Mono","Microsoft YaHei UI",Consolas,monospace;/,
-  'Windows 等宽字体必须优先 Cascadia Mono，并为中文提供明确回退',
+  /:root\[data-platform="win32"\]\{[\s\S]*?--font-mono:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace;/,
+  'Windows 等宽字体必须优先 Cascadia Mono，并在中文字体前回退到 Consolas',
 );
 assert.match(themeCss, /--font-document:SimSun,"Songti SC",serif;/, '申报文档必须使用独立字体 token');
 assert.match(themeCss, /\.step4-paper__header\{[^}]*font-family:var\(--font-document\)/, 'A4 页眉必须使用文档字体域');
@@ -38,6 +38,10 @@ assert.doesNotMatch(`${themeCss}\n${componentSource}`, /fontWeight:\s*(?:550|650
 
 for (const match of componentSource.matchAll(/fontSize:\s*([0-9]+(?:\.[0-9]+)?)/g)) {
   assert.ok(Number(match[1]) >= 11, `React 内联 UI 字号不得小于 11px：${match[0]}`);
+}
+
+for (const match of componentSource.matchAll(/fontSize\s*=\s*(?:\{\s*)?["']?([0-9]+(?:\.[0-9]+)?)/g)) {
+  assert.ok(Number(match[1]) >= 11, `JSX UI 字号不得小于 11px：${match[0]}`);
 }
 
 for (const line of themeCss.split('\n')) {

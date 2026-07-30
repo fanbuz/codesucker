@@ -349,7 +349,7 @@ export default function Step2Files() {
             <circle cx="31" cy="31" r="26" fill="none" stroke={pageOk ? 'var(--green)' : 'var(--orange)'} strokeWidth="6" strokeLinecap="round"
               strokeDasharray={`${ring * Math.min(1, estPages / 60)} ${ring}`} transform="rotate(-90 31 31)" />
             <text x="31" y="29" textAnchor="middle" fontSize="14" fontWeight="600" fill="var(--text)" fontFamily="var(--mono)">{estPages}</text>
-            <text x="31" y="42" textAnchor="middle" fontSize="9" fill="var(--text3)">页</text>
+            <text x="31" y="42" textAnchor="middle" fontSize="11" fill="var(--text3)">页</text>
           </svg>
           <div className="step2-page-estimate__copy">
             <div style={{ fontSize: 11, color: 'var(--text3)' }}>预估页数</div>

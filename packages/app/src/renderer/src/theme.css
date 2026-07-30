@@ -10,7 +10,7 @@
 }
 :root[data-platform="win32"]{
  --font-ui:"Segoe UI Variable","Segoe UI","Microsoft YaHei UI",sans-serif;
- --font-mono:"Cascadia Mono","Microsoft YaHei UI",Consolas,monospace;
+ --font-mono:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace;
 }
 body{margin:0;font-family:var(--font-ui);font-size:13px;
  --accent-base:#4f46e5; --accent:var(--accent-base);

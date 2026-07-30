@@ -43,13 +43,11 @@ CodeSucker 把常见的软件著作权源程序材料规则整理成一套本地
 
 | 系统 | 架构 | 安装包 |
 |---|---|---|
-| macOS | Apple Silicon（M 系列芯片） | `CodeSucker-0.4.3-mac-arm64.dmg` |
-| macOS | Intel | `CodeSucker-0.4.3-mac-x64.dmg` |
-| Windows | x64 | `CodeSucker-0.4.3-win-x64.exe` |
+| macOS | Apple Silicon（M 系列芯片） | `CodeSucker-0.4.4-mac-arm64.dmg` |
+| macOS | Intel | `CodeSucker-0.4.4-mac-x64.dmg` |
+| Windows | x64 | `CodeSucker-0.4.4-win-x64.exe` |
 
 每个 Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件是否完整。
-
-> **v0.4.4 RC 测试**：需要协助验证 Windows 字体/缩放或 macOS 原生交通灯时，可前往 [v0.4.4-rc.1 pre-release](https://github.com/fanbuz/codesucker/releases/tag/v0.4.4-rc.1) 下载测试安装包；日常使用仍建议选择上表所列的最新稳定版。
 
 > **macOS 安装说明**：当前安装包尚未进行 Apple Developer ID 签名与公证。首次打开如果被 Gatekeeper 拦截，请先尝试打开一次，再进入“系统设置 → 隐私与安全性”，在安全提示旁选择“仍要打开”。不要从非本项目 Release 的来源下载安装包。正式签名与公证将在后续版本接入。
 >
@@ -155,7 +153,7 @@ scripts/    图标生成等工具脚本
 - [x] **v0.4.1**：分页缩略图首尾标签完整可见 · 项目文件目录树关键字快速筛选
 - [x] **v0.4.2**：应用标题栏、窗口、README 与 Windows 安装器品牌图标统一
 - [x] **v0.4.3**：安装包第三方许可证归属清单 · 依赖许可证自动审计与发布门禁
-- [ ] **v0.4.4（RC 验收中）**：Windows 字体与四档缩放质量 · macOS 原生交通灯与窗口行为 · 申报文档 Word 一致性验证
+- [x] **v0.4.4**：Windows 字体与四档缩放质量 · macOS 原生交通灯与窗口行为 · 申报文档 Word 一致性验证
 - [ ] **后续版本**：多目录导入 · 成立日期输入 · 自定义脱敏规则 · 校验项一键修复 · Linux 安装包 · macOS 签名与公证 · 应用内下载/安装更新 · CLI 版本
 - [ ] **V3**：用户手册/设计说明书模板化生成 · 例外交存模式（黑斜线覆盖）· 多申报主体管理
 
