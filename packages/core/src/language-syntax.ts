@@ -279,7 +279,9 @@ interface ConsumedSource {
 
 const POWERSHELL_IDENTIFIER = '[\\p{L}_][\\p{L}\\p{N}_]*';
 const POWERSHELL_BACKTICK_ESCAPE = '`(?:u\\{[0-9a-fA-F]{1,6}\\}|[^\\r\\n])';
-const POWERSHELL_VARIABLE = `(?:\\$\\{(?:${POWERSHELL_BACKTICK_ESCAPE}|[^\`{}\\r\\n])+\\}|\\$[\\p{L}_][\\p{L}\\p{N}_:]*)`;
+const POWERSHELL_VARIABLE_CHARS = '[\\p{L}\\p{Nd}_?]';
+const POWERSHELL_ORDINARY_VARIABLE = `\\$(?:(?:${POWERSHELL_VARIABLE_CHARS}+):)?${POWERSHELL_VARIABLE_CHARS}+`;
+const POWERSHELL_VARIABLE = `(?:${POWERSHELL_ORDINARY_VARIABLE}|\\$[$^]|\\$\\{(?:${POWERSHELL_BACKTICK_ESCAPE}|[^\`{}\\r\\n])+\\})`;
 const POWERSHELL_DECIMAL_DIGITS = '[0-9](?:_?[0-9])*';
 const POWERSHELL_UNSIGNED_NUMERIC_KEY = `(?:(?:0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|0[bB][01](?:_?[01])*)(?:[lL])?|(?:${POWERSHELL_DECIMAL_DIGITS}(?:\\.(?:${POWERSHELL_DECIMAL_DIGITS})?)?|\\.${POWERSHELL_DECIMAL_DIGITS})(?:[eE][+-]?${POWERSHELL_DECIMAL_DIGITS})?(?:[dDlL]|[kKmMgGtTpP][bB])?)`;
 const POWERSHELL_QUOTED_ATOM = `(?:"(?:\`.|""|[^"])*"|'(?:''|[^'])*')`;
@@ -566,14 +568,46 @@ function batchCommentStart(line: string): number | null {
   return match ? match[1].length : null;
 }
 
-function batchLastCommandSegment(code: string): { text: string; separatorStart: number } {
+function hasBatchLineContinuation(line: string, firstCharEscaped = false): boolean {
+  let quoted = false;
+  for (let cursor = 0; cursor < line.length; cursor++) {
+    if (cursor === 0 && firstCharEscaped) continue;
+    if (quoted) {
+      if (line[cursor] === '"') quoted = false;
+      continue;
+    }
+    if (line[cursor] === '^') {
+      let end = cursor;
+      while (line[end] === '^') end++;
+      const carets = end - cursor;
+      if (end === line.length) return carets % 2 !== 0;
+      if (carets % 2 !== 0) end++;
+      cursor = end - 1;
+      continue;
+    }
+    if (line[cursor] === '"') quoted = true;
+  }
+  return false;
+}
+
+function batchPrecedingCarets(code: string, index: number, firstCharEscaped = false): number {
+  let carets = 0;
+  for (let before = index - 1; before >= 0 && code[before] === '^'; before--) carets++;
+  if (firstCharEscaped && carets === index) carets--;
+  return carets;
+}
+
+function batchLastCommandSegment(
+  code: string,
+  firstCharEscaped = false,
+): { text: string; separatorStart: number } {
   let segmentStart = 0;
   let separatorStart = 0;
   let quoted = false;
   for (let cursor = 0; cursor < code.length; cursor++) {
+    if (cursor === 0 && firstCharEscaped) continue;
     const value = code[cursor];
-    let precedingCarets = 0;
-    for (let before = cursor - 1; before >= 0 && code[before] === '^'; before--) precedingCarets++;
+    const precedingCarets = batchPrecedingCarets(code, cursor, firstCharEscaped);
     const escaped = precedingCarets % 2 !== 0;
     if (value === '"') {
       if (quoted) quoted = false;
@@ -606,14 +640,20 @@ function isBatchRedirectionOnly(command: string): boolean {
   return new RegExp(String.raw`^@?(?:${redirection})(?:\s+${redirection})*$`).test(command);
 }
 
-function batchInlineRemBoundary(line: string, index: number, code: string): number | null {
+function batchInlineRemBoundary(
+  line: string,
+  index: number,
+  code: string,
+  firstCharEscaped = false,
+): number | null {
   if (!/^rem(?:[.\s]|$)/i.test(line.slice(index))) return null;
   const directSeparated = /\s$/.test(code) || /\s@$/.test(code);
   if (directSeparated) {
     const atPrefix = /\s@$/.test(code);
     const directCode = atPrefix ? code.slice(0, -1).trimEnd() : code.trimEnd();
-    const commandSegment = batchLastCommandSegment(directCode);
-    if (isBatchRedirectionOnly(commandSegment.text)) return commandSegment.separatorStart;
+    const commandSegment = batchLastCommandSegment(directCode, firstCharEscaped);
+    if ((!firstCharEscaped || commandSegment.separatorStart > 0)
+      && isBatchRedirectionOnly(commandSegment.text)) return commandSegment.separatorStart;
     const elseCount = commandSegment.text.match(/\belse\b/ig)?.length ?? 0;
     const doCount = commandSegment.text.match(/\bdo\b/ig)?.length ?? 0;
     const provenElse = elseCount === 1
@@ -625,10 +665,10 @@ function batchInlineRemBoundary(line: string, index: number, code: string): numb
   // REM 不能作为管道右侧命令；接受命令链以及未转义分组左括号后的首命令。
   const match = /(&&|\|\||&|\()\s*@?\s*$/.exec(code);
   if (!match) return null;
+  if (firstCharEscaped && match.index === 0) return null;
 
   // ^& / ^| / ^( 是 echo 等命令 token 的字面量字符，不是新命令段边界。
-  let carets = 0;
-  for (let cursor = match.index - 1; cursor >= 0 && code[cursor] === '^'; cursor--) carets++;
+  const carets = batchPrecedingCarets(code, match.index, firstCharEscaped);
   if (carets % 2 !== 0) return null;
 
   if (match[1] === '(') {
@@ -1770,11 +1810,16 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
   let activePowerShellRhsMode: PowerShellRhsMode = null;
   let activePowerShellRhsNesting = newPowerShellRhsNesting();
   let activePowerShellContinuation: PowerShellContinuationReason | null = null;
+  let activeBatchContinuation = false;
   const groovyExpression: GroovyExpressionState = {
     paren: 0, bracket: 0, canEndExpression: false, lineEscape: false,
   };
 
   for (const raw of rawLines) {
+    const batchContinuedLine = activeBatchContinuation;
+    activeBatchContinuation = false;
+    const batchFirstCharEscaped = syntax.dialect === 'batch'
+      && batchContinuedLine && raw.length > 0;
     let code = '';
     const comments: string[] = [];
     let hadComment = false;
@@ -1822,7 +1867,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       continue;
     }
 
-    const batchStart = syntax.dialect === 'batch' && !activeComment && !activeString
+    const batchStart = syntax.dialect === 'batch' && !batchContinuedLine
+      && !activeComment && !activeString
       ? batchCommentStart(raw)
       : null;
     if (batchStart !== null) {
@@ -1830,6 +1876,11 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       comments.push(raw.slice(batchStart));
       result.push({ raw, code, comments, hadComment: true, hadStringContent: false });
       continue;
+    }
+
+    if (batchFirstCharEscaped) {
+      code = raw[0];
+      index = 1;
     }
 
     // #requires 是 PowerShell 的编译/加载指令，不是可删除的普通注释。
@@ -2030,7 +2081,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       }
 
       if (syntax.dialect === 'batch') {
-        const commentBoundary = batchInlineRemBoundary(raw, index, code);
+        const commentBoundary = batchInlineRemBoundary(
+          raw, index, code, batchFirstCharEscaped,
+        );
         if (commentBoundary !== null) {
           code = code.slice(0, commentBoundary).trimEnd();
           comments.push(raw.slice(index));
@@ -2322,6 +2375,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       index++;
     }
 
+    const nextBatchContinuation = syntax.dialect === 'batch' && !hadComment
+      && activeString === null && hasBatchLineContinuation(raw, batchFirstCharEscaped);
     const groovyExpressionSpansLine = activeString?.groovyContexts !== undefined
       && activeString.groovyContexts.length > 1;
     if (activeString && !activeString.rule.multiline && !groovyExpressionSpansLine) {
@@ -2330,6 +2385,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     if (syntax.dialect === 'groovy') {
       finalizeGroovyExpressionState(groovyExpression, groovyLineCode);
     }
+    if (nextBatchContinuation) activeBatchContinuation = true;
     const nextPowerShellContinuation: PowerShellContinuationReason | null
       = syntax.dialect === 'powershell'
       ? powerShellContinuationReason(
