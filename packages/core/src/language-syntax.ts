@@ -87,10 +87,13 @@ const PASCAL: LanguageSyntax = {
 
 const POWERSHELL: LanguageSyntax = {
   lineComments: ['#'],
-  blockComments: [{ open: '<#', close: '#>', nested: true }],
+  blockComments: [{ open: '<#', close: '#>' }],
   strings: [
     quote("@'", 'double', { close: "'@", multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
-    quote('@"', 'backtick', { close: '"@', multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
+    quote('@"', 'backtick', {
+      close: '"@', multiline: true, closeAtLineStart: true, openAtLineEnd: true,
+      embedded: 'powershell-expandable',
+    }),
     quote('"', 'backtick', { multiline: true, embedded: 'powershell-expandable' }),
     quote("'", 'double', { multiline: true }),
   ],
@@ -107,7 +110,11 @@ const VISUAL_BASIC: LanguageSyntax = {
 const R: LanguageSyntax = {
   lineComments: ['#'],
   blockComments: [],
-  strings: [quote('"', 'backslash', { multiline: true }), quote("'", 'backslash', { multiline: true })],
+  strings: [
+    quote('`', 'backslash', { multiline: true }),
+    quote('"', 'backslash', { multiline: true }),
+    quote("'", 'backslash', { multiline: true }),
+  ],
   dialect: 'r',
 };
 
@@ -178,9 +185,9 @@ type HclContext =
   | { kind: 'comment' };
 
 type PowerShellContext =
-  | { kind: 'string'; quote: '"' | "'" }
+  | { kind: 'string'; quote: '"' | "'"; hereString?: boolean }
   | { kind: 'expression'; depth: number }
-  | { kind: 'comment'; depth: number };
+  | { kind: 'comment' };
 
 interface ActiveHeredoc {
   delimiter: string;
@@ -201,6 +208,21 @@ interface ActiveVbEmbedded {
   code: string;
 }
 
+interface ConsumedSource {
+  end: number;
+  closed: boolean;
+  code: string;
+  comments: string[];
+}
+
+/** 块注释在表达式中等价于空白；仅在没有现成空白时补位，避免相邻 token 粘连。 */
+function appendCommentGap(code: string, line: string, nextIndex: number): string {
+  if (code !== '' && !/\s$/.test(code) && nextIndex < line.length && !/\s/.test(line[nextIndex])) {
+    return `${code} `;
+  }
+  return code;
+}
+
 function isPowerShellRequires(line: string): boolean {
   return /^\s*#requires\b/i.test(line);
 }
@@ -209,6 +231,13 @@ function isPowerShellLineComment(line: string, index: number): boolean {
   if (line[index] !== '#') return false;
   if (index === 0) return true;
   // PowerShell 的 # 只有从新 token 开始时才是注释；裸参数 token 内的 # 是普通字符。
+  return /[\s;|&(){}\[\],=]/.test(line[index - 1]);
+}
+
+function isPowerShellBlockComment(line: string, index: number): boolean {
+  if (!line.startsWith('<#', index)) return false;
+  if (index === 0) return true;
+  // 与 # 行注释一致，只在新 token 起点识别，避免 Foo<#Bar#> 一类裸 token 被截断。
   return /[\s;|&(){}\[\],=]/.test(line[index - 1]);
 }
 
@@ -252,7 +281,10 @@ function canOpenString(rule: StringRule, line: string, index: number, code: stri
 function startString(rule: StringRule): ActiveString {
   if (rule.embedded === 'hcl-template') return { rule, hclContexts: [{ kind: 'template' }] };
   if (rule.embedded === 'powershell-expandable') {
-    return { rule, powershellContexts: [{ kind: 'string', quote: '"' }] };
+    return {
+      rule,
+      powershellContexts: [{ kind: 'string', quote: '"', hereString: rule.open === '@"' }],
+    };
   }
   if (rule.embedded === 'groovy-gstring') {
     return { rule, groovyContexts: [{ kind: 'string', rule }] };
@@ -264,76 +296,97 @@ function consumePowerShellExpandable(
   line: string,
   index: number,
   contexts: NonNullable<ActiveString['powershellContexts']>,
-): { end: number; closed: boolean } {
+): ConsumedSource {
   let cursor = index;
+  let code = '';
+  const comments: string[] = [];
   while (cursor < line.length) {
     const context = contexts[contexts.length - 1];
     if (context.kind === 'comment') {
-      if (line.startsWith('<#', cursor)) {
-        context.depth++;
-        cursor += 2;
-        continue;
-      }
-      if (line.startsWith('#>', cursor)) {
-        context.depth--;
-        cursor += 2;
-        if (context.depth === 0) contexts.pop();
-        continue;
-      }
-      cursor++;
+      const commentStart = cursor;
+      const closeIndex = line.indexOf('#>', cursor);
+      cursor = closeIndex === -1 ? line.length : closeIndex + 2;
+      comments.push(line.slice(commentStart, cursor));
+      if (closeIndex === -1) return { end: line.length, closed: false, code, comments };
+      contexts.pop();
+      code = appendCommentGap(code, line, cursor);
       continue;
     }
 
     if (context.kind === 'string') {
+      if (context.hereString && contexts.length === 1 && cursor === 0 && line.startsWith('"@', cursor)) {
+        code += '"@';
+        cursor += 2;
+        return { end: cursor, closed: true, code, comments };
+      }
       if (context.quote === '"' && line[cursor] === '`') {
-        cursor += Math.min(2, line.length - cursor);
+        const length = Math.min(2, line.length - cursor);
+        code += line.slice(cursor, cursor + length);
+        cursor += length;
         continue;
       }
       if (context.quote === "'" && line.startsWith("''", cursor)) {
+        code += "''";
         cursor += 2;
         continue;
       }
       if (context.quote === '"' && line.startsWith('$(', cursor)) {
+        code += '$(';
         contexts.push({ kind: 'expression', depth: 1 });
         cursor += 2;
         continue;
       }
-      if (line[cursor] === context.quote) {
+      if (!context.hereString && line[cursor] === context.quote) {
+        code += context.quote;
         cursor++;
-        if (contexts.length === 1) return { end: cursor, closed: true };
+        if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
         contexts.pop();
         continue;
       }
+      code += line[cursor];
       cursor++;
       continue;
     }
 
     if (line[cursor] === '"' || line[cursor] === "'") {
+      code += line[cursor];
       contexts.push({ kind: 'string', quote: line[cursor] as '"' | "'" });
       cursor++;
       continue;
     }
-    if (line.startsWith('<#', cursor)) {
-      contexts.push({ kind: 'comment', depth: 1 });
-      cursor += 2;
+    if (isPowerShellBlockComment(line, cursor)) {
+      const commentStart = cursor;
+      const closeIndex = line.indexOf('#>', cursor + 2);
+      cursor = closeIndex === -1 ? line.length : closeIndex + 2;
+      comments.push(line.slice(commentStart, cursor));
+      if (closeIndex === -1) {
+        contexts.push({ kind: 'comment' });
+        return { end: line.length, closed: false, code, comments };
+      }
+      code = appendCommentGap(code, line, cursor);
       continue;
     }
     if (line[cursor] === '(') {
+      code += '(';
       context.depth++;
       cursor++;
       continue;
     }
     if (line[cursor] === ')') {
+      code += ')';
       context.depth--;
       cursor++;
       if (context.depth === 0) contexts.pop();
       continue;
     }
-    // 子表达式中的行注释属于字符串表达式的一部分；保守保留，并在下一行继续上下文。
-    if (isPowerShellLineComment(line, cursor)) return { end: line.length, closed: false };
+    if (isPowerShellLineComment(line, cursor)) {
+      comments.push(line.slice(cursor));
+      return { end: line.length, closed: false, code, comments };
+    }
+    code += line[cursor];
     cursor++;
   }
-  return { end: line.length, closed: false };
+  return { end: line.length, closed: false, code, comments };
 }
 
 function appendGroovyCode(context: Extract<GroovyContext, { kind: 'expression' }>, value: string): void {
@@ -344,54 +397,78 @@ function consumeGroovyGString(
   line: string,
   index: number,
   contexts: NonNullable<ActiveString['groovyContexts']>,
-): { end: number; closed: boolean } {
+): ConsumedSource {
   let cursor = index;
+  let code = '';
+  const comments: string[] = [];
   while (cursor < line.length) {
     const context = contexts[contexts.length - 1];
     if (context.kind === 'comment') {
       const closeIndex = line.indexOf(context.close, cursor);
-      if (closeIndex === -1) return { end: line.length, closed: false };
+      if (closeIndex === -1) {
+        comments.push(line.slice(cursor));
+        return { end: line.length, closed: false, code, comments };
+      }
+      comments.push(line.slice(cursor, closeIndex + context.close.length));
       cursor = closeIndex + context.close.length;
       contexts.pop();
+      code = appendCommentGap(code, line, cursor);
       continue;
     }
 
     if (context.kind === 'string') {
       if (context.rule.embedded === 'groovy-gstring' && line.startsWith('${', cursor)) {
+        code += '${';
         contexts.push({ kind: 'expression', depth: 1, code: '' });
         cursor += 2;
         continue;
       }
       const escaped = escapedLength(context.rule, line, cursor);
       if (escaped > 0) {
+        code += line.slice(cursor, cursor + escaped);
         cursor += escaped;
         continue;
       }
       if (line.startsWith(context.rule.close, cursor)) {
+        code += context.rule.close;
         cursor += context.rule.close.length;
-        if (contexts.length === 1) return { end: cursor, closed: true };
+        if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
         contexts.pop();
         const parent = contexts[contexts.length - 1];
         if (parent.kind === 'expression') appendGroovyCode(parent, 'x');
         continue;
       }
+      code += line[cursor];
       cursor++;
       continue;
     }
 
-    if (line.startsWith('//', cursor)) return { end: line.length, closed: false };
+    if (line.startsWith('//', cursor)) {
+      comments.push(line.slice(cursor));
+      return { end: line.length, closed: false, code, comments };
+    }
     if (line.startsWith('/*', cursor)) {
-      contexts.push({ kind: 'comment', close: '*/' });
-      cursor += 2;
+      const closeIndex = line.indexOf('*/', cursor + 2);
+      const end = closeIndex === -1 ? line.length : closeIndex + 2;
+      comments.push(line.slice(cursor, end));
+      cursor = end;
+      if (closeIndex === -1) {
+        contexts.push({ kind: 'comment', close: '*/' });
+        return { end: line.length, closed: false, code, comments };
+      }
+      code = appendCommentGap(code, line, cursor);
+      appendGroovyCode(context, ' ');
       continue;
     }
     if (line[cursor] === '{') {
+      code += '{';
       context.depth++;
       appendGroovyCode(context, '{');
       cursor++;
       continue;
     }
     if (line[cursor] === '}') {
+      code += '}';
       context.depth--;
       cursor++;
       if (context.depth === 0) contexts.pop();
@@ -401,22 +478,24 @@ function consumeGroovyGString(
 
     const nestedString = GROOVY.strings.find((rule) => canOpenString(rule, line, cursor, context.code));
     if (nestedString) {
+      code += nestedString.open;
       contexts.push({ kind: 'string', rule: nestedString });
       appendGroovyCode(context, 'x');
       cursor += nestedString.open.length;
       continue;
     }
+    code += line[cursor];
     appendGroovyCode(context, line[cursor]);
     cursor++;
   }
-  return { end: line.length, closed: false };
+  return { end: line.length, closed: false, code, comments };
 }
 
 function consumeHclTemplate(
   line: string,
   index: number,
   contexts: NonNullable<ActiveString['hclContexts']>,
-): { end: number; closed: boolean; code: string; comments: string[] } {
+): ConsumedSource {
   let cursor = index;
   let code = '';
   const comments: string[] = [];
@@ -471,8 +550,7 @@ function consumeHclTemplate(
         contexts.push({ kind: 'comment' });
         return { end: line.length, closed: false, code, comments };
       }
-      // HCL 注释在词法上等价于空白；仅在两侧没有现成空白时补一个，防止 for/*...*/x -> forx。
-      if (code !== '' && !/\s$/.test(code) && cursor < line.length && !/\s/.test(line[cursor])) code += ' ';
+      code = appendCommentGap(code, line, cursor);
       continue;
     }
     if (line.startsWith('//', cursor) || line[cursor] === '#') {
@@ -528,21 +606,26 @@ function appendVbEmbeddedCode(state: ActiveVbEmbedded, value: string): void {
   state.code = (state.code + value).slice(-80);
 }
 
-function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: number; closed: boolean } {
+function consumeVbXml(line: string, index: number, state: ActiveVbXml): ConsumedSource {
   let cursor = index;
+  let code = '';
+  const comments: string[] = [];
   while (cursor < line.length) {
     if (state.embedded) {
       const embedded = state.embedded;
       if (embedded.nestedXml) {
         const consumed = consumeVbXml(line, cursor, embedded.nestedXml);
+        code += consumed.code;
+        comments.push(...consumed.comments);
         cursor = consumed.end;
-        if (!consumed.closed) return { end: line.length, closed: false };
+        if (!consumed.closed) return { end: line.length, closed: false, code, comments };
         embedded.nestedXml = null;
         appendVbEmbeddedCode(embedded, 'x');
         continue;
       }
       if (embedded.quote) {
         if (line.startsWith('""', cursor)) {
+          code += '""';
           cursor += 2;
           continue;
         }
@@ -550,31 +633,39 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
           embedded.quote = null;
           appendVbEmbeddedCode(embedded, 'x');
         }
+        code += line[cursor];
         cursor++;
         continue;
       }
       if (line.startsWith('%>', cursor)) {
         state.embedded = null;
+        code += '%>';
         cursor += 2;
         continue;
       }
       if (line[cursor] === '"') {
         embedded.quote = '"';
+        code += '"';
         cursor++;
         continue;
       }
       if (line[cursor] === '<' && isVbXmlStart(line, cursor, embedded.code)) {
         const nestedXml = newVbXmlState();
         const consumed = consumeVbXml(line, cursor, nestedXml);
+        code += consumed.code;
+        comments.push(...consumed.comments);
         cursor = consumed.end;
         if (!consumed.closed) embedded.nestedXml = nestedXml;
         else appendVbEmbeddedCode(embedded, 'x');
-        if (!consumed.closed) return { end: line.length, closed: false };
+        if (!consumed.closed) return { end: line.length, closed: false, code, comments };
         continue;
       }
       // 嵌入 VB 表达式的单引号注释延续到物理行末，下一行仍回到表达式状态。
-      if (line[cursor] === "'") return { end: line.length, closed: false };
-      if (isVbRem(line, cursor)) return { end: line.length, closed: false };
+      if (line[cursor] === "'" || isVbRem(line, cursor)) {
+        comments.push(line.slice(cursor));
+        return { end: line.length, closed: false, code, comments };
+      }
+      code += line[cursor];
       appendVbEmbeddedCode(embedded, line[cursor]);
       cursor++;
       continue;
@@ -582,8 +673,13 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
 
     if (state.specialClose) {
       const closeIndex = line.indexOf(state.specialClose, cursor);
-      if (closeIndex === -1) return { end: line.length, closed: false };
-      cursor = closeIndex + state.specialClose.length;
+      if (closeIndex === -1) {
+        code += line.slice(cursor);
+        return { end: line.length, closed: false, code, comments };
+      }
+      const end = closeIndex + state.specialClose.length;
+      code += line.slice(cursor, end);
+      cursor = end;
       state.specialClose = null;
       continue;
     }
@@ -593,23 +689,27 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
       // VB XML 允许在活动标签（包括属性值）中注入表达式；退出后恢复原 tag/quote 状态。
       if (line.startsWith('<%=', cursor)) {
         state.embedded = newVbEmbeddedState();
+        code += '<%=';
         cursor += 3;
         continue;
       }
       if (tag.quote) {
         if (line[cursor] === tag.quote) tag.quote = null;
+        code += line[cursor];
         cursor++;
         continue;
       }
       if (line[cursor] === '"' || line[cursor] === "'") {
         tag.quote = line[cursor] as '"' | "'";
+        code += line[cursor];
         cursor++;
         continue;
       }
       if (!tag.closing && line.startsWith('/>', cursor)) {
         state.tag = null;
+        code += '/>';
         cursor += 2;
-        if (state.stack.length === 0) return { end: cursor, closed: true };
+        if (state.stack.length === 0) return { end: cursor, closed: true, code, comments };
         continue;
       }
       if (line[cursor] === '>') {
@@ -619,31 +719,37 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
           state.stack.push(tag.name);
         }
         state.tag = null;
+        code += '>';
         cursor++;
-        if (state.stack.length === 0) return { end: cursor, closed: true };
+        if (state.stack.length === 0) return { end: cursor, closed: true, code, comments };
         continue;
       }
+      code += line[cursor];
       cursor++;
       continue;
     }
 
     if (line.startsWith('<!--', cursor)) {
       state.specialClose = '-->';
+      code += '<!--';
       cursor += 4;
       continue;
     }
     if (line.startsWith('<![CDATA[', cursor)) {
       state.specialClose = ']]>';
+      code += '<![CDATA[';
       cursor += 9;
       continue;
     }
     if (line.startsWith('<?', cursor)) {
       state.specialClose = '?>';
+      code += '<?';
       cursor += 2;
       continue;
     }
     if (line.startsWith('<%=', cursor)) {
       state.embedded = newVbEmbeddedState();
+      code += '<%=';
       cursor += 3;
       continue;
     }
@@ -651,18 +757,21 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
     const closingTag = /^<\/([A-Za-z_][A-Za-z0-9_.:-]*)(?=[\s>])/.exec(line.slice(cursor));
     if (closingTag) {
       state.tag = { name: closingTag[1], closing: true, quote: null };
+      code += closingTag[0];
       cursor += closingTag[0].length;
       continue;
     }
     const openingTag = /^<([A-Za-z_][A-Za-z0-9_.:-]*)(?=[\s/>])/.exec(line.slice(cursor));
     if (openingTag) {
       state.tag = { name: openingTag[1], closing: false, quote: null };
+      code += openingTag[0];
       cursor += openingTag[0].length;
       continue;
     }
+    code += line[cursor];
     cursor++;
   }
-  return { end: line.length, closed: false };
+  return { end: line.length, closed: false, code, comments };
 }
 
 function dynamicRRawString(line: string, index: number, code: string): { open: string; rule: StringRule } | null {
@@ -778,7 +887,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     scan: while (index < raw.length) {
       if (activeVbXml) {
         const consumed = consumeVbXml(raw, index, activeVbXml);
-        code += raw.slice(index, consumed.end);
+        code += consumed.code;
+        comments.push(...consumed.comments);
+        if (consumed.comments.length > 0) hadComment = true;
         hadStringContent = true;
         index = consumed.end;
         if (!consumed.closed) break;
@@ -801,14 +912,18 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         const { rule } = activeString;
         if (activeString.powershellContexts) {
           const consumed = consumePowerShellExpandable(raw, index, activeString.powershellContexts);
-          code += raw.slice(index, consumed.end);
+          code += consumed.code;
+          comments.push(...consumed.comments);
+          if (consumed.comments.length > 0) hadComment = true;
           index = consumed.end;
           if (consumed.closed) activeString = null;
           continue;
         }
         if (activeString.groovyContexts) {
           const consumed = consumeGroovyGString(raw, index, activeString.groovyContexts);
-          code += raw.slice(index, consumed.end);
+          code += consumed.code;
+          comments.push(...consumed.comments);
+          if (consumed.comments.length > 0) hadComment = true;
           index = consumed.end;
           if (consumed.closed) activeString = null;
           continue;
@@ -908,7 +1023,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         if (isVbXmlStart(raw, index, code)) {
           const state = newVbXmlState();
           const consumed = consumeVbXml(raw, index, state);
-          code += raw.slice(index, consumed.end);
+          code += consumed.code;
+          comments.push(...consumed.comments);
+          if (consumed.comments.length > 0) hadComment = true;
           hadStringContent = true;
           index = consumed.end;
           if (!consumed.closed) activeVbXml = state;
@@ -926,7 +1043,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         }
       }
 
-      const block = syntax.blockComments.find((rule) => raw.startsWith(rule.open, index));
+      const block = syntax.blockComments.find((rule) => raw.startsWith(rule.open, index)
+        && !(syntax.dialect === 'powershell' && rule.open === '<#'
+          && !isPowerShellBlockComment(raw, index)));
       if (block) {
         if (block.nested) {
           const commentStart = index;
@@ -944,6 +1063,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         hadComment = true;
         index = end;
         if (closeIndex === -1) activeComment = { close: block.close, depth: 1 };
+        else if (syntax.dialect === 'powershell') code = appendCommentGap(code, raw, index);
         continue;
       }
 
@@ -975,6 +1095,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     }
 
     if (activeString && !activeString.rule.multiline) activeString = null;
+    // 嵌入表达式中仅含真实注释的行应按注释行删除，而不是作为外层多行字符串的空内容保留。
+    if (hadComment && code.trim() === '') hadStringContent = false;
     result.push({ raw, code, comments, hadComment, hadStringContent });
   }
 

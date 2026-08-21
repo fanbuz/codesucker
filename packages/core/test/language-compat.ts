@@ -251,6 +251,118 @@ assert.deepEqual(cleanedLines([
   'Write-Output $message',
 ], 'PowerShell expandable 双引号的 $() 嵌套括号与内部引号必须保留，外层闭合后的真实注释仍须删除');
 
+const powerShellExpandableComments = [
+  '$message = "prefix $(',
+  '  Write-Output foo;<# @author PS Block Maintainer #>bar',
+  '  # @author PS Line Maintainer',
+  '  (Get-Date)',
+  ') suffix" # @author PS Tail Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellExpandableComments, 'ps1'), [
+  '$message = "prefix $(',
+  '  Write-Output foo; bar',
+  '  (Get-Date)',
+  ') suffix"',
+], 'PowerShell expandable $() 内块/行注释必须删除且保留 token 空白，闭合后的外层尾注释仍须删除');
+assert.deepEqual(
+  extractAttributions(powerShellExpandableComments, 'src/expandable-comments.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Block Maintainer',
+      file: 'src/expandable-comments.ps1',
+      line: 2,
+      text: '  Write-Output foo;<# @author PS Block Maintainer #>bar',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Line Maintainer',
+      file: 'src/expandable-comments.ps1',
+      line: 3,
+      text: '  # @author PS Line Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Tail Maintainer',
+      file: 'src/expandable-comments.ps1',
+      line: 5,
+      text: ') suffix" # @author PS Tail Maintainer',
+    },
+  ],
+  'PowerShell $() 内部块/行注释与 expandable string 闭合后的署名都必须定位',
+);
+
+const powerShellBlockBoundaries = [
+  '$top = Foo<#Bar#> # remove after ordinary token',
+  '$message = "prefix $(Write-Output Foo<#Bar#>) suffix" # remove after expandable token',
+  'Write-Output foo;<# @author PS Top Block Maintainer #>bar',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellBlockBoundaries, 'ps1'), [
+  '$top = Foo<#Bar#>',
+  '$message = "prefix $(Write-Output Foo<#Bar#>) suffix"',
+  'Write-Output foo; bar',
+], 'PowerShell Foo<#Bar#> 普通 token 在顶层和 $() 内都必须保留，真实块注释应删除并保留 token 空白');
+assert.deepEqual(
+  extractAttributions(powerShellBlockBoundaries, 'src/block-boundaries.ps1', 'ps1'),
+  [{
+    kind: 'author',
+    subject: 'PS Top Block Maintainer',
+    file: 'src/block-boundaries.ps1',
+    line: 3,
+    text: 'Write-Output foo;<# @author PS Top Block Maintainer #>bar',
+  }],
+  'PowerShell 普通 token 内的 <# #> 不得误报，真实 block comment 署名必须定位',
+);
+
+const powerShellExpandableHereString = [
+  '$here = @"',
+  '<# @author Fake Here-String Literal #>',
+  '$(',
+  '  Write-Output foo;<# @author PS Here Block Maintainer #>bar',
+  '  # @author PS Here Line Maintainer',
+  '  (Get-Date)',
+  ')',
+  '"@',
+  'Write-Output $here # @author PS Here Tail Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellExpandableHereString, 'ps1'), [
+  '$here = @"',
+  '<# @author Fake Here-String Literal #>',
+  '$(',
+  '  Write-Output foo; bar',
+  '  (Get-Date)',
+  ')',
+  '"@',
+  'Write-Output $here',
+], 'PowerShell expandable here-string 的普通 <# #> 必须保留，$() 内真实注释须删除，首列 "@ 才能终止');
+assert.deepEqual(
+  extractAttributions(powerShellExpandableHereString, 'src/expandable-here-string.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Here Block Maintainer',
+      file: 'src/expandable-here-string.ps1',
+      line: 4,
+      text: '  Write-Output foo;<# @author PS Here Block Maintainer #>bar',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Here Line Maintainer',
+      file: 'src/expandable-here-string.ps1',
+      line: 5,
+      text: '  # @author PS Here Line Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Here Tail Maintainer',
+      file: 'src/expandable-here-string.ps1',
+      line: 9,
+      text: 'Write-Output $here # @author PS Here Tail Maintainer',
+    },
+  ],
+  'PowerShell here-string 字面文本中的伪署名不得误报，$() 内部和 here-string 后的真实署名必须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'Write-Output https://example.test/#fragment',
   'Write-Output foo#bar',
@@ -263,31 +375,27 @@ assert.deepEqual(cleanedLines([
   '$value = $(Write-Output nested#fragment)',
 ], 'PowerShell 未加引号 token 与 $() 表达式 token 内的 # 必须保留，空白 token 边界后的 # 才是注释');
 
-const nestedPowerShellComment = [
+const firstClosePowerShellComment = [
   '$before = 1',
-  '<# outer comment starts',
-  'outer prefix',
-  '<# nested comment #>',
-  '# @author Nested Comment Maintainer',
-  'outer suffix after nested close',
-  '#> $after = 2',
+  '<# block comment starts',
+  '<# nested-looking text #> $after = 2 # @author First Close Maintainer',
   'Write-Output $before',
 ].join('\n');
-assert.deepEqual(cleanedLines(nestedPowerShellComment, 'ps1'), [
+assert.deepEqual(cleanedLines(firstClosePowerShellComment, 'ps1'), [
   '$before = 1',
   ' $after = 2',
   'Write-Output $before',
-], 'PowerShell 内层 #> 不得提前结束外层块注释，最外层 #> 后的代码必须保留');
+], 'PowerShell block comment 不可嵌套，遇到首个 #> 后必须立即恢复代码扫描');
 assert.deepEqual(
-  extractAttributions(nestedPowerShellComment, 'src/nested.ps1', 'ps1'),
+  extractAttributions(firstClosePowerShellComment, 'src/first-close.ps1', 'ps1'),
   [{
     kind: 'author',
-    subject: 'Nested Comment Maintainer',
-    file: 'src/nested.ps1',
-    line: 5,
-    text: '# @author Nested Comment Maintainer',
+    subject: 'First Close Maintainer',
+    file: 'src/first-close.ps1',
+    line: 3,
+    text: '<# nested-looking text #> $after = 2 # @author First Close Maintainer',
   }],
-  'PowerShell 内层注释闭合后的外层余段仍应作为注释提取署名证据',
+  'PowerShell 首个 #> 后的真实行注释署名必须定位',
 );
 
 assert.deepEqual(cleanedLines([
@@ -391,6 +499,90 @@ assert.deepEqual(
   'VB XML 属性表达式字符串中的伪署名不得误报，/> 后的真实署名仍须定位',
 );
 
+const visualBasicMultilineXmlExpression = [
+  'Dim xml = <root><%= String.Concat(',
+  "  value, ' %> </root> @author VB Apostrophe Maintainer",
+  '  "safe \' @author Fake REM Copyright 2026 Fake", REM %> </root> @author VB Rem Maintainer',
+  '  other',
+  ') %></root> \' @author VB Outer Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicMultilineXmlExpression, 'vb'), [
+  'Dim xml = <root><%= String.Concat(',
+  '  value,',
+  '  "safe \' @author Fake REM Copyright 2026 Fake",',
+  '  other',
+  ') %></root>',
+], 'VB XML 多行 <%= %> 内单引号/REM 注释必须删除，表达式与 XML 闭合后的外层尾注释仍须删除');
+assert.deepEqual(
+  extractAttributions(visualBasicMultilineXmlExpression, 'src/multiline-xml-expression.vb', 'vb'),
+  [
+    {
+      kind: 'author',
+      subject: 'VB Apostrophe Maintainer',
+      file: 'src/multiline-xml-expression.vb',
+      line: 2,
+      text: "  value, ' %> </root> @author VB Apostrophe Maintainer",
+    },
+    {
+      kind: 'author',
+      subject: 'VB Rem Maintainer',
+      file: 'src/multiline-xml-expression.vb',
+      line: 3,
+      text: '  "safe \' @author Fake REM Copyright 2026 Fake", REM %> </root> @author VB Rem Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'VB Outer Maintainer',
+      file: 'src/multiline-xml-expression.vb',
+      line: 5,
+      text: ') %></root> \' @author VB Outer Maintainer',
+    },
+  ],
+  'VB XML 多行表达式字符串中的伪署名不得误报，内部真实注释与 outer tail 署名必须定位',
+);
+
+const visualBasicNestedXmlComments = [
+  'Dim nested = <root><%= <child><%= String.Concat(',
+  "  value, ' %> @author VB Nested Apostrophe Maintainer",
+  '  "safe", REM %> @author VB Nested Rem Maintainer',
+  '  other',
+  ') %></child> %></root> \' @author VB Nested Outer Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicNestedXmlComments, 'vb'), [
+  'Dim nested = <root><%= <child><%= String.Concat(',
+  '  value,',
+  '  "safe",',
+  '  other',
+  ') %></child> %></root>',
+], 'VB nested XML 自身的多行 <%= %> 注释必须删除，注释内 %> 不得提前闭合任一表达式或 XML');
+assert.deepEqual(
+  extractAttributions(visualBasicNestedXmlComments, 'src/nested-xml-comments.vb', 'vb'),
+  [
+    {
+      kind: 'author',
+      subject: 'VB Nested Apostrophe Maintainer',
+      file: 'src/nested-xml-comments.vb',
+      line: 2,
+      text: "  value, ' %> @author VB Nested Apostrophe Maintainer",
+    },
+    {
+      kind: 'author',
+      subject: 'VB Nested Rem Maintainer',
+      file: 'src/nested-xml-comments.vb',
+      line: 3,
+      text: '  "safe", REM %> @author VB Nested Rem Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'VB Nested Outer Maintainer',
+      file: 'src/nested-xml-comments.vb',
+      line: 5,
+      text: ') %></child> %></root> \' @author VB Nested Outer Maintainer',
+    },
+  ],
+  'VB nested XML 内嵌表达式的真实署名必须传播到最外层提取结果，outer tail 署名仍须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url <- "https://example.test/#fragment" # remove',
   "label <- '# literal'",
@@ -427,6 +619,48 @@ assert.deepEqual(cleanedLines([
   "last line'",
   'print(doubleQuoted)',
 ], 'R 普通单双引号字符串跨行时必须保护 # 字面量，闭合后的真实尾注释仍须删除');
+
+const rBacktickIdentifiers = [
+  '`value#raw @author Fake` <- 1 # @author R Backtick Maintainer',
+  '`value\\`#escaped Copyright 2026 Fake` <- 2 # remove real trailing comment',
+  'value <- 3 # @author R Real Comment Maintainer',
+  '`multiline',
+  'name# @author Fake Multiline` <- 4 # @author R Multiline Backtick Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(rBacktickIdentifiers, 'r'), [
+  '`value#raw @author Fake` <- 1',
+  '`value\\`#escaped Copyright 2026 Fake` <- 2',
+  'value <- 3',
+  '`multiline',
+  'name# @author Fake Multiline` <- 4',
+], 'R backtick identifier 内的 #、空格与反斜杠转义必须保留，标识符闭合后的真实 # 注释仍须删除');
+assert.deepEqual(
+  extractAttributions(rBacktickIdentifiers, 'analysis/backtick-names.R', 'R'),
+  [
+    {
+      kind: 'author',
+      subject: 'R Backtick Maintainer',
+      file: 'analysis/backtick-names.R',
+      line: 1,
+      text: '`value#raw @author Fake` <- 1 # @author R Backtick Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'R Real Comment Maintainer',
+      file: 'analysis/backtick-names.R',
+      line: 3,
+      text: 'value <- 3 # @author R Real Comment Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'R Multiline Backtick Maintainer',
+      file: 'analysis/backtick-names.R',
+      line: 5,
+      text: 'name# @author Fake Multiline` <- 4 # @author R Multiline Backtick Maintainer',
+    },
+  ],
+  'R 单行/跨行 backtick identifier 内的伪署名不得误报，闭合后的真实注释署名必须定位',
+);
 
 assert.deepEqual(cleanedLines([
   'url = "https://example.test/#fragment // literal /* literal */" # remove',
@@ -556,6 +790,57 @@ assert.deepEqual(cleanedLines([
   'def quotedInterpolation = "prefix ${value.replace("/", "//")} suffix"',
   'def dollarSlashyInterpolation = $/prefix ${value.replace("/", "//")} suffix/$',
 ], 'Groovy slashy、普通双引号及 dollar-slashy GString 的插值表达式必须保留，闭合后的真实注释仍须删除');
+
+const groovyGStringComments = [
+  'def quoted = "prefix ${value instanceof/* @author Groovy Block Maintainer */String} suffix" // @author Groovy Quoted Tail',
+  'def coercion = "prefix ${value/* gap */as String} suffix" // remove after coercion GString',
+  'def slashy = /prefix ${',
+  '  value // } / @author Groovy Line Maintainer',
+  '  .toString()',
+  '} suffix/ // @author Groovy Slashy Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(groovyGStringComments, 'groovy'), [
+  'def quoted = "prefix ${value instanceof String} suffix"',
+  'def coercion = "prefix ${value as String} suffix"',
+  'def slashy = /prefix ${',
+  '  value',
+  '  .toString()',
+  '} suffix/',
+], 'Groovy quoted/slashy GString 的 ${} 内块/行注释必须删除且保留 token 空白，外层尾注释仍须删除');
+assert.deepEqual(
+  extractAttributions(groovyGStringComments, 'src/gstring-comments.groovy', 'groovy'),
+  [
+    {
+      kind: 'author',
+      subject: 'Groovy Block Maintainer',
+      file: 'src/gstring-comments.groovy',
+      line: 1,
+      text: 'def quoted = "prefix ${value instanceof/* @author Groovy Block Maintainer */String} suffix" // @author Groovy Quoted Tail',
+    },
+    {
+      kind: 'author',
+      subject: 'Groovy Quoted Tail',
+      file: 'src/gstring-comments.groovy',
+      line: 1,
+      text: 'def quoted = "prefix ${value instanceof/* @author Groovy Block Maintainer */String} suffix" // @author Groovy Quoted Tail',
+    },
+    {
+      kind: 'author',
+      subject: 'Groovy Line Maintainer',
+      file: 'src/gstring-comments.groovy',
+      line: 4,
+      text: '  value // } / @author Groovy Line Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'Groovy Slashy Tail',
+      file: 'src/gstring-comments.groovy',
+      line: 6,
+      text: '} suffix/ // @author Groovy Slashy Tail',
+    },
+  ],
+  'Groovy GString 插值内部与字符串闭合后的真实注释署名必须全部定位',
+);
 
 assert.deepEqual(cleanedLines([
   '@echo off',
