@@ -18,8 +18,8 @@ interface StringRule {
   openAtLineEnd?: boolean;
   /** Groovy slashy string 需要结合前面的表达式判断，避免把除号当成字符串。 */
   contextual?: 'groovy-slashy';
-  /** HCL quoted template 允许在 ${...} / %{...} 表达式内嵌套字符串。 */
-  embedded?: 'hcl-template';
+  /** 需要跟踪插值表达式与嵌套字符串的可插值字符串。 */
+  embedded?: 'groovy-gstring' | 'hcl-template' | 'powershell-expandable';
 }
 
 interface LanguageSyntax {
@@ -61,11 +61,11 @@ const GROOVY: LanguageSyntax = {
   lineComments: ['//'],
   blockComments: [{ open: '/*', close: '*/' }],
   strings: [
-    quote('$/', 'dollar', { close: '/$', multiline: true }),
-    quote('"""', 'backslash', { multiline: true }),
+    quote('$/', 'dollar', { close: '/$', multiline: true, embedded: 'groovy-gstring' }),
+    quote('"""', 'backslash', { multiline: true, embedded: 'groovy-gstring' }),
     quote("'''", 'backslash', { multiline: true }),
-    quote('/', 'backslash', { multiline: true, contextual: 'groovy-slashy' }),
-    quote('"'),
+    quote('/', 'backslash', { multiline: true, contextual: 'groovy-slashy', embedded: 'groovy-gstring' }),
+    quote('"', 'backslash', { embedded: 'groovy-gstring' }),
     quote("'"),
   ],
   dialect: 'groovy',
@@ -91,7 +91,7 @@ const POWERSHELL: LanguageSyntax = {
   strings: [
     quote("@'", 'double', { close: "'@", multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
     quote('@"', 'backtick', { close: '"@', multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
-    quote('"', 'backtick', { multiline: true }),
+    quote('"', 'backtick', { multiline: true, embedded: 'powershell-expandable' }),
     quote("'", 'double', { multiline: true }),
   ],
   dialect: 'powershell',
@@ -107,7 +107,7 @@ const VISUAL_BASIC: LanguageSyntax = {
 const R: LanguageSyntax = {
   lineComments: ['#'],
   blockComments: [],
-  strings: [quote('"'), quote("'")],
+  strings: [quote('"', 'backslash', { multiline: true }), quote("'", 'backslash', { multiline: true })],
   dialect: 'r',
 };
 
@@ -162,8 +162,20 @@ interface ActiveComment {
 
 interface ActiveString {
   rule: StringRule;
+  groovyContexts?: GroovyContext[];
   hclContexts?: Array<{ kind: 'template' } | { kind: 'expression'; depth: number }>;
+  powershellContexts?: PowerShellContext[];
 }
+
+type GroovyContext =
+  | { kind: 'string'; rule: StringRule }
+  | { kind: 'expression'; depth: number; code: string }
+  | { kind: 'comment'; close: '*/' };
+
+type PowerShellContext =
+  | { kind: 'string'; quote: '"' | "'" }
+  | { kind: 'expression'; depth: number }
+  | { kind: 'comment'; depth: number };
 
 interface ActiveHeredoc {
   delimiter: string;
@@ -174,6 +186,7 @@ interface ActiveVbXml {
   stack: string[];
   tag: { name: string; closing: boolean; quote: '"' | "'" | null } | null;
   specialClose: string | null;
+  embedded: { quote: '"' | null } | null;
 }
 
 function isPowerShellRequires(line: string): boolean {
@@ -206,9 +219,166 @@ function canOpenString(rule: StringRule, line: string, index: number, code: stri
 }
 
 function startString(rule: StringRule): ActiveString {
-  return rule.embedded === 'hcl-template'
-    ? { rule, hclContexts: [{ kind: 'template' }] }
-    : { rule };
+  if (rule.embedded === 'hcl-template') return { rule, hclContexts: [{ kind: 'template' }] };
+  if (rule.embedded === 'powershell-expandable') {
+    return { rule, powershellContexts: [{ kind: 'string', quote: '"' }] };
+  }
+  if (rule.embedded === 'groovy-gstring') {
+    return { rule, groovyContexts: [{ kind: 'string', rule }] };
+  }
+  return { rule };
+}
+
+function consumePowerShellExpandable(
+  line: string,
+  index: number,
+  contexts: NonNullable<ActiveString['powershellContexts']>,
+): { end: number; closed: boolean } {
+  let cursor = index;
+  while (cursor < line.length) {
+    const context = contexts[contexts.length - 1];
+    if (context.kind === 'comment') {
+      if (line.startsWith('<#', cursor)) {
+        context.depth++;
+        cursor += 2;
+        continue;
+      }
+      if (line.startsWith('#>', cursor)) {
+        context.depth--;
+        cursor += 2;
+        if (context.depth === 0) contexts.pop();
+        continue;
+      }
+      cursor++;
+      continue;
+    }
+
+    if (context.kind === 'string') {
+      if (context.quote === '"' && line[cursor] === '`') {
+        cursor += Math.min(2, line.length - cursor);
+        continue;
+      }
+      if (context.quote === "'" && line.startsWith("''", cursor)) {
+        cursor += 2;
+        continue;
+      }
+      if (context.quote === '"' && line.startsWith('$(', cursor)) {
+        contexts.push({ kind: 'expression', depth: 1 });
+        cursor += 2;
+        continue;
+      }
+      if (line[cursor] === context.quote) {
+        cursor++;
+        if (contexts.length === 1) return { end: cursor, closed: true };
+        contexts.pop();
+        continue;
+      }
+      cursor++;
+      continue;
+    }
+
+    if (line[cursor] === '"' || line[cursor] === "'") {
+      contexts.push({ kind: 'string', quote: line[cursor] as '"' | "'" });
+      cursor++;
+      continue;
+    }
+    if (line.startsWith('<#', cursor)) {
+      contexts.push({ kind: 'comment', depth: 1 });
+      cursor += 2;
+      continue;
+    }
+    if (line[cursor] === '(') {
+      context.depth++;
+      cursor++;
+      continue;
+    }
+    if (line[cursor] === ')') {
+      context.depth--;
+      cursor++;
+      if (context.depth === 0) contexts.pop();
+      continue;
+    }
+    // 子表达式中的行注释属于字符串表达式的一部分；保守保留，并在下一行继续上下文。
+    if (line[cursor] === '#') return { end: line.length, closed: false };
+    cursor++;
+  }
+  return { end: line.length, closed: false };
+}
+
+function appendGroovyCode(context: Extract<GroovyContext, { kind: 'expression' }>, value: string): void {
+  context.code = (context.code + value).slice(-80);
+}
+
+function consumeGroovyGString(
+  line: string,
+  index: number,
+  contexts: NonNullable<ActiveString['groovyContexts']>,
+): { end: number; closed: boolean } {
+  let cursor = index;
+  while (cursor < line.length) {
+    const context = contexts[contexts.length - 1];
+    if (context.kind === 'comment') {
+      const closeIndex = line.indexOf(context.close, cursor);
+      if (closeIndex === -1) return { end: line.length, closed: false };
+      cursor = closeIndex + context.close.length;
+      contexts.pop();
+      continue;
+    }
+
+    if (context.kind === 'string') {
+      if (context.rule.embedded === 'groovy-gstring' && line.startsWith('${', cursor)) {
+        contexts.push({ kind: 'expression', depth: 1, code: '' });
+        cursor += 2;
+        continue;
+      }
+      const escaped = escapedLength(context.rule, line, cursor);
+      if (escaped > 0) {
+        cursor += escaped;
+        continue;
+      }
+      if (line.startsWith(context.rule.close, cursor)) {
+        cursor += context.rule.close.length;
+        if (contexts.length === 1) return { end: cursor, closed: true };
+        contexts.pop();
+        const parent = contexts[contexts.length - 1];
+        if (parent.kind === 'expression') appendGroovyCode(parent, 'x');
+        continue;
+      }
+      cursor++;
+      continue;
+    }
+
+    if (line.startsWith('//', cursor)) return { end: line.length, closed: false };
+    if (line.startsWith('/*', cursor)) {
+      contexts.push({ kind: 'comment', close: '*/' });
+      cursor += 2;
+      continue;
+    }
+    if (line[cursor] === '{') {
+      context.depth++;
+      appendGroovyCode(context, '{');
+      cursor++;
+      continue;
+    }
+    if (line[cursor] === '}') {
+      context.depth--;
+      cursor++;
+      if (context.depth === 0) contexts.pop();
+      else appendGroovyCode(context, '}');
+      continue;
+    }
+
+    const nestedString = GROOVY.strings.find((rule) => canOpenString(rule, line, cursor, context.code));
+    if (nestedString) {
+      contexts.push({ kind: 'string', rule: nestedString });
+      appendGroovyCode(context, 'x');
+      cursor += nestedString.open.length;
+      continue;
+    }
+    appendGroovyCode(context, line[cursor]);
+    cursor++;
+  }
+  return { end: line.length, closed: false };
 }
 
 function consumeHclTemplate(
@@ -280,6 +450,33 @@ function isVbXmlStart(line: string, index: number, code: string): boolean {
 function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: number; closed: boolean } {
   let cursor = index;
   while (cursor < line.length) {
+    if (state.embedded) {
+      if (state.embedded.quote) {
+        if (line.startsWith('""', cursor)) {
+          cursor += 2;
+          continue;
+        }
+        if (line[cursor] === '"') state.embedded.quote = null;
+        cursor++;
+        continue;
+      }
+      if (line.startsWith('%>', cursor)) {
+        state.embedded = null;
+        cursor += 2;
+        continue;
+      }
+      if (line[cursor] === '"') {
+        state.embedded.quote = '"';
+        cursor++;
+        continue;
+      }
+      // 嵌入 VB 表达式的单引号注释延续到物理行末，下一行仍回到表达式状态。
+      if (line[cursor] === "'") return { end: line.length, closed: false };
+      if (isVbRem(line, cursor)) return { end: line.length, closed: false };
+      cursor++;
+      continue;
+    }
+
     if (state.specialClose) {
       const closeIndex = line.indexOf(state.specialClose, cursor);
       if (closeIndex === -1) return { end: line.length, closed: false };
@@ -334,6 +531,11 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
     if (line.startsWith('<?', cursor)) {
       state.specialClose = '?>';
       cursor += 2;
+      continue;
+    }
+    if (line.startsWith('<%=', cursor)) {
+      state.embedded = { quote: null };
+      cursor += 3;
       continue;
     }
 
@@ -487,6 +689,20 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       if (activeString) {
         hadStringContent = true;
         const { rule } = activeString;
+        if (activeString.powershellContexts) {
+          const consumed = consumePowerShellExpandable(raw, index, activeString.powershellContexts);
+          code += raw.slice(index, consumed.end);
+          index = consumed.end;
+          if (consumed.closed) activeString = null;
+          continue;
+        }
+        if (activeString.groovyContexts) {
+          const consumed = consumeGroovyGString(raw, index, activeString.groovyContexts);
+          code += raw.slice(index, consumed.end);
+          index = consumed.end;
+          if (consumed.closed) activeString = null;
+          continue;
+        }
         if (activeString.hclContexts) {
           const consumed = consumeHclTemplate(raw, index, activeString.hclContexts);
           code += raw.slice(index, consumed.end);
@@ -579,7 +795,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       if (syntax.dialect === 'vb' && raw[index] === '<') {
         if (isVbXmlStart(raw, index, code)) {
           const state: ActiveVbXml = {
-            stack: [], tag: null, specialClose: null,
+            stack: [], tag: null, specialClose: null, embedded: null,
           };
           const consumed = consumeVbXml(raw, index, state);
           code += raw.slice(index, consumed.end);

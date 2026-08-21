@@ -243,6 +243,14 @@ assert.deepEqual(cleanedLines([
   'Write-Output $doubleQuoted',
 ], 'PowerShell 普通单双引号字符串跨行时必须保护中间注释标记，闭合后的真实注释仍须删除');
 
+assert.deepEqual(cleanedLines([
+  '$message = "prefix $([string]::Concat("a#b", ([string]::Concat("c#d", "!")))) suffix" # remove after expandable string',
+  'Write-Output $message',
+].join('\n'), 'ps1'), [
+  '$message = "prefix $([string]::Concat("a#b", ([string]::Concat("c#d", "!")))) suffix"',
+  'Write-Output $message',
+], 'PowerShell expandable 双引号的 $() 嵌套括号与内部引号必须保留，外层闭合后的真实注释仍须删除');
+
 const nestedPowerShellComment = [
   '$before = 1',
   '<# outer comment starts',
@@ -305,6 +313,23 @@ assert.deepEqual(
   'VB XML literal 内容中的伪署名不得误报，闭合后的真实署名仍须定位',
 );
 
+const visualBasicXmlEmbeddedExpression =
+  'Dim xml = <root><%= "\' @author Fake %> and </root>" %><child>safe</child></root> \' @author Actual XML Expression Maintainer';
+assert.deepEqual(cleanedLines(visualBasicXmlEmbeddedExpression, 'vb'), [
+  'Dim xml = <root><%= "\' @author Fake %> and </root>" %><child>safe</child></root>',
+], 'VB XML 的 <%= %> 表达式必须忽略字符串内的 %> 与伪闭合标签，XML 闭合后的真实注释仍须删除');
+assert.deepEqual(
+  extractAttributions(visualBasicXmlEmbeddedExpression, 'src/xml-expression.vb', 'vb'),
+  [{
+    kind: 'author',
+    subject: 'Actual XML Expression Maintainer',
+    file: 'src/xml-expression.vb',
+    line: 1,
+    text: visualBasicXmlEmbeddedExpression,
+  }],
+  'VB XML 注入表达式字符串中的伪署名不得误报，XML 闭合后的真实署名仍须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url <- "https://example.test/#fragment" # remove',
   "label <- '# literal'",
@@ -323,6 +348,24 @@ assert.deepEqual(cleanedLines([
   ')"',
   'value <- 42',
 ], 'R 扩展名匹配与清洗都必须大小写不敏感');
+
+assert.deepEqual(cleanedLines([
+  'doubleQuoted <- "first line',
+  '# literal in ordinary double-quoted string',
+  'last line" # remove after double quote closes',
+  "singleQuoted <- 'first line",
+  '# literal in ordinary single-quoted string',
+  "last line' # remove after single quote closes",
+  'print(doubleQuoted)',
+].join('\n'), 'r'), [
+  'doubleQuoted <- "first line',
+  '# literal in ordinary double-quoted string',
+  'last line"',
+  "singleQuoted <- 'first line",
+  '# literal in ordinary single-quoted string',
+  "last line'",
+  'print(doubleQuoted)',
+], 'R 普通单双引号字符串跨行时必须保护 # 字面量，闭合后的真实尾注释仍须删除');
 
 assert.deepEqual(cleanedLines([
   'url = "https://example.test/#fragment // literal /* literal */" # remove',
@@ -369,6 +412,16 @@ assert.deepEqual(cleanedLines([
   '/$',
   'def value = 42',
 ], 'Groovy 普通、多行、slashy 与 dollar-slashy 字符串必须保留');
+
+assert.deepEqual(cleanedLines([
+  'def slashyInterpolation = /prefix ${value.replace("/", "//")} suffix/ // remove after slashy GString',
+  'def quotedInterpolation = "prefix ${value.replace("/", "//")} suffix" // remove after quoted GString',
+  'def dollarSlashyInterpolation = $/prefix ${value.replace("/", "//")} suffix/$ // remove after dollar-slashy GString',
+].join('\n'), 'groovy'), [
+  'def slashyInterpolation = /prefix ${value.replace("/", "//")} suffix/',
+  'def quotedInterpolation = "prefix ${value.replace("/", "//")} suffix"',
+  'def dollarSlashyInterpolation = $/prefix ${value.replace("/", "//")} suffix/$',
+], 'Groovy slashy、普通双引号及 dollar-slashy GString 的插值表达式必须保留，闭合后的真实注释仍须删除');
 
 assert.deepEqual(cleanedLines([
   '@echo off',
