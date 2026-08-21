@@ -193,6 +193,36 @@ assert.deepEqual(cleanedLines([
   'end.',
 ], 'Pascal 字符串、双单引号和编译指令必须保留，三类真实注释必须删除');
 
+const pascalMixedBlockComments = [
+  '{ outer (* @author Pascal Mixed Brace Maintainer',
+  '} fake-close',
+  '*) still } braceCode := 1;',
+  '(* outer { @author Pascal Mixed Paren Maintainer',
+  '*) fake-close',
+  '} still *) parenCode := 2;',
+  '{ outer (* inner } fake-close *) still } code',
+  '(* outer { inner *) fake-close } still *) code',
+  '{ outer { inner } same-close } code',
+  '(* outer (* inner *) same-close *) code',
+].join('\n');
+assert.deepEqual(cleanedLines(pascalMixedBlockComments, 'pas'), [
+  ' braceCode := 1;',
+  ' parenCode := 2;',
+  ' code',
+  ' code',
+  ' same-close } code',
+  ' same-close *) code',
+], 'Pascal mixed 异类块注释必须使用嵌套栈并由对应 outer close 结束；同类 opener 不嵌套，仍由 first-close 结束');
+assert.deepEqual(
+  extractAttributions(pascalMixedBlockComments, 'src/mixed-comments.pas', 'pas')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Pascal Mixed Brace Maintainer', 1],
+    ['author', 'Pascal Mixed Paren Maintainer', 4],
+  ],
+  'Pascal 多行 mixed block 嵌套内真实署名必须提取，异类 fake-close 不得提前结束 outer comment',
+);
+
 assert.deepEqual(cleanedLines([
   '#requires -Version 7.2',
   '$url = "https://example.test/#fragment <# literal #>" # remove',
@@ -3239,6 +3269,44 @@ assert.deepEqual(
   'R 单行/跨行 backtick identifier 内的伪署名不得误报，闭合后的真实注释署名必须定位',
 );
 
+const rSpecialInfixOperators = [
+  'left %#% right # @author R Hash Infix Tail',
+  'left %/*#*/% right # @author R Marker Infix Tail',
+  'left %custom#name% right # @author R Custom Infix Tail',
+  'x%tag#literal%y # @author R Adjacent Infix Tail',
+  'x%%y # @author R Empty Infix Tail',
+  'text <- "%#% # literal" # @author R String Tail',
+  'value <- 1 # @author R Ordinary Hash Tail',
+  'left %unfinished# @author Fake Unclosed Infix',
+  'after <- 2 # @author R After Unclosed Infix',
+].join('\n');
+assert.deepEqual(cleanedLines(rSpecialInfixOperators, 'r'), [
+  'left %#% right',
+  'left %/*#*/% right',
+  'left %custom#name% right',
+  'x%tag#literal%y',
+  'x%%y',
+  'text <- "%#% # literal"',
+  'value <- 1',
+  'left %unfinished# @author Fake Unclosed Infix',
+  'after <- 2',
+], 'R `%...%` 特殊中缀操作符内 #、/* */ 必须保留，闭合后的普通 # 评论删除；未闭合 % token 须保守保护');
+assert.deepEqual(
+  extractAttributions(rSpecialInfixOperators, 'analysis/special-infix.R', 'R')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'R Hash Infix Tail', 1],
+    ['author', 'R Marker Infix Tail', 2],
+    ['author', 'R Custom Infix Tail', 3],
+    ['author', 'R Adjacent Infix Tail', 4],
+    ['author', 'R Empty Infix Tail', 5],
+    ['author', 'R String Tail', 6],
+    ['author', 'R Ordinary Hash Tail', 7],
+    ['author', 'R After Unclosed Infix', 9],
+  ],
+  'R 特殊中缀操作符与字符串内伪评论不得产生署名，闭合后的真实 # 评论署名必须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url = "https://example.test/#fragment // literal /* literal */" # remove',
   'value = "${replace(var.x, "#", "-")}" # remove after interpolation',
@@ -3971,6 +4039,45 @@ assert.deepEqual(
     ['author', 'Batch Three Caret Tail', 3],
   ],
   'Batch caret quote parity 后真实 REM 署名必须定位，双 caret 后 quoted segment 内伪署名不得误报',
+);
+
+const batchElseAndForDoRem = [
+  'if exist x (echo yes) else REM @author Batch Else Rem',
+  'if exist x (echo yes) ELSE @ReM @author Batch Else At Rem',
+  'for %%i in (x) do REM @author Batch For Do Rem',
+  'echo before & for %%i in (x) DO @rEm @author Batch For Do At Rem',
+  'echo else REM @author Fake Echo Else Rem',
+  'if exist x (echo yes) else ^REM @author Fake Escaped Else Rem',
+  'if exist x (echo yes) else "REM @author Fake Quoted Else Rem"',
+  'for %%i in (x) do ^REM @author Fake Escaped For Do Rem',
+  'for %%i in (x) do echo REM @author Fake Echo For Do Rem',
+  'echo for %%i in (x) do REM @author Fake Echo For Do Prefix',
+  'echo ready | for %%i in (x) do REM @author Fake Single Pipe For Do Rem',
+  'echo ordinary DO REM @author Fake Ordinary Do Rem',
+].join('\n');
+assert.deepEqual(cleanedLines(batchElseAndForDoRem, 'cmd'), [
+  'if exist x (echo yes)',
+  'if exist x (echo yes)',
+  'echo before',
+  'echo else REM @author Fake Echo Else Rem',
+  'if exist x (echo yes) else ^REM @author Fake Escaped Else Rem',
+  'if exist x (echo yes) else "REM @author Fake Quoted Else Rem"',
+  'for %%i in (x) do ^REM @author Fake Escaped For Do Rem',
+  'for %%i in (x) do echo REM @author Fake Echo For Do Rem',
+  'echo for %%i in (x) do REM @author Fake Echo For Do Prefix',
+  'echo ready | for %%i in (x) do REM @author Fake Single Pipe For Do Rem',
+  'echo ordinary DO REM @author Fake Ordinary Do Rem',
+], 'Batch `) ELSE REM` 必须从 ELSE 删除，纯 FOR ... DO REM 必须删除整个 command segment；echo、escaped、quoted、DO 后普通命令与单 pipe 中的 REM 必须保留');
+assert.deepEqual(
+  extractAttributions(batchElseAndForDoRem, 'scripts/else-for-do-rem.cmd', 'cmd')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Batch Else Rem', 1],
+    ['author', 'Batch Else At Rem', 2],
+    ['author', 'Batch For Do Rem', 3],
+    ['author', 'Batch For Do At Rem', 4],
+  ],
+  'Batch ELSE/FOR DO 的真实 REM 署名必须定位，各类负例中的伪署名不得误报',
 );
 
 const keepCases = [

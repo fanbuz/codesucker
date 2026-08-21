@@ -170,6 +170,8 @@ interface ActiveComment {
   open?: string;
   close: string;
   depth: number;
+  /** Object Pascal 允许异类块评论嵌套，但同类 opener 不增加深度。 */
+  pascalStack?: Array<'}' | '*)'>;
 }
 
 interface ActiveString {
@@ -532,8 +534,9 @@ function batchCommentStart(line: string): number | null {
   return match ? match[1].length : null;
 }
 
-function batchLastCommandSegment(code: string): string {
+function batchLastCommandSegment(code: string): { text: string; separatorStart: number } {
   let segmentStart = 0;
+  let separatorStart = 0;
   let quoted = false;
   for (let cursor = 0; cursor < code.length; cursor++) {
     const value = code[cursor];
@@ -547,20 +550,35 @@ function batchLastCommandSegment(code: string): string {
     if (quoted || escaped) continue;
     if (value === '&') {
       const length = code[cursor + 1] === '&' ? 2 : 1;
+      separatorStart = cursor;
       segmentStart = cursor + length;
       cursor += length - 1;
       continue;
     }
     if (value === '|' && code[cursor + 1] === '|') {
+      separatorStart = cursor;
       segmentStart = cursor + 2;
       cursor++;
     }
   }
-  return code.slice(segmentStart).trim();
+  return { text: code.slice(segmentStart).trim(), separatorStart };
 }
 
 function batchInlineRemBoundary(line: string, index: number, code: string): number | null {
   if (!/^rem(?:[.\s]|$)/i.test(line.slice(index))) return null;
+  const directSeparated = /\s$/.test(code) || /\s@$/.test(code);
+  if (directSeparated) {
+    const atPrefix = /\s@$/.test(code);
+    const directCode = atPrefix ? code.slice(0, -1).trimEnd() : code.trimEnd();
+    const commandSegment = batchLastCommandSegment(directCode);
+    const elseCount = commandSegment.text.match(/\belse\b/ig)?.length ?? 0;
+    const doCount = commandSegment.text.match(/\bdo\b/ig)?.length ?? 0;
+    const provenElse = elseCount === 1
+      && /^(?:@?if\b.*)?\)\s*else$/i.test(commandSegment.text);
+    if (provenElse) return directCode.toLowerCase().lastIndexOf('else');
+    const provenFor = doCount === 1 && /^@?for\b.+\bdo$/i.test(commandSegment.text);
+    if (provenFor) return commandSegment.separatorStart;
+  }
   // REM 不能作为管道右侧命令；接受命令链以及未转义分组左括号后的首命令。
   const match = /(&&|\|\||&|\()\s*@?\s*$/.exec(code);
   if (!match) return null;
@@ -574,7 +592,7 @@ function batchInlineRemBoundary(line: string, index: number, code: string): numb
     const beforeGroup = code.slice(0, match.index).trimEnd();
     // 单管道右侧仍按普通命令文本处理；`|| (` 已由最长匹配排除在外。
     if (/(?:^|[^|])\|$/.test(beforeGroup)) return null;
-    const commandSegment = batchLastCommandSegment(beforeGroup);
+    const commandSegment = batchLastCommandSegment(beforeGroup).text;
     // 只接受可证明的分组 opener：命令段首、IF/ELSE 分支、FOR ... DO。
     const ifGroup = /^@?if\b(?:(?:\s+\/i)?\s+(?:not\s+)?(?:exist\s+.+|defined\s+\S+|errorlevel\s+\d+|cmdextversion\s+\d+|.+==.+))$/i
       .test(commandSegment);
@@ -1543,6 +1561,31 @@ function escapedLength(
 }
 
 function consumeActiveComment(line: string, index: number, state: ActiveComment): { end: number; closed: boolean } {
+  if (state.pascalStack) {
+    let cursor = index;
+    while (cursor < line.length) {
+      const close = state.pascalStack[state.pascalStack.length - 1];
+      // 仅异类 opener 入栈；同类 opener 保持 Delphi first-close 语义。
+      if (close === '}' && line.startsWith('(*', cursor)) {
+        state.pascalStack.push('*)');
+        cursor += 2;
+        continue;
+      }
+      if (close === '*)' && line[cursor] === '{') {
+        state.pascalStack.push('}');
+        cursor++;
+        continue;
+      }
+      if (line.startsWith(close, cursor)) {
+        state.pascalStack.pop();
+        cursor += close.length;
+        if (state.pascalStack.length === 0) return { end: cursor, closed: true };
+        continue;
+      }
+      cursor++;
+    }
+    return { end: line.length, closed: false };
+  }
   if (!state.open) {
     const closeIndex = line.indexOf(state.close, index);
     if (closeIndex === -1) return { end: line.length, closed: false };
@@ -1816,6 +1859,16 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         }
       }
 
+      if (syntax.dialect === 'r' && raw[index] === '%') {
+        const close = raw.indexOf('%', index + 1);
+        const end = close === -1 ? raw.length : close + 1;
+        // R 的 %...% 是单个 special infix token；其中 # 和其他评论样式均为 token 内容。
+        // 未闭合 token 保守保护到物理行末，避免误删可能的源码。
+        code += raw.slice(index, end);
+        index = end;
+        continue;
+      }
+
       if (syntax.dialect === 'vb' && raw[index] === '<') {
         if (isVbXmlStart(raw, index, code)) {
           const state = newVbXmlState();
@@ -1986,6 +2039,20 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
             powerShellRhsMode,
           )));
       if (block) {
+        if (syntax.dialect === 'pascal' && (block.open === '{' || block.open === '(*')) {
+          const commentStart = index;
+          const state: ActiveComment = {
+            close: block.close,
+            depth: 1,
+            pascalStack: [block.close as '}' | '*)'],
+          };
+          const consumed = consumeActiveComment(raw, index + block.open.length, state);
+          comments.push(raw.slice(commentStart, consumed.end));
+          hadComment = true;
+          index = consumed.end;
+          if (!consumed.closed) activeComment = state;
+          continue;
+        }
         if (block.nested) {
           const commentStart = index;
           const state: ActiveComment = { open: block.open, close: block.close, depth: 1 };
