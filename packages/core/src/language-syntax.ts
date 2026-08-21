@@ -186,11 +186,25 @@ interface ActiveVbXml {
   stack: string[];
   tag: { name: string; closing: boolean; quote: '"' | "'" | null } | null;
   specialClose: string | null;
-  embedded: { quote: '"' | null } | null;
+  embedded: ActiveVbEmbedded | null;
+}
+
+interface ActiveVbEmbedded {
+  quote: '"' | null;
+  nestedXml: ActiveVbXml | null;
+  /** 仅保留足够判断下一个 XML literal 是否位于表达式起始语境的尾部。 */
+  code: string;
 }
 
 function isPowerShellRequires(line: string): boolean {
   return /^\s*#requires\b/i.test(line);
+}
+
+function isPowerShellLineComment(line: string, index: number): boolean {
+  if (line[index] !== '#') return false;
+  if (index === 0) return true;
+  // PowerShell 的 # 只有从新 token 开始时才是注释；裸参数 token 内的 # 是普通字符。
+  return /[\s;|&(){}\[\],=]/.test(line[index - 1]);
 }
 
 function batchCommentStart(line: string): number | null {
@@ -299,7 +313,7 @@ function consumePowerShellExpandable(
       continue;
     }
     // 子表达式中的行注释属于字符串表达式的一部分；保守保留，并在下一行继续上下文。
-    if (line[cursor] === '#') return { end: line.length, closed: false };
+    if (isPowerShellLineComment(line, cursor)) return { end: line.length, closed: false };
     cursor++;
   }
   return { end: line.length, closed: false };
@@ -447,16 +461,36 @@ function isVbXmlStart(line: string, index: number, code: string): boolean {
   return /^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(line.slice(index));
 }
 
+function newVbXmlState(): ActiveVbXml {
+  return { stack: [], tag: null, specialClose: null, embedded: null };
+}
+
+function appendVbEmbeddedCode(state: ActiveVbEmbedded, value: string): void {
+  state.code = (state.code + value).slice(-80);
+}
+
 function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: number; closed: boolean } {
   let cursor = index;
   while (cursor < line.length) {
     if (state.embedded) {
-      if (state.embedded.quote) {
+      const embedded = state.embedded;
+      if (embedded.nestedXml) {
+        const consumed = consumeVbXml(line, cursor, embedded.nestedXml);
+        cursor = consumed.end;
+        if (!consumed.closed) return { end: line.length, closed: false };
+        embedded.nestedXml = null;
+        appendVbEmbeddedCode(embedded, 'x');
+        continue;
+      }
+      if (embedded.quote) {
         if (line.startsWith('""', cursor)) {
           cursor += 2;
           continue;
         }
-        if (line[cursor] === '"') state.embedded.quote = null;
+        if (line[cursor] === '"') {
+          embedded.quote = null;
+          appendVbEmbeddedCode(embedded, 'x');
+        }
         cursor++;
         continue;
       }
@@ -466,13 +500,23 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
         continue;
       }
       if (line[cursor] === '"') {
-        state.embedded.quote = '"';
+        embedded.quote = '"';
         cursor++;
+        continue;
+      }
+      if (line[cursor] === '<' && isVbXmlStart(line, cursor, embedded.code)) {
+        const nestedXml = newVbXmlState();
+        const consumed = consumeVbXml(line, cursor, nestedXml);
+        cursor = consumed.end;
+        if (!consumed.closed) embedded.nestedXml = nestedXml;
+        else appendVbEmbeddedCode(embedded, 'x');
+        if (!consumed.closed) return { end: line.length, closed: false };
         continue;
       }
       // 嵌入 VB 表达式的单引号注释延续到物理行末，下一行仍回到表达式状态。
       if (line[cursor] === "'") return { end: line.length, closed: false };
       if (isVbRem(line, cursor)) return { end: line.length, closed: false };
+      appendVbEmbeddedCode(embedded, line[cursor]);
       cursor++;
       continue;
     }
@@ -534,7 +578,7 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
       continue;
     }
     if (line.startsWith('<%=', cursor)) {
-      state.embedded = { quote: null };
+      state.embedded = { quote: null, nestedXml: null, code: '' };
       cursor += 3;
       continue;
     }
@@ -577,7 +621,8 @@ function hclHeredoc(line: string, index: number): ActiveHeredoc | null {
 }
 
 function isHeredocEnd(line: string, state: ActiveHeredoc): boolean {
-  const candidate = state.allowIndent ? line.trim() : line.trimEnd();
+  // <<- 只放宽前导缩进；两种 heredoc 的终止符都不允许尾随空白。
+  const candidate = state.allowIndent ? line.replace(/^[\t ]+/, '') : line;
   return candidate === state.delimiter;
 }
 
@@ -794,9 +839,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
 
       if (syntax.dialect === 'vb' && raw[index] === '<') {
         if (isVbXmlStart(raw, index, code)) {
-          const state: ActiveVbXml = {
-            stack: [], tag: null, specialClose: null, embedded: null,
-          };
+          const state = newVbXmlState();
           const consumed = consumeVbXml(raw, index, state);
           code += raw.slice(index, consumed.end);
           hadStringContent = true;
@@ -833,7 +876,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         break;
       }
 
-      const lineComment = syntax.lineComments.find((token) => raw.startsWith(token, index));
+      const lineComment = syntax.lineComments.find((token) => raw.startsWith(token, index)
+        && !(syntax.dialect === 'powershell' && token === '#' && !isPowerShellLineComment(raw, index)));
       if (lineComment) {
         comments.push(raw.slice(index));
         hadComment = true;

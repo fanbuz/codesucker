@@ -251,6 +251,18 @@ assert.deepEqual(cleanedLines([
   'Write-Output $message',
 ], 'PowerShell expandable 双引号的 $() 嵌套括号与内部引号必须保留，外层闭合后的真实注释仍须删除');
 
+assert.deepEqual(cleanedLines([
+  'Write-Output https://example.test/#fragment',
+  'Write-Output foo#bar',
+  'Write-Output done # remove at token boundary',
+  '$value = $(Write-Output nested#fragment) # remove after subexpression',
+].join('\n'), 'ps1'), [
+  'Write-Output https://example.test/#fragment',
+  'Write-Output foo#bar',
+  'Write-Output done',
+  '$value = $(Write-Output nested#fragment)',
+], 'PowerShell 未加引号 token 与 $() 表达式 token 内的 # 必须保留，空白 token 边界后的 # 才是注释');
+
 const nestedPowerShellComment = [
   '$before = 1',
   '<# outer comment starts',
@@ -330,6 +342,26 @@ assert.deepEqual(
   'VB XML 注入表达式字符串中的伪署名不得误报，XML 闭合后的真实署名仍须定位',
 );
 
+const visualBasicNestedXmlExpression = [
+  "Dim xml = <root><%= <child attr='value'/> %></root> ' @author Real",
+  "Dim sample = <root><%= <child attr='@author Fake Copyright 2026 Fake'/> %></root>",
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicNestedXmlExpression, 'vb'), [
+  "Dim xml = <root><%= <child attr='value'/> %></root>",
+  "Dim sample = <root><%= <child attr='@author Fake Copyright 2026 Fake'/> %></root>",
+], 'VB XML 的 <%= %> 表达式必须支持嵌套 XML，最外层 XML 闭合后的真实注释仍须删除');
+assert.deepEqual(
+  extractAttributions(visualBasicNestedXmlExpression, 'src/nested-xml-expression.vb', 'vb'),
+  [{
+    kind: 'author',
+    subject: 'Real',
+    file: 'src/nested-xml-expression.vb',
+    line: 1,
+    text: "Dim xml = <root><%= <child attr='value'/> %></root> ' @author Real",
+  }],
+  'VB XML 注入的嵌套 XML 属性伪署名不得误报，最外层闭合后的真实署名仍须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url <- "https://example.test/#fragment" # remove',
   "label <- '# literal'",
@@ -386,6 +418,32 @@ assert.deepEqual(cleanedLines([
   'EOT',
   'value = 42',
 ], 'HCL 字符串与 heredoc 内容必须保留，三类真实注释必须删除');
+
+assert.deepEqual(cleanedLines([
+  'regular = <<EOT',
+  'regular content',
+  'EOT ',
+  '# literal after trailing-space pseudo terminator',
+  'EOT',
+  'indented = <<-TAG',
+  '  indented content',
+  '  TAG ',
+  '  # literal after indented trailing-space pseudo terminator',
+  '  TAG',
+  'after = true # remove after real terminator',
+].join('\n'), 'tf'), [
+  'regular = <<EOT',
+  'regular content',
+  'EOT',
+  '# literal after trailing-space pseudo terminator',
+  'EOT',
+  'indented = <<-TAG',
+  '  indented content',
+  '  TAG',
+  '  # literal after indented trailing-space pseudo terminator',
+  '  TAG',
+  'after = true',
+], 'HCL heredoc 终止符不得包含尾空格；<<- 仅额外允许前导缩进，真实终止符后的注释仍须删除');
 
 assert.deepEqual(cleanedLines([
   'def url = "https://example.test/#fragment // literal" // remove',
