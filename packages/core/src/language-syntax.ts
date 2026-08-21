@@ -18,6 +18,8 @@ interface StringRule {
   openAtLineEnd?: boolean;
   /** Groovy slashy string 需要结合前面的表达式判断，避免把除号当成字符串。 */
   contextual?: 'groovy-slashy';
+  /** HCL quoted template 允许在 ${...} / %{...} 表达式内嵌套字符串。 */
+  embedded?: 'hcl-template';
 }
 
 interface LanguageSyntax {
@@ -72,7 +74,7 @@ const GROOVY: LanguageSyntax = {
 const HCL: LanguageSyntax = {
   lineComments: ['//', '#'],
   blockComments: [{ open: '/*', close: '*/' }],
-  strings: [quote('"')],
+  strings: [quote('"', 'backslash', { embedded: 'hcl-template' })],
   dialect: 'hcl',
 };
 
@@ -89,8 +91,8 @@ const POWERSHELL: LanguageSyntax = {
   strings: [
     quote("@'", 'double', { close: "'@", multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
     quote('@"', 'backtick', { close: '"@', multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
-    quote('"', 'backtick'),
-    quote("'", 'double'),
+    quote('"', 'backtick', { multiline: true }),
+    quote("'", 'double', { multiline: true }),
   ],
   dialect: 'powershell',
 };
@@ -160,11 +162,18 @@ interface ActiveComment {
 
 interface ActiveString {
   rule: StringRule;
+  hclContexts?: Array<{ kind: 'template' } | { kind: 'expression'; depth: number }>;
 }
 
 interface ActiveHeredoc {
   delimiter: string;
   allowIndent: boolean;
+}
+
+interface ActiveVbXml {
+  stack: string[];
+  tag: { name: string; closing: boolean; quote: '"' | "'" | null } | null;
+  specialClose: string | null;
 }
 
 function isPowerShellRequires(line: string): boolean {
@@ -194,6 +203,155 @@ function canOpenString(rule: StringRule, line: string, index: number, code: stri
   if (rule.openAtLineEnd && line.slice(index + rule.open.length).trim() !== '') return false;
   if (rule.contextual === 'groovy-slashy' && !canStartGroovySlashy(code)) return false;
   return true;
+}
+
+function startString(rule: StringRule): ActiveString {
+  return rule.embedded === 'hcl-template'
+    ? { rule, hclContexts: [{ kind: 'template' }] }
+    : { rule };
+}
+
+function consumeHclTemplate(
+  line: string,
+  index: number,
+  contexts: NonNullable<ActiveString['hclContexts']>,
+): { end: number; closed: boolean } {
+  let cursor = index;
+  while (cursor < line.length) {
+    const context = contexts[contexts.length - 1];
+    if (context.kind === 'template') {
+      if (line[cursor] === '\\') {
+        cursor += Math.min(2, line.length - cursor);
+        continue;
+      }
+      // $${ / %%{ 分别表示字面量 ${ / %{，不能进入模板表达式。
+      if (line.startsWith('$${', cursor) || line.startsWith('%%{', cursor)) {
+        cursor += 3;
+        continue;
+      }
+      if (line.startsWith('${', cursor) || line.startsWith('%{', cursor)) {
+        contexts.push({ kind: 'expression', depth: 1 });
+        cursor += 2;
+        continue;
+      }
+      if (line[cursor] === '"') {
+        cursor++;
+        if (contexts.length === 1) return { end: cursor, closed: true };
+        contexts.pop();
+        continue;
+      }
+      cursor++;
+      continue;
+    }
+
+    if (line[cursor] === '"') {
+      contexts.push({ kind: 'template' });
+      cursor++;
+      continue;
+    }
+    if (line[cursor] === '{') {
+      context.depth++;
+      cursor++;
+      continue;
+    }
+    if (line[cursor] === '}') {
+      context.depth--;
+      cursor++;
+      if (context.depth === 0) contexts.pop();
+      continue;
+    }
+    cursor++;
+  }
+  return { end: line.length, closed: false };
+}
+
+function canStartVbXml(code: string): boolean {
+  const before = code.trimEnd();
+  if (before === '') return true;
+  if (/[=([{,:&+]$/.test(before)) return true;
+  return /\b(?:return|yield)\s*$/i.test(before);
+}
+
+function isVbXmlStart(line: string, index: number, code: string): boolean {
+  if (!canStartVbXml(code)) return false;
+  return /^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(line.slice(index));
+}
+
+function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: number; closed: boolean } {
+  let cursor = index;
+  while (cursor < line.length) {
+    if (state.specialClose) {
+      const closeIndex = line.indexOf(state.specialClose, cursor);
+      if (closeIndex === -1) return { end: line.length, closed: false };
+      cursor = closeIndex + state.specialClose.length;
+      state.specialClose = null;
+      continue;
+    }
+
+    if (state.tag) {
+      const tag = state.tag;
+      if (tag.quote) {
+        if (line[cursor] === tag.quote) tag.quote = null;
+        cursor++;
+        continue;
+      }
+      if (line[cursor] === '"' || line[cursor] === "'") {
+        tag.quote = line[cursor] as '"' | "'";
+        cursor++;
+        continue;
+      }
+      if (!tag.closing && line.startsWith('/>', cursor)) {
+        state.tag = null;
+        cursor += 2;
+        if (state.stack.length === 0) return { end: cursor, closed: true };
+        continue;
+      }
+      if (line[cursor] === '>') {
+        if (tag.closing) {
+          if (state.stack[state.stack.length - 1] === tag.name) state.stack.pop();
+        } else {
+          state.stack.push(tag.name);
+        }
+        state.tag = null;
+        cursor++;
+        if (state.stack.length === 0) return { end: cursor, closed: true };
+        continue;
+      }
+      cursor++;
+      continue;
+    }
+
+    if (line.startsWith('<!--', cursor)) {
+      state.specialClose = '-->';
+      cursor += 4;
+      continue;
+    }
+    if (line.startsWith('<![CDATA[', cursor)) {
+      state.specialClose = ']]>';
+      cursor += 9;
+      continue;
+    }
+    if (line.startsWith('<?', cursor)) {
+      state.specialClose = '?>';
+      cursor += 2;
+      continue;
+    }
+
+    const closingTag = /^<\/([A-Za-z_][A-Za-z0-9_.:-]*)(?=[\s>])/.exec(line.slice(cursor));
+    if (closingTag) {
+      state.tag = { name: closingTag[1], closing: true, quote: null };
+      cursor += closingTag[0].length;
+      continue;
+    }
+    const openingTag = /^<([A-Za-z_][A-Za-z0-9_.:-]*)(?=[\s/>])/.exec(line.slice(cursor));
+    if (openingTag) {
+      state.tag = { name: openingTag[1], closing: false, quote: null };
+      cursor += openingTag[0].length;
+      continue;
+    }
+    cursor++;
+  }
+  return { end: line.length, closed: false };
 }
 
 function dynamicRRawString(line: string, index: number, code: string): { open: string; rule: StringRule } | null {
@@ -272,12 +430,13 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
   let activeComment: ActiveComment | null = null;
   let activeString: ActiveString | null = null;
   let activeHeredoc: ActiveHeredoc | null = null;
+  let activeVbXml: ActiveVbXml | null = null;
 
   for (const raw of rawLines) {
     let code = '';
     const comments: string[] = [];
     let hadComment = false;
-    let hadStringContent = activeString !== null || activeHeredoc !== null;
+    let hadStringContent = activeString !== null || activeHeredoc !== null || activeVbXml !== null;
     let index = 0;
 
     if (activeHeredoc) {
@@ -305,6 +464,16 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     }
 
     scan: while (index < raw.length) {
+      if (activeVbXml) {
+        const consumed = consumeVbXml(raw, index, activeVbXml);
+        code += raw.slice(index, consumed.end);
+        hadStringContent = true;
+        index = consumed.end;
+        if (!consumed.closed) break;
+        activeVbXml = null;
+        continue;
+      }
+
       if (activeComment) {
         const consumed = consumeActiveComment(raw, index, activeComment);
         comments.push(raw.slice(index, consumed.end));
@@ -318,6 +487,13 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       if (activeString) {
         hadStringContent = true;
         const { rule } = activeString;
+        if (activeString.hclContexts) {
+          const consumed = consumeHclTemplate(raw, index, activeString.hclContexts);
+          code += raw.slice(index, consumed.end);
+          index = consumed.end;
+          if (consumed.closed) activeString = null;
+          continue;
+        }
         // Pascal / VB / PowerShell 单引号通过连续两个引号表示字面量引号。
         if (rule.escape === 'double' && raw.startsWith(rule.close + rule.close, index)) {
           code += rule.close + rule.close;
@@ -356,7 +532,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           } else {
             code += token;
             index += token.length;
-            activeString = { rule: quote(token, 'backslash', { multiline: true }) };
+            activeString = startString(quote(token, 'backslash', { multiline: true }));
             hadStringContent = true;
           }
           continue;
@@ -372,7 +548,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         if (directive) {
           code += directive.open;
           index += directive.open.length;
-          activeString = { rule: directive };
+          activeString = startString(directive);
           hadStringContent = true;
           continue;
         }
@@ -394,8 +570,22 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         if (rawString) {
           code += rawString.open;
           index += rawString.open.length;
-          activeString = { rule: rawString.rule };
+          activeString = startString(rawString.rule);
           hadStringContent = true;
+          continue;
+        }
+      }
+
+      if (syntax.dialect === 'vb' && raw[index] === '<') {
+        if (isVbXmlStart(raw, index, code)) {
+          const state: ActiveVbXml = {
+            stack: [], tag: null, specialClose: null,
+          };
+          const consumed = consumeVbXml(raw, index, state);
+          code += raw.slice(index, consumed.end);
+          hadStringContent = true;
+          index = consumed.end;
+          if (!consumed.closed) activeVbXml = state;
           continue;
         }
       }
@@ -438,7 +628,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       if (string) {
         code += string.open;
         index += string.open.length;
-        activeString = { rule: string };
+        activeString = startString(string);
         hadStringContent = true;
         continue scan;
       }

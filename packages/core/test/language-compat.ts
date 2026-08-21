@@ -221,6 +221,28 @@ assert.deepEqual(cleanedLines([
   'Write-Output $here',
 ], 'PowerShell 引号、here-string 与 #requires 必须保留，真实注释必须删除');
 
+assert.deepEqual(cleanedLines([
+  '$doubleQuoted = "first line',
+  '# literal in ordinary double-quoted string',
+  '<# literal block marker #>',
+  'last line" # remove after double quote closes',
+  "$singleQuoted = 'first line",
+  '# literal in ordinary single-quoted string',
+  '<# another literal block marker #>',
+  "last line' # remove after single quote closes",
+  'Write-Output $doubleQuoted',
+].join('\n'), 'ps1'), [
+  '$doubleQuoted = "first line',
+  '# literal in ordinary double-quoted string',
+  '<# literal block marker #>',
+  'last line"',
+  "$singleQuoted = 'first line",
+  '# literal in ordinary single-quoted string',
+  '<# another literal block marker #>',
+  "last line'",
+  'Write-Output $doubleQuoted',
+], 'PowerShell 普通单双引号字符串跨行时必须保护中间注释标记，闭合后的真实注释仍须删除');
+
 const nestedPowerShellComment = [
   '$before = 1',
   '<# outer comment starts',
@@ -263,6 +285,26 @@ assert.deepEqual(cleanedLines([
   'Remember = True',
 ], 'VB 双引号转义内容和 REM 前缀标识符必须保留，独立、行内及冒号后的 REM 注释必须删除');
 
+const visualBasicXmlLiteral = [
+  "Dim x = <tag attr='value'>text</tag> ' remove after XML literal",
+  "Dim sample = <tag attr='value'>it's <!-- @author Fake XML --> // Copyright 2026 Fake REM literal</tag> ' @author Actual XML Maintainer",
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicXmlLiteral, 'vb'), [
+  "Dim x = <tag attr='value'>text</tag>",
+  "Dim sample = <tag attr='value'>it's <!-- @author Fake XML --> // Copyright 2026 Fake REM literal</tag>",
+], 'VB XML literal 的单引号属性和内容注释样式必须保留，XML 闭合后的真实注释仍须删除');
+assert.deepEqual(
+  extractAttributions(visualBasicXmlLiteral, 'src/xml-literal.vb', 'vb'),
+  [{
+    kind: 'author',
+    subject: 'Actual XML Maintainer',
+    file: 'src/xml-literal.vb',
+    line: 2,
+    text: "Dim sample = <tag attr='value'>it's <!-- @author Fake XML --> // Copyright 2026 Fake REM literal</tag> ' @author Actual XML Maintainer",
+  }],
+  'VB XML literal 内容中的伪署名不得误报，闭合后的真实署名仍须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url <- "https://example.test/#fragment" # remove',
   "label <- '# literal'",
@@ -284,6 +326,8 @@ assert.deepEqual(cleanedLines([
 
 assert.deepEqual(cleanedLines([
   'url = "https://example.test/#fragment // literal /* literal */" # remove',
+  'value = "${replace(var.x, "#", "-")}" # remove after interpolation',
+  'nested = "${jsonencode({ key = "#", nested = { marker = "/* literal */" } })}" // remove after nested interpolation',
   'script = <<-EOT',
   '# literal in heredoc',
   'echo "// literal /* literal */"',
@@ -291,6 +335,8 @@ assert.deepEqual(cleanedLines([
   'value = 42 /* remove */',
 ].join('\n'), 'tf'), [
   'url = "https://example.test/#fragment // literal /* literal */"',
+  'value = "${replace(var.x, "#", "-")}"',
+  'nested = "${jsonencode({ key = "#", nested = { marker = "/* literal */" } })}"',
   'script = <<-EOT',
   '# literal in heredoc',
   'echo "// literal /* literal */"',
