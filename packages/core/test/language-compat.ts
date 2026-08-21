@@ -4409,6 +4409,50 @@ assert.deepEqual(
   'Batch caret quote parity 后真实 REM 署名必须定位，双 caret 后 quoted segment 内伪署名不得误报',
 );
 
+const batchCaretInsideOpenQuote = [
+  'echo "foo^" & REM @author Batch Open Quote One Caret Tail',
+  'echo "foo^^" & REM @author Batch Open Quote Two Caret Tail',
+  'echo "foo^^^" & REM @author Batch Open Quote Three Caret Tail',
+  'echo "foo & REM @author Fake Inside Open Quote" & REM @author Batch Open Quote Inner Rem Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(batchCaretInsideOpenQuote, 'cmd'), [
+  'echo "foo^"',
+  'echo "foo^^"',
+  'echo "foo^^^"',
+  'echo "foo & REM @author Fake Inside Open Quote"',
+], 'Batch 已开启 quote 内 1/2/3 caret 均为字面字符且后续 quote 必须闭合；引号内 & REM 保留，闭合后的真实 & REM 删除');
+assert.deepEqual(
+  extractAttributions(batchCaretInsideOpenQuote, 'scripts/caret-inside-open-quote.cmd', 'cmd')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Batch Open Quote One Caret Tail', 1],
+    ['author', 'Batch Open Quote Two Caret Tail', 2],
+    ['author', 'Batch Open Quote Three Caret Tail', 3],
+    ['author', 'Batch Open Quote Inner Rem Tail', 4],
+  ],
+  'Batch open quote 内 REM 伪署名不得误报，1/2/3 caret 后 quote 闭合后的真实 REM 署名必须定位',
+);
+
+const batchCaretSeparatorAfterClosedQuote = [
+  'echo "x^" & if exist y ( REM @author Batch Quote Caret Group Rem',
+  'echo "x" ^& REM @author Fake Escaped Ampersand Rem',
+  'echo "x" ^^& REM @author Batch Even Caret Ampersand Rem',
+].join('\n');
+assert.deepEqual(cleanedLines(batchCaretSeparatorAfterClosedQuote, 'bat'), [
+  'echo "x^" & if exist y (',
+  'echo "x" ^& REM @author Fake Escaped Ampersand Rem',
+  'echo "x" ^^',
+], 'Batch open quote 内 caret 不得阻止 quote 闭合与后续 IF group REM；引号外奇数 caret 转义 & 时保留，偶数 caret 后 & REM 必须删除');
+assert.deepEqual(
+  extractAttributions(batchCaretSeparatorAfterClosedQuote, 'scripts/caret-separator-after-quote.bat', 'bat')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Batch Quote Caret Group Rem', 1],
+    ['author', 'Batch Even Caret Ampersand Rem', 3],
+  ],
+  'Batch closed quote 后 group/even-caret separator 的真实 REM 署名必须定位，escaped ampersand 后伪署名不得误报',
+);
+
 const batchElseAndForDoRem = [
   'if exist x (echo yes) else REM @author Batch Else Rem',
   'if exist x (echo yes) ELSE @ReM @author Batch Else At Rem',

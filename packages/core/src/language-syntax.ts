@@ -121,7 +121,7 @@ const R: LanguageSyntax = {
 const BATCH: LanguageSyntax = {
   lineComments: [],
   blockComments: [],
-  strings: [quote('"', 'caret')],
+  strings: [quote('"', 'none')],
   dialect: 'batch',
 };
 
@@ -575,8 +575,9 @@ function batchLastCommandSegment(code: string): { text: string; separatorStart: 
     let precedingCarets = 0;
     for (let before = cursor - 1; before >= 0 && code[before] === '^'; before--) precedingCarets++;
     const escaped = precedingCarets % 2 !== 0;
-    if (value === '"' && !escaped) {
-      quoted = !quoted;
+    if (value === '"') {
+      if (quoted) quoted = false;
+      else if (!escaped) quoted = true;
       continue;
     }
     if (quoted || escaped) continue;
