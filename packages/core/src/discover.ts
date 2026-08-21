@@ -16,12 +16,21 @@ const LANG_BY_EXT: Record<string, string> = {
   php: 'PHP', rb: 'RB', vue: 'VUE', dart: 'DART', lua: 'LUA', scala: 'SCALA',
   sql: 'SQL', sh: 'SH', html: 'HTML', htm: 'HTML', css: 'CSS', scss: 'SCSS',
   less: 'LESS', xml: 'XML',
+  pas: 'PASCAL', pp: 'PASCAL', lpr: 'PASCAL', dpr: 'PASCAL', dpk: 'PASCAL',
+  ps1: 'POWERSHELL', psm1: 'POWERSHELL', psd1: 'POWERSHELL',
+  vb: 'VB', vbs: 'VB', bas: 'VB', r: 'R',
+  hcl: 'HCL', tf: 'HCL', tfvars: 'HCL',
+  groovy: 'GROOVY', gvy: 'GROOVY', gradle: 'GROOVY',
+  bat: 'BATCH', cmd: 'BATCH',
 };
 
 const ENTRY_PATTERNS = [
   /^main\./i, /^index\./i, /^app\./i, /^application\./i,
   /main\.(c|cpp|go|rs|py|java|kt|swift|dart)$/i,
   /^(App|Application|MainActivity|Program|Startup)\./,
+  /\.(dpr|lpr|dpk)$/i,
+  /^(start|run)\.(bat|cmd|ps1)$/i,
+  /^(build|settings)\.gradle$/i,
 ];
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -58,7 +67,17 @@ export function entryScore(name: string): number {
 }
 
 export function langOf(ext: string): string {
-  return LANG_BY_EXT[ext.toLowerCase()] ?? ext.toUpperCase();
+  const normalized = normalizeExtension(ext);
+  return LANG_BY_EXT[normalized] ?? normalized.toUpperCase();
+}
+
+function normalizeExtension(ext: string): string {
+  return ext.trim().replace(/^\./, '').toLowerCase();
+}
+
+function sourcePatterns(extensions: string[]): string[] {
+  const normalized = [...new Set(extensions.map(normalizeExtension).filter(Boolean))];
+  return normalized.map((ext) => `**/*.${ext}`);
 }
 
 /** 读取文件并按探测到的编码解码为 UTF-8 文本 */
@@ -109,12 +128,13 @@ export function discover(root: string, extensions: string[], excludes: string[])
     ig.add(fs.readFileSync(gitignorePath, 'utf8'));
   }
 
-  const entries = fg.sync(`**/*.{${extensions.join(',')}}`, {
+  const entries = fg.sync(sourcePatterns(extensions), {
     cwd: root,
     dot: false,
     onlyFiles: true,
     stats: true,
     suppressErrors: true,
+    caseSensitiveMatch: false,
     ignore: compileExcludePatterns(excludes),
   });
 
@@ -177,12 +197,13 @@ export async function discoverAsync(
     if (code !== 'ENOENT') throw error;
   }
 
-  const entries = await fg(`**/*.{${extensions.join(',')}}`, {
+  const entries = await fg(sourcePatterns(extensions), {
     cwd: root,
     dot: false,
     onlyFiles: true,
     stats: true,
     suppressErrors: true,
+    caseSensitiveMatch: false,
     ignore: compileExcludePatterns(excludes),
   });
   throwIfAborted(signal);

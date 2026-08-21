@@ -24,6 +24,10 @@ const LANG_COLORS: Record<string, [string, string]> = {
   CPP: ['#2563eb', 'rgba(37,99,235,.12)'], C: ['#64748b', 'rgba(100,116,139,.12)'],
   CS: ['#16a34a', 'rgba(22,163,74,.12)'], RS: ['#b45309', 'rgba(180,83,9,.12)'],
   SWIFT: ['#ea580c', 'rgba(234,88,12,.12)'], VUE: ['#059669', 'rgba(5,150,105,.12)'],
+  PASCAL: ['#9a7b00', 'rgba(154,123,0,.12)'], POWERSHELL: ['#2563eb', 'rgba(37,99,235,.12)'],
+  VB: ['#7e22ce', 'rgba(126,34,206,.12)'], R: ['#2774a8', 'rgba(39,116,168,.12)'],
+  HCL: ['#844fba', 'rgba(132,79,186,.12)'], GROOVY: ['#0e7490', 'rgba(14,116,144,.12)'],
+  BATCH: ['#4d7c0f', 'rgba(77,124,15,.12)'],
 };
 const langStyle = (lang: string) => LANG_COLORS[lang] ?? ['#6f6f78', 'rgba(110,110,120,.12)'];
 

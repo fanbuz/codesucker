@@ -41,6 +41,38 @@ assert.deepEqual(kotlin.extensions, ['kt', 'kts'], '同语言的多扩展名应�
 assert.equal(kotlin.rawLines, 30);
 assert.equal(summary.extensions.find((item) => item.extension === 'html')?.rawLines, 30, 'HTML 应作为普通后缀参与统计');
 
+const compatibilitySummary = summarizeFileTypes([
+  ...['pas', 'pp', 'lpr', 'dpr', 'dpk'].map((ext) => ({ ext, lang: 'PASCAL', sizeBytes: 10, rawLines: 1, included: true })),
+  ...['ps1', 'psm1', 'psd1'].map((ext) => ({ ext, lang: 'POWERSHELL', sizeBytes: 10, rawLines: 1, included: true })),
+  ...['vb', 'vbs', 'bas'].map((ext) => ({ ext, lang: 'VB', sizeBytes: 10, rawLines: 1, included: true })),
+  { ext: '.R', lang: 'R', sizeBytes: 10, rawLines: 1, included: true },
+  { ext: 'r', lang: 'R', sizeBytes: 10, rawLines: 1, included: true },
+  ...['hcl', 'tf', 'tfvars'].map((ext) => ({ ext, lang: 'HCL', sizeBytes: 10, rawLines: 1, included: true })),
+  ...['groovy', 'gvy', 'gradle'].map((ext) => ({ ext, lang: 'GROOVY', sizeBytes: 10, rawLines: 1, included: true })),
+  ...['bat', 'cmd'].map((ext) => ({ ext, lang: 'BATCH', sizeBytes: 10, rawLines: 1, included: true })),
+]);
+const expectedLanguageExtensions: Record<string, string[]> = {
+  PASCAL: ['dpk', 'dpr', 'lpr', 'pas', 'pp'],
+  POWERSHELL: ['ps1', 'psd1', 'psm1'],
+  VB: ['bas', 'vb', 'vbs'],
+  R: ['r'],
+  HCL: ['hcl', 'tf', 'tfvars'],
+  GROOVY: ['gradle', 'groovy', 'gvy'],
+  BATCH: ['bat', 'cmd'],
+};
+for (const [language, extensions] of Object.entries(expectedLanguageExtensions)) {
+  assert.deepEqual(
+    compatibilitySummary.languages.find((item) => item.language === language)?.extensions,
+    extensions,
+    `${language} 的多个扩展名应汇总到同一语言统计`,
+  );
+}
+assert.equal(
+  compatibilitySummary.extensions.find((item) => item.extension === 'r')?.files,
+  2,
+  '.r 与 .R 应合并为同一个后缀统计项',
+);
+
 assert.equal(statValue(java, 'all', 'files'), 2);
 assert.equal(statValue(java, 'included', 'rawLines'), 40);
 assert.equal(rankExtensionStats(summary.extensions, 'all', 'rawLines')[0].extension, 'java');
