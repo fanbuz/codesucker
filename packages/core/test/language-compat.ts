@@ -223,6 +223,38 @@ assert.deepEqual(
   'Pascal 多行 mixed block 嵌套内真实署名必须提取，异类 fake-close 不得提前结束 outer comment',
 );
 
+const pascalBlockCommentWhitespace = [
+  'var{c}x; // @author Pascal Brace Gap Tail',
+  'var(*c*)x; // @author Pascal Paren Gap Tail',
+  'var{ outer (* inner *) still @author Pascal Mixed Brace Block }x;',
+  'var(* outer { inner } still @author Pascal Mixed Paren Block *)x;',
+  'var {c} x; // @author Pascal Spaced Gap Tail',
+  'var token{ @author Pascal Multiline Block',
+  'still }x;',
+].join('\n');
+assert.deepEqual(cleanedLines(pascalBlockCommentWhitespace, 'pas'), [
+  'var x;',
+  'var x;',
+  'var x;',
+  'var x;',
+  'var x;',
+  'var token',
+  'x;',
+], 'Pascal 同行 brace/paren/mixed block comment 只补一个必要 token gap，已有空白不得变双空格；跨行由物理换行分隔且不得额外补空格');
+assert.deepEqual(
+  extractAttributions(pascalBlockCommentWhitespace, 'src/block-comment-whitespace.pas', 'pas')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Pascal Brace Gap Tail', 1],
+    ['author', 'Pascal Paren Gap Tail', 2],
+    ['author', 'Pascal Mixed Brace Block', 3],
+    ['author', 'Pascal Mixed Paren Block', 4],
+    ['author', 'Pascal Spaced Gap Tail', 5],
+    ['author', 'Pascal Multiline Block', 6],
+  ],
+  'Pascal block gap 清洗中 tail、mixed nested block 与跨行 block 真实署名必须定位',
+);
+
 assert.deepEqual(cleanedLines([
   '#requires -Version 7.2',
   '$url = "https://example.test/#fragment <# literal #>" # remove',
@@ -3399,6 +3431,45 @@ assert.deepEqual(
     ['author', 'R After Unclosed Infix', 9],
   ],
   'R 特殊中缀操作符与字符串内伪评论不得产生署名，闭合后的真实 # 评论署名必须定位',
+);
+
+const hclBlockCommentWhitespace = [
+  'value = for/*c*/x # @author HCL Adjacent Gap Tail',
+  'other = left/*c*/right // @author HCL Identifier Gap Tail',
+  'spaced = for /*c*/ x # @author HCL Spaced Gap Tail',
+  'multi = for/* @author HCL Multiline Block',
+  'still */x',
+  'quoted = "${for/* @author HCL Quoted Interpolation Block */x}" # @author HCL Quoted Tail',
+  'script = <<EOT',
+  'literal for/*c*/x # @author Fake HCL Heredoc Root',
+  '${for/* @author HCL Heredoc Interpolation Block */x} # literal @author Fake HCL Heredoc Tail',
+  'EOT',
+].join('\n');
+assert.deepEqual(cleanedLines(hclBlockCommentWhitespace, 'tf'), [
+  'value = for x',
+  'other = left right',
+  'spaced = for x',
+  'multi = for',
+  'x',
+  'quoted = "${for x}"',
+  'script = <<EOT',
+  'literal for/*c*/x # @author Fake HCL Heredoc Root',
+  '${for x} # literal @author Fake HCL Heredoc Tail',
+  'EOT',
+], 'HCL top-level 与 quoted/heredoc interpolation 中 block comment 必须使用单个必要 token gap；已有空白、跨行与 heredoc root literal 语义不得回归');
+assert.deepEqual(
+  extractAttributions(hclBlockCommentWhitespace, 'infra/block-comment-whitespace.tf', 'tf')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'HCL Adjacent Gap Tail', 1],
+    ['author', 'HCL Identifier Gap Tail', 2],
+    ['author', 'HCL Spaced Gap Tail', 3],
+    ['author', 'HCL Multiline Block', 4],
+    ['author', 'HCL Quoted Interpolation Block', 6],
+    ['author', 'HCL Quoted Tail', 6],
+    ['author', 'HCL Heredoc Interpolation Block', 9],
+  ],
+  'HCL top/quoted/heredoc interpolation 中真实 block/tail 署名必须定位，heredoc root 字面伪署名不得误报',
 );
 
 assert.deepEqual(cleanedLines([

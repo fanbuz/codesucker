@@ -315,7 +315,7 @@ function appendCommentGap(code: string, line: string, nextIndex: number): string
   return code;
 }
 
-function groovyCommentGap(
+function normalizedCommentGap(
   code: string,
   line: string,
   nextIndex: number,
@@ -1157,7 +1157,7 @@ function consumeGroovyGString(
         contexts.push({ kind: 'comment', close: '*/' });
         return finish({ end: line.length, closed: false, code, comments });
       }
-      const gap = groovyCommentGap(code, line, cursor);
+      const gap = normalizedCommentGap(code, line, cursor);
       code = gap.code;
       if (gap.trimmed) {
         context.code = context.code.trimEnd();
@@ -2155,6 +2155,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           hadComment = true;
           index = consumed.end;
           if (!consumed.closed) activeComment = state;
+          else code = normalizedCommentGap(code, raw, index).code;
           continue;
         }
         if (block.nested) {
@@ -2173,9 +2174,12 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         hadComment = true;
         index = end;
         if (closeIndex === -1) activeComment = { close: block.close, depth: 1 };
-        else if (syntax.dialect === 'powershell') code = appendCommentGap(code, raw, index);
-        else if (syntax.dialect === 'groovy') {
-          const gap = groovyCommentGap(code, raw, index);
+        else if (syntax.dialect === 'powershell') {
+          code = appendCommentGap(code, raw, index);
+        } else if (syntax.dialect === 'hcl') {
+          code = normalizedCommentGap(code, raw, index).code;
+        } else if (syntax.dialect === 'groovy') {
+          const gap = normalizedCommentGap(code, raw, index);
           code = gap.code;
           if (gap.trimmed) {
             groovyLineCode = groovyLineCode.trimEnd();
