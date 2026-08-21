@@ -187,12 +187,24 @@ interface ActiveString {
 
 type GroovyContext =
   | { kind: 'string'; rule: StringRule }
-  | { kind: 'expression'; depth: number; code: string }
+  | {
+    kind: 'expression'; depth: number; code: string; lineCode: string;
+    paren: number; bracket: number; canEndExpression: boolean;
+    lineEscape: boolean; continuedDivision: boolean;
+  }
   | { kind: 'comment'; close: '*/' };
+
+interface GroovyExpressionState {
+  paren: number;
+  bracket: number;
+  canEndExpression: boolean;
+  lineEscape: boolean;
+}
 
 type HclContext =
   | { kind: 'template' }
   | { kind: 'expression'; depth: number }
+  | { kind: 'heredoc'; delimiter: string; allowIndent: boolean }
   | { kind: 'comment' };
 
 type PowerShellContext =
@@ -902,8 +914,71 @@ function consumePowerShellExpandable(
   return { end: line.length, closed: false, code, comments };
 }
 
+function newGroovyExpression(depth = 1): Extract<GroovyContext, { kind: 'expression' }> {
+  return {
+    kind: 'expression', depth, code: '', lineCode: '', paren: 0, bracket: 0,
+    canEndExpression: false, lineEscape: false, continuedDivision: false,
+  };
+}
+
+function updateGroovyExpressionState(state: GroovyExpressionState, value: string): void {
+  if (/\s/.test(value)) return;
+  if (value === '(') {
+    state.paren++;
+    state.canEndExpression = false;
+  } else if (value === ')') {
+    state.paren = Math.max(0, state.paren - 1);
+    state.canEndExpression = true;
+  } else if (value === '[') {
+    state.bracket++;
+    state.canEndExpression = false;
+  } else if (value === ']') {
+    state.bracket = Math.max(0, state.bracket - 1);
+    state.canEndExpression = true;
+  } else if (value === '\\') {
+    // 仅在物理行末通过 parity 确认为 line escape，不改变其前 operand 状态。
+  } else if (/[=,+\-*\/%&|^!?:<>.;({]/.test(value)) {
+    state.canEndExpression = false;
+  } else {
+    state.canEndExpression = true;
+  }
+}
+
+function groovyHasLineEscape(code: string): boolean {
+  let cursor = code.length - 1;
+  while (cursor >= 0 && /\s/.test(code[cursor])) cursor--;
+  let slashes = 0;
+  while (cursor >= 0 && code[cursor] === '\\') {
+    slashes++;
+    cursor--;
+  }
+  return slashes % 2 !== 0;
+}
+
+function finalizeGroovyExpressionState(state: GroovyExpressionState, code: string): void {
+  state.lineEscape = groovyHasLineEscape(code);
+  const withoutEscape = state.lineEscape ? code.replace(/\\\s*$/, '').trimEnd() : code.trimEnd();
+  if (/\b(?:as|assert|case|else|in|instanceof|return|throw)$/.test(withoutEscape)) {
+    state.canEndExpression = false;
+  }
+  if (state.paren === 0 && state.bracket === 0 && !state.lineEscape) {
+    state.canEndExpression = false;
+  }
+}
+
 function appendGroovyCode(context: Extract<GroovyContext, { kind: 'expression' }>, value: string): void {
   context.code = (context.code + value).slice(-80);
+  context.lineCode += value;
+}
+
+function finalizeGroovyContexts(contexts: GroovyContext[]): void {
+  for (const context of contexts) {
+    if (context.kind !== 'expression') continue;
+    finalizeGroovyExpressionState(context, context.lineCode);
+    if (context.paren === 0 && context.bracket === 0 && !context.lineEscape) context.code = '';
+    context.lineCode = '';
+    context.continuedDivision = false;
+  }
 }
 
 function consumeGroovyGString(
@@ -914,13 +989,26 @@ function consumeGroovyGString(
   let cursor = index;
   let code = '';
   const comments: string[] = [];
+  for (const context of contexts) {
+    if (context.kind !== 'expression') continue;
+    const carried = context.paren > 0 || context.bracket > 0 || context.lineEscape;
+    context.continuedDivision = carried && context.canEndExpression;
+    if (!carried) context.code = '';
+    else if (context.lineEscape) context.code = context.code.replace(/\\\s*$/, '').trimEnd();
+    context.lineEscape = false;
+    context.lineCode = '';
+  }
+  const finish = (result: ConsumedSource): ConsumedSource => {
+    finalizeGroovyContexts(contexts);
+    return result;
+  };
   while (cursor < line.length) {
     const context = contexts[contexts.length - 1];
     if (context.kind === 'comment') {
       const closeIndex = line.indexOf(context.close, cursor);
       if (closeIndex === -1) {
         comments.push(line.slice(cursor));
-        return { end: line.length, closed: false, code, comments };
+        return finish({ end: line.length, closed: false, code, comments });
       }
       comments.push(line.slice(cursor, closeIndex + context.close.length));
       cursor = closeIndex + context.close.length;
@@ -932,7 +1020,7 @@ function consumeGroovyGString(
     if (context.kind === 'string') {
       if (context.rule.embedded === 'groovy-gstring' && line.startsWith('${', cursor)) {
         code += '${';
-        contexts.push({ kind: 'expression', depth: 1, code: '' });
+        contexts.push(newGroovyExpression());
         cursor += 2;
         continue;
       }
@@ -945,7 +1033,7 @@ function consumeGroovyGString(
       if (line.startsWith(context.rule.close, cursor)) {
         code += context.rule.close;
         cursor += context.rule.close.length;
-        if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
+        if (contexts.length === 1) return finish({ end: cursor, closed: true, code, comments });
         contexts.pop();
         const parent = contexts[contexts.length - 1];
         if (parent.kind === 'expression') appendGroovyCode(parent, 'x');
@@ -958,7 +1046,7 @@ function consumeGroovyGString(
 
     if (line.startsWith('//', cursor)) {
       comments.push(line.slice(cursor));
-      return { end: line.length, closed: false, code, comments };
+      return finish({ end: line.length, closed: false, code, comments });
     }
     if (line.startsWith('/*', cursor)) {
       const closeIndex = line.indexOf('*/', cursor + 2);
@@ -967,7 +1055,7 @@ function consumeGroovyGString(
       cursor = end;
       if (closeIndex === -1) {
         contexts.push({ kind: 'comment', close: '*/' });
-        return { end: line.length, closed: false, code, comments };
+        return finish({ end: line.length, closed: false, code, comments });
       }
       code = appendCommentGap(code, line, cursor);
       appendGroovyCode(context, ' ');
@@ -977,6 +1065,7 @@ function consumeGroovyGString(
       code += '{';
       context.depth++;
       appendGroovyCode(context, '{');
+      updateGroovyExpressionState(context, '{');
       cursor++;
       continue;
     }
@@ -985,23 +1074,32 @@ function consumeGroovyGString(
       context.depth--;
       cursor++;
       if (context.depth === 0) contexts.pop();
-      else appendGroovyCode(context, '}');
+      else {
+        appendGroovyCode(context, '}');
+        updateGroovyExpressionState(context, '}');
+      }
       continue;
     }
 
-    const nestedString = GROOVY.strings.find((rule) => canOpenString(rule, line, cursor, context.code));
+    const nestedString = GROOVY.strings.find((rule) => {
+      if (rule.contextual === 'groovy-slashy' && context.continuedDivision
+        && context.lineCode.trim() === '') return false;
+      return canOpenString(rule, line, cursor, context.code);
+    });
     if (nestedString) {
       code += nestedString.open;
       contexts.push({ kind: 'string', rule: nestedString });
       appendGroovyCode(context, 'x');
+      context.canEndExpression = true;
       cursor += nestedString.open.length;
       continue;
     }
     code += line[cursor];
     appendGroovyCode(context, line[cursor]);
+    updateGroovyExpressionState(context, line[cursor]);
     cursor++;
   }
-  return { end: line.length, closed: false, code, comments };
+  return finish({ end: line.length, closed: false, code, comments });
 }
 
 function consumeHclTemplate(
@@ -1022,6 +1120,29 @@ function consumeHclTemplate(
       cursor = end;
       if (closeIndex === -1) return { end: line.length, closed: false, code, comments };
       contexts.pop();
+      continue;
+    }
+    if (context.kind === 'heredoc') {
+      if (cursor === 0 && isHclHeredocDelimiter(line, context)) {
+        code += line;
+        contexts.pop();
+        return { end: line.length, closed: false, code, comments };
+      }
+      // nested heredoc 的根正文与 outer heredoc 相同：评论标记和引号均为字面量，
+      // 仅模板插值/指令会进入新的 expression frame。
+      if (line.startsWith('$${', cursor) || line.startsWith('%%{', cursor)) {
+        code += line.slice(cursor, cursor + 3);
+        cursor += 3;
+        continue;
+      }
+      if (line.startsWith('${', cursor) || line.startsWith('%{', cursor)) {
+        code += line.slice(cursor, cursor + 2);
+        contexts.push({ kind: 'expression', depth: 1 });
+        cursor += 2;
+        continue;
+      }
+      code += line[cursor];
+      cursor++;
       continue;
     }
     if (context.kind === 'template') {
@@ -1059,6 +1180,18 @@ function consumeHclTemplate(
       continue;
     }
 
+    if (line.startsWith('<<', cursor)) {
+      const nestedHeredoc = hclHeredoc(line, cursor);
+      if (nestedHeredoc) {
+        code += line.slice(cursor);
+        contexts.push({
+          kind: 'heredoc',
+          delimiter: nestedHeredoc.delimiter,
+          allowIndent: nestedHeredoc.allowIndent,
+        });
+        return { end: line.length, closed: false, code, comments };
+      }
+    }
     if (line.startsWith('/*', cursor)) {
       const closeIndex = line.indexOf('*/', cursor + 2);
       const end = closeIndex === -1 ? line.length : closeIndex + 2;
@@ -1315,13 +1448,20 @@ function hclHeredoc(line: string, index: number): ActiveHeredoc | null {
   };
 }
 
-function isHeredocEnd(line: string, state: ActiveHeredoc): boolean {
-  // delimiter 仅在 heredoc 根 template 语境可终止；未闭合的 expression/comment
-  // 中的同名行仍是内容。
-  if (state.contexts.length !== 1 || state.contexts[0].kind !== 'template') return false;
+function isHclHeredocDelimiter(
+  line: string,
+  state: Pick<ActiveHeredoc, 'delimiter' | 'allowIndent'>,
+): boolean {
   // <<- 只放宽前导缩进；两种 heredoc 的终止符都不允许尾随空白。
   const candidate = state.allowIndent ? line.replace(/^[\t ]+/, '') : line;
   return candidate === state.delimiter;
+}
+
+function isHeredocEnd(line: string, state: ActiveHeredoc): boolean {
+  // delimiter 仅在 heredoc 根 template 语境可终止；未闭合的 expression/comment/
+  // nested heredoc 中的同名行仍是内容。
+  if (state.contexts.length !== 1 || state.contexts[0].kind !== 'template') return false;
+  return isHclHeredocDelimiter(line, state);
 }
 
 function escapedLength(
@@ -1400,6 +1540,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
   let activePowerShellRhsMode: PowerShellRhsMode = null;
   let activePowerShellRhsNesting = newPowerShellRhsNesting();
   let activePowerShellContinuation: PowerShellContinuationReason | null = null;
+  const groovyExpression: GroovyExpressionState = {
+    paren: 0, bracket: 0, canEndExpression: false, lineEscape: false,
+  };
 
   for (const raw of rawLines) {
     let code = '';
@@ -1420,6 +1563,13 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       ? newPowerShellRhsNesting()
       : activePowerShellRhsNesting;
     let powerShellModeExplicitContinuation = false;
+    let groovyLineCode = '';
+    const groovyCarried = groovyExpression.paren > 0
+      || groovyExpression.bracket > 0
+      || groovyExpression.lineEscape;
+    const groovyContinuedDivision = syntax.dialect === 'groovy'
+      && groovyCarried && groovyExpression.canEndExpression;
+    groovyExpression.lineEscape = false;
     activePowerShellContinuedToken = false;
     activePowerShellRhsMode = null;
     activePowerShellRhsNesting = newPowerShellRhsNesting();
@@ -1506,7 +1656,11 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           comments.push(...consumed.comments);
           if (consumed.comments.length > 0) hadComment = true;
           index = consumed.end;
-          if (consumed.closed) activeString = null;
+          if (consumed.closed) {
+            activeString = null;
+            groovyExpression.canEndExpression = true;
+            groovyLineCode += 'x';
+          }
           continue;
         }
         if (activeString.hclContexts) {
@@ -1536,6 +1690,10 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
               : 'nonGeneric';
             powerShellRhsMode = activeString.powerShellRhsMode ?? null;
             powerShellRhsNesting = activeString.powerShellRhsNesting ?? newPowerShellRhsNesting();
+          }
+          if (syntax.dialect === 'groovy') {
+            groovyExpression.canEndExpression = true;
+            groovyLineCode += 'x';
           }
           activeString = null;
           continue;
@@ -1802,9 +1960,13 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         break;
       }
 
-      const string = syntax.strings.find((rule) => canOpenString(
-        rule, raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
-      ));
+      const string = syntax.strings.find((rule) => {
+        if (syntax.dialect === 'groovy' && rule.contextual === 'groovy-slashy'
+          && groovyContinuedDivision && groovyLineCode.trim() === '') return false;
+        return canOpenString(
+          rule, raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
+        );
+      });
       if (string) {
         const sqlBackslashEscapes = string.escape === 'sql' && string.open === "'"
           && /(?:^|[^\p{L}\p{N}_$])E$/iu.test(code);
@@ -1812,6 +1974,10 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         index += string.open.length;
         activeString = startString(string);
         if (sqlBackslashEscapes) activeString.sqlBackslashEscapes = true;
+        if (syntax.dialect === 'groovy') {
+          groovyExpression.canEndExpression = true;
+          groovyLineCode += 'x';
+        }
         if (syntax.dialect === 'powershell') {
           activeString.powerShellTokenPrefix = powerShellTokenKind;
           if (powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression') {
@@ -1849,11 +2015,22 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           powerShellTokenKind = 'none';
         }
       }
+      if (syntax.dialect === 'groovy') {
+        updateGroovyExpressionState(groovyExpression, raw[index]);
+        groovyLineCode += raw[index];
+      }
       code += raw[index];
       index++;
     }
 
-    if (activeString && !activeString.rule.multiline) activeString = null;
+    const groovyExpressionSpansLine = activeString?.groovyContexts !== undefined
+      && activeString.groovyContexts.length > 1;
+    if (activeString && !activeString.rule.multiline && !groovyExpressionSpansLine) {
+      activeString = null;
+    }
+    if (syntax.dialect === 'groovy') {
+      finalizeGroovyExpressionState(groovyExpression, groovyLineCode);
+    }
     const nextPowerShellContinuation: PowerShellContinuationReason | null
       = syntax.dialect === 'powershell'
       ? powerShellContinuationReason(

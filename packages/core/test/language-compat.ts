@@ -3481,6 +3481,80 @@ assert.deepEqual(hclAttributionSummary(hclInvalidOpenerAndBackslashInterpolation
   ['author', 'HCL Backslash Outer Tail', 9],
 ], 'HCL invalid opener 后普通评论、backslash interpolation/directive 评论与 real heredoc 后 tail 必须定位');
 
+const hclNestedHeredocsInOuterTemplate = [
+  'outer = <<OUTER',
+  '${trimspace(<<INNER',
+  '# literal inner @author Fake Plain Inner Hash',
+  '// literal inner @author Fake Plain Inner Slash',
+  '/* literal inner */ @author Fake Plain Inner Block',
+  '  INNER',
+  'INNER ',
+  'INNER',
+  '# @author HCL Nested Plain Expression Comment',
+  ')}',
+  '${trimspace(<<-INDENT',
+  '  # literal inner @author Fake Indented Inner Hash',
+  '  // literal inner @author Fake Indented Inner Slash',
+  '  /* literal inner */ @author Fake Indented Inner Block',
+  '  INDENT ',
+  '  # literal after pseudo terminator @author Fake Indented Pseudo',
+  '  INDENT',
+  '// @author HCL Nested Indented Expression Comment',
+  ')}',
+  'OUTER',
+  'after = true # @author HCL Nested Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(hclNestedHeredocsInOuterTemplate, 'tf'), [
+  'outer = <<OUTER',
+  '${trimspace(<<INNER',
+  '# literal inner @author Fake Plain Inner Hash',
+  '// literal inner @author Fake Plain Inner Slash',
+  '/* literal inner */ @author Fake Plain Inner Block',
+  '  INNER',
+  'INNER',
+  'INNER',
+  ')}',
+  '${trimspace(<<-INDENT',
+  '  # literal inner @author Fake Indented Inner Hash',
+  '  // literal inner @author Fake Indented Inner Slash',
+  '  /* literal inner */ @author Fake Indented Inner Block',
+  '  INDENT',
+  '  # literal after pseudo terminator @author Fake Indented Pseudo',
+  '  INDENT',
+  ')}',
+  'OUTER',
+  'after = true',
+], 'HCL outer heredoc interpolation 内 nested <<INNER/<<-INDENT body 的 # // /* */ 与伪署名必须保留，严格 terminator 后恢复 expression 评论扫描');
+assert.deepEqual(hclAttributionSummary(hclNestedHeredocsInOuterTemplate, 'infra/nested-heredocs.tf'), [
+  ['author', 'HCL Nested Plain Expression Comment', 9],
+  ['author', 'HCL Nested Indented Expression Comment', 18],
+  ['author', 'HCL Nested Outer Tail', 21],
+], 'HCL nested heredoc body/pseudo terminator 内伪署名不得误报，inner terminator 后 expression 评论与 outer tail 必须定位');
+
+const hclUnclosedNestedHeredoc = [
+  'outer = <<OUTER',
+  '${trimspace(<<INNER',
+  '# literal inner @author Fake Unclosed Inner',
+  'OUTER',
+  'INNER',
+  ')}',
+  'OUTER',
+  'after = true # @author HCL Unclosed Nested Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(hclUnclosedNestedHeredoc, 'hcl'), [
+  'outer = <<OUTER',
+  '${trimspace(<<INNER',
+  '# literal inner @author Fake Unclosed Inner',
+  'OUTER',
+  'INNER',
+  ')}',
+  'OUTER',
+  'after = true',
+], 'HCL inner heredoc 未闭合时同名 outer delimiter 必须作为 inner body 保留，inner/expression/root 依次闭合后 outer 才能终止');
+assert.deepEqual(hclAttributionSummary(hclUnclosedNestedHeredoc, 'infra/unclosed-nested-heredoc.hcl', 'hcl'), [
+  ['author', 'HCL Unclosed Nested Outer Tail', 8],
+], 'HCL 未闭合 nested heredoc body 中伪署名不得误报，真正 outer terminator 后 tail 必须定位');
+
 assert.deepEqual(cleanedLines([
   'def url = "https://example.test/#fragment // literal" // remove',
   'def multiline = """',
@@ -3566,6 +3640,82 @@ assert.deepEqual(
     },
   ],
   'Groovy GString 插值内部与字符串闭合后的真实注释署名必须全部定位',
+);
+
+const groovyDivisionAfterOpenGroups = [
+  'def ratio = (',
+  '  total',
+  '  / 2',
+  ') // @author Groovy Paren Division Tail',
+  'def values = [',
+  '  total',
+  '  / value',
+  '] // @author Groovy Bracket Division Tail',
+  String.raw`def assigned = /a\/\/b # \/* @author Fake Assignment Slashy *\// // @author Groovy Assignment Slashy Tail`,
+  String.raw`return /value\/path # \/* @author Fake Return Slashy *\// // @author Groovy Return Slashy Tail`,
+].join('\n');
+assert.deepEqual(cleanedLines(groovyDivisionAfterOpenGroups, 'groovy'), [
+  'def ratio = (',
+  '  total',
+  '  / 2',
+  ')',
+  'def values = [',
+  '  total',
+  '  / value',
+  ']',
+  String.raw`def assigned = /a\/\/b # \/* @author Fake Assignment Slashy *\//`,
+  String.raw`return /value\/path # \/* @author Fake Return Slashy *\//`,
+], 'Groovy 开放 paren/bracket expression 跨行后的 leading / 必须作为 division；assignment/return 语境中的真实 slashy 及其 comment markers 必须保留');
+assert.deepEqual(
+  extractAttributions(groovyDivisionAfterOpenGroups, 'src/division-open-groups.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Paren Division Tail', 4],
+    ['author', 'Groovy Bracket Division Tail', 8],
+    ['author', 'Groovy Assignment Slashy Tail', 9],
+    ['author', 'Groovy Return Slashy Tail', 10],
+  ],
+  'Groovy division 与 slashy 闭合后的真实评论署名必须定位，slashy 内容伪署名不得误报',
+);
+
+const groovyNewlineSlashyAndDivisionContexts = [
+  'def bracePattern = {',
+  String.raw`  /brace \/* @author Fake Brace Slashy *\//`,
+  '} // @author Groovy Brace Slashy Tail',
+  'def continued = total \\',
+  '  / value // @author Groovy Escaped Newline Division Tail',
+  'def parenGString = "value ${(',
+  '  total',
+  '  / 2',
+  ')}" // @author Groovy GString Paren Division Tail',
+  'def braceGString = "value ${{',
+  String.raw`  /gstring \/* @author Fake GString Brace Slashy *\//`,
+  '}}" // @author Groovy GString Brace Slashy Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(groovyNewlineSlashyAndDivisionContexts, 'groovy'), [
+  'def bracePattern = {',
+  String.raw`  /brace \/* @author Fake Brace Slashy *\//`,
+  '}',
+  'def continued = total \\',
+  '  / value',
+  'def parenGString = "value ${(',
+  '  total',
+  '  / 2',
+  ')}"',
+  'def braceGString = "value ${{',
+  String.raw`  /gstring \/* @author Fake GString Brace Slashy *\//`,
+  '}}"',
+], 'Groovy brace newline 后 leading / 必须开启 slashy；反斜杠续行与 GString paren 内 leading / 必须为 division，GString brace 后 slashy 对照须保留');
+assert.deepEqual(
+  extractAttributions(groovyNewlineSlashyAndDivisionContexts, 'src/newline-slashy-division.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Brace Slashy Tail', 3],
+    ['author', 'Groovy Escaped Newline Division Tail', 5],
+    ['author', 'Groovy GString Paren Division Tail', 9],
+    ['author', 'Groovy GString Brace Slashy Tail', 12],
+  ],
+  'Groovy brace/GString slashy 内容伪署名不得误报，division 与 slashy 闭合后的真实 tails 必须定位',
 );
 
 const sqlEscapedQuotedLiterals = [
