@@ -1982,8 +1982,13 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       }
 
       if (activeComment) {
+        const commentState = activeComment;
         const consumed = consumeActiveComment(raw, index, activeComment);
-        comments.push(raw.slice(index, consumed.end));
+        const fragmentEnd = syntax.dialect === 'pascal' && commentState.pascalStack
+          && consumed.closed
+          ? consumed.end - commentState.close.length
+          : consumed.end;
+        comments.push(raw.slice(index, fragmentEnd));
         hadComment = true;
         index = consumed.end;
         if (!consumed.closed) break;
@@ -2329,7 +2334,10 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
             pascalStack: [block.close as '}' | '*)'],
           };
           const consumed = consumeActiveComment(raw, index + block.open.length, state);
-          comments.push(raw.slice(commentStart, consumed.end));
+          const fragmentEnd = consumed.closed
+            ? consumed.end - state.close.length
+            : consumed.end;
+          comments.push(raw.slice(commentStart, fragmentEnd));
           hadComment = true;
           index = consumed.end;
           if (!consumed.closed) activeComment = state;

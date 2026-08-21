@@ -4913,6 +4913,53 @@ assert.deepEqual(
   'Batch redirected REM 的真实署名必须定位，escaped/quoted/echo/single-pipe 负例中的伪署名不得误报',
 );
 
+const braceEndingAttributionSubjects = [
+  {
+    ext: 'ts',
+    file: 'src/brace-author.ts',
+    source: 'const fake = "// @author Fake"; // @author {Alice}',
+    expected: [['author', '{Alice}', 1]],
+  },
+  {
+    ext: 'r',
+    file: 'analysis/template-author.R',
+    source: 'value <- "# @author Fake" # @author ${AUTHOR}',
+    expected: [['author', '${AUTHOR}', 1]],
+  },
+  {
+    ext: 'ts',
+    file: 'src/block-brace-author.ts',
+    source: 'const fake = "/* @author Fake */"; /* @author Team {Core} */',
+    expected: [['author', 'Team {Core}', 1]],
+  },
+] as const;
+for (const attributionCase of braceEndingAttributionSubjects) {
+  assert.deepEqual(
+    extractAttributions(attributionCase.source, attributionCase.file, attributionCase.ext)
+      .map((item) => [item.kind, item.subject, item.line]),
+    attributionCase.expected,
+    `.${attributionCase.ext} comment 内 brace-ending 合法 author subject 必须完整保留，字符串中的同形伪署名不得误报`,
+  );
+}
+
+const pascalAttributionDelimiterSubjects = [
+  "value := '@author Fake Brace }'; { @author Pascal Brace }",
+  "other := '@author Fake Paren *)'; (* @author Pascal Paren *)",
+  '{ outer (* inner *) @author Pascal Mixed Brace }',
+  '(* outer { inner } @author Pascal Mixed Paren *)',
+].join('\n');
+assert.deepEqual(
+  extractAttributions(pascalAttributionDelimiterSubjects, 'src/pascal-attribution-delimiters.pas', 'pas')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Pascal Brace', 1],
+    ['author', 'Pascal Paren', 2],
+    ['author', 'Pascal Mixed Brace', 3],
+    ['author', 'Pascal Mixed Paren', 4],
+  ],
+  'Pascal brace/paren/mixed block 内 author subject 必须剥离真实 closer 但不破坏 subject，字符串内伪署名不得误报',
+);
+
 const keepCases = [
   ['pas', 'value := 1; // keep'],
   ['psm1', 'Write-Output 1 # keep'],

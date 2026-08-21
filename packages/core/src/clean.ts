@@ -42,7 +42,7 @@ function cleanAttributionSubject(value: string): string {
   return value
     .replace(/\s+@(?:since|version|see|param|return|throws?)\b.*$/i, '')
     .replace(/\ball\s+rights\s+reserved\.?\s*$/i, '')
-    .replace(/(?:-->|#>|\*\/|\*\)|\}|\*|#|\/\/)+\s*$/g, '')
+    .replace(/(?:-->|#>|\*\/|\*\)|\*|#|\/\/)+\s*$/g, '')
     .replace(/^[\s:：,，;；-]+|[\s:：,，;；-]+$/g, '')
     .trim();
 }
