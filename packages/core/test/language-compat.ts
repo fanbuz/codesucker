@@ -3568,6 +3568,48 @@ assert.deepEqual(
   'Groovy GString 插值内部与字符串闭合后的真实注释署名必须全部定位',
 );
 
+const sqlEscapedQuotedLiterals = [
+  "SELECT 'single\\'quoted -- # /* @author Fake SQL Single */ and ''doubled''' AS value; -- @author SQL Single Tail",
+  'SELECT "double\\"quoted -- # /* @author Fake SQL Double */ and ""doubled""" AS value; /* @author SQL Double Tail */',
+].join('\n');
+assert.deepEqual(cleanedLines(sqlEscapedQuotedLiterals, 'sql'), [
+  "SELECT 'single\\'quoted -- # /* @author Fake SQL Single */ and ''doubled''' AS value;",
+  'SELECT "double\\"quoted -- # /* @author Fake SQL Double */ and ""doubled""" AS value;',
+], 'SQL 单/双引号内容中的 backslash escaped quote、doubled quote 与 --、#、/* */ 标记必须保留，闭合后的真实评论删除');
+assert.deepEqual(
+  extractAttributions(sqlEscapedQuotedLiterals, 'db/escaped-quotes.sql', 'sql')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'SQL Single Tail', 1],
+    ['author', 'SQL Double Tail', 2],
+  ],
+  'SQL quoted literal 内伪署名不得误报，单引号后的行评论与双引号后的块评论署名必须定位',
+);
+
+const sqlBackslashQuoteParity = [
+  String.raw`SELECT '\' AS x, 'foo -- literal'; -- @author Real`,
+  String.raw`SELECT '\\' AS x, 'even -- literal'; -- @author SQL Even Backslash Boundary`,
+  String.raw`SELECT 'odd\'quote -- literal' AS x; -- @author SQL Odd Backslash Escape`,
+  String.raw`SELECT 'triple\\\'quote /* literal */' AS x; -- @author SQL Triple Backslash Escape`,
+].join('\n');
+assert.deepEqual(cleanedLines(sqlBackslashQuoteParity, 'sql'), [
+  String.raw`SELECT '\' AS x, 'foo -- literal';`,
+  String.raw`SELECT '\\' AS x, 'even -- literal';`,
+  String.raw`SELECT 'odd\'quote -- literal' AS x;`,
+  String.raw`SELECT 'triple\\\'quote /* literal */' AS x;`,
+], 'SQL 单 backslash 后的 boundary quote 必须闭合，内部奇数 backslash escaped quote 保留，偶数 parity quote 正常闭合且后续字符串内 -- 保持字面');
+assert.deepEqual(
+  extractAttributions(sqlBackslashQuoteParity, 'db/backslash-parity.sql', 'sql')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Real', 1],
+    ['author', 'SQL Even Backslash Boundary', 2],
+    ['author', 'SQL Odd Backslash Escape', 3],
+    ['author', 'SQL Triple Backslash Escape', 4],
+  ],
+  'SQL backslash parity 字符串内伪评论不得截断扫描，闭合后的真实 tail 署名必须定位',
+);
+
 assert.deepEqual(cleanedLines([
   '@echo off',
   'echo REM is command text & echo :: is command text',
@@ -3611,6 +3653,62 @@ assert.deepEqual(
     text: 'echo ready & REM @author Chained Batch Maintainer',
   }],
   'Batch 命令链 REM 注释中的署名必须定位，单个 | 后和 echo 参数中的 REM 不得产生误报',
+);
+
+const batchBlockOpeningRemComments = [
+  'if "%READY%"=="1" ( REM @author Batch If Block',
+  '  echo ready',
+  ')',
+  'if exist input.txt (',
+  '  for %%F in (*.txt) do ( REM @author Batch Nested Block',
+  '    echo %%F',
+  '  )',
+  ')',
+  'echo ^( REM @author Fake Escaped Paren',
+  'echo REM @author Fake Echo Argument',
+  'echo ready | REM @author Fake Single Pipe',
+].join('\n');
+assert.deepEqual(cleanedLines(batchBlockOpeningRemComments, 'cmd'), [
+  'if "%READY%"=="1" (',
+  '  echo ready',
+  ')',
+  'if exist input.txt (',
+  '  for %%F in (*.txt) do (',
+  '    echo %%F',
+  '  )',
+  ')',
+  'echo ^( REM @author Fake Escaped Paren',
+  'echo REM @author Fake Echo Argument',
+  'echo ready | REM @author Fake Single Pipe',
+], 'Batch if/for block opening paren 后 REM 必须清洗并保留 paren；escaped ^(、echo argument 与单 pipe 后 REM 必须保持普通命令文本');
+assert.deepEqual(
+  extractAttributions(batchBlockOpeningRemComments, 'scripts/block-rem.cmd', 'cmd')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Batch If Block', 1],
+    ['author', 'Batch Nested Block', 5],
+  ],
+  'Batch block-opening REM 的真实署名必须定位，escaped paren、echo 与单 pipe 负例中的伪署名不得误报',
+);
+
+const batchConservativeParenRem = [
+  'echo ( REM @author Fake Ordinary Echo Paren',
+  'if exist x ^( REM @author Fake Escaped If Paren',
+  'if exist x ( REM @author Fake Structured Suffix )',
+  'echo ^& if exist x ( REM @author Fake Escaped Ampersand Prefix',
+  'echo ^|^| if exist x ( REM @author Fake Escaped Or Prefix',
+].join('\n');
+assert.deepEqual(cleanedLines(batchConservativeParenRem, 'bat'), [
+  'echo ( REM @author Fake Ordinary Echo Paren',
+  'if exist x ^( REM @author Fake Escaped If Paren',
+  'if exist x ( REM @author Fake Structured Suffix )',
+  'echo ^& if exist x ( REM @author Fake Escaped Ampersand Prefix',
+  'echo ^|^| if exist x ( REM @author Fake Escaped Or Prefix',
+], 'Batch ordinary echo paren、escaped IF paren、含结构 suffix ) 及 escaped &/|| 前缀的 REM 行必须保守整行保留');
+assert.deepEqual(
+  extractAttributions(batchConservativeParenRem, 'scripts/conservative-paren-rem.bat', 'bat'),
+  [],
+  'Batch 无法证明为可安全删除 block-opening REM 的三类负例均不得产生伪署名',
 );
 
 const keepCases = [

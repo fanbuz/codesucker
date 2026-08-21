@@ -5,7 +5,7 @@ interface BlockCommentRule {
   nested?: boolean;
 }
 
-type EscapeMode = 'backslash' | 'backtick' | 'caret' | 'double' | 'dollar' | 'none';
+type EscapeMode = 'backslash' | 'backtick' | 'caret' | 'double' | 'dollar' | 'none' | 'sql';
 
 interface StringRule {
   open: string;
@@ -138,7 +138,12 @@ const SYNTAX_BY_EXT: Record<string, LanguageSyntax> = {
   sh: { lineComments: ['#'], blockComments: [], strings: [quote('"'), quote("'")] },
   php: { lineComments: ['//', '#'], blockComments: [{ open: '/*', close: '*/' }], strings: [quote('"'), quote("'")] },
   lua: { lineComments: ['--'], blockComments: [{ open: '--[[', close: ']]' }], strings: [quote('"'), quote("'")] },
-  sql: { lineComments: ['--'], blockComments: [{ open: '/*', close: '*/' }], strings: [quote("'", 'double')] },
+  sql: {
+    lineComments: ['--'],
+    blockComments: [{ open: '/*', close: '*/' }],
+    // SQL 方言同时存在标准 doubled quote 与反斜杠转义；两者都按字符串内容保护。
+    strings: [quote("'", 'sql'), quote('"', 'sql')],
+  },
   html: { lineComments: [], blockComments: [{ open: '<!--', close: '-->' }], strings: [quote('"'), quote("'")] },
   htm: { lineComments: [], blockComments: [{ open: '<!--', close: '-->' }], strings: [quote('"'), quote("'")] },
   xml: { lineComments: [], blockComments: [{ open: '<!--', close: '-->' }], strings: [quote('"'), quote("'")] },
@@ -169,6 +174,8 @@ interface ActiveComment {
 
 interface ActiveString {
   rule: StringRule;
+  /** PostgreSQL E'...' 明确启用反斜杠转义；普通 SQL 字符串使用保守的词内启发式。 */
+  sqlBackslashEscapes?: boolean;
   groovyContexts?: GroovyContext[];
   hclContexts?: HclContext[];
   powershellContexts?: PowerShellContext[];
@@ -501,16 +508,68 @@ function batchCommentStart(line: string): number | null {
   return match ? match[1].length : null;
 }
 
+function batchLastCommandSegment(code: string): string {
+  let segmentStart = 0;
+  let quoted = false;
+  for (let cursor = 0; cursor < code.length; cursor++) {
+    const value = code[cursor];
+    let precedingCarets = 0;
+    for (let before = cursor - 1; before >= 0 && code[before] === '^'; before--) precedingCarets++;
+    const escaped = precedingCarets % 2 !== 0;
+    if (value === '"' && !escaped) {
+      quoted = !quoted;
+      continue;
+    }
+    if (quoted || escaped) continue;
+    if (value === '&') {
+      const length = code[cursor + 1] === '&' ? 2 : 1;
+      segmentStart = cursor + length;
+      cursor += length - 1;
+      continue;
+    }
+    if (value === '|' && code[cursor + 1] === '|') {
+      segmentStart = cursor + 2;
+      cursor++;
+    }
+  }
+  return code.slice(segmentStart).trim();
+}
+
 function batchInlineRemBoundary(line: string, index: number, code: string): number | null {
   if (!/^rem(?:[.\s]|$)/i.test(line.slice(index))) return null;
-  // REM 不能作为管道右侧命令；只接受命令链的 &、&&、||，排除单个 |。
-  const match = /(?:&&|\|\||&)\s*@?\s*$/.exec(code);
+  // REM 不能作为管道右侧命令；接受命令链以及未转义分组左括号后的首命令。
+  const match = /(&&|\|\||&|\()\s*@?\s*$/.exec(code);
   if (!match) return null;
 
-  // ^& / ^| 是 echo 等命令 token 的字面量字符，不是新命令段边界。
+  // ^& / ^| / ^( 是 echo 等命令 token 的字面量字符，不是新命令段边界。
   let carets = 0;
   for (let cursor = match.index - 1; cursor >= 0 && code[cursor] === '^'; cursor--) carets++;
-  return carets % 2 === 0 ? match.index : null;
+  if (carets % 2 !== 0) return null;
+
+  if (match[1] === '(') {
+    const beforeGroup = code.slice(0, match.index).trimEnd();
+    // 单管道右侧仍按普通命令文本处理；`|| (` 已由最长匹配排除在外。
+    if (/(?:^|[^|])\|$/.test(beforeGroup)) return null;
+    const commandSegment = batchLastCommandSegment(beforeGroup);
+    // 只接受可证明的分组 opener：命令段首、IF/ELSE 分支、FOR ... DO。
+    const ifGroup = /^@?if\b(?:(?:\s+\/i)?\s+(?:not\s+)?(?:exist\s+.+|defined\s+\S+|errorlevel\s+\d+|cmdextversion\s+\d+|.+==.+))$/i
+      .test(commandSegment);
+    const provenGroup = commandSegment === ''
+      || ifGroup
+      || /(?:^|\s)else$/i.test(commandSegment)
+      || /^@?for\b.+\bdo$/i.test(commandSegment);
+    if (!provenGroup) return null;
+    // `)` 会参与当前行的块结构；扫描器不能安全拆出 suffix 时保守整行保留。
+    for (let cursor = index; cursor < line.length; cursor++) {
+      if (line[cursor] !== ')') continue;
+      let precedingCarets = 0;
+      for (let before = cursor - 1; before >= 0 && line[before] === '^'; before--) precedingCarets++;
+      if (precedingCarets % 2 === 0) return null;
+    }
+    return match.index + 1;
+  }
+
+  return match.index;
 }
 
 function isVbRem(line: string, index: number): boolean {
@@ -1265,9 +1324,27 @@ function isHeredocEnd(line: string, state: ActiveHeredoc): boolean {
   return candidate === state.delimiter;
 }
 
-function escapedLength(rule: StringRule, line: string, index: number): number {
+function escapedLength(
+  rule: StringRule,
+  line: string,
+  index: number,
+  sqlBackslashEscapes = false,
+): number {
   const ch = line[index];
   if (rule.escape === 'backslash' && ch === '\\') return Math.min(2, line.length - index);
+  if (rule.escape === 'sql' && ch === '\\') {
+    let end = index;
+    while (line[end] === '\\') end++;
+    const count = end - index;
+    if (count % 2 === 1 && line.startsWith(rule.close, end)) {
+      const previous = line[index - 1] ?? '';
+      const next = line[end + rule.close.length] ?? '';
+      // MySQL 常见 bare string 仅在词内保守识别 \'；E'...' 则按明确语义处理。
+      if (sqlBackslashEscapes || (/^[\p{L}\p{N}_$]$/u.test(previous)
+        && /^[\p{L}\p{N}_$]$/u.test(next))) return count + rule.close.length;
+    }
+    return count;
+  }
   if (rule.escape === 'backtick' && ch === '`') return Math.min(2, line.length - index);
   if (rule.escape === 'caret' && ch === '^') return Math.min(2, line.length - index);
   // Dollar slashy string 用 $ 转义紧随其后的字符。
@@ -1442,7 +1519,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           continue;
         }
         // Pascal / VB / PowerShell 单引号通过连续两个引号表示字面量引号。
-        if (rule.escape === 'double' && raw.startsWith(rule.close + rule.close, index)) {
+        if ((rule.escape === 'double' || rule.escape === 'sql')
+          && raw.startsWith(rule.close + rule.close, index)) {
           code += rule.close + rule.close;
           index += rule.close.length * 2;
           continue;
@@ -1462,7 +1540,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           activeString = null;
           continue;
         }
-        const escaped = escapedLength(rule, raw, index);
+        const escaped = escapedLength(rule, raw, index, activeString.sqlBackslashEscapes);
         if (escaped > 0) {
           code += raw.slice(index, index + escaped);
           index += escaped;
@@ -1728,9 +1806,12 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         rule, raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
       ));
       if (string) {
+        const sqlBackslashEscapes = string.escape === 'sql' && string.open === "'"
+          && /(?:^|[^\p{L}\p{N}_$])E$/iu.test(code);
         code += string.open;
         index += string.open.length;
         activeString = startString(string);
+        if (sqlBackslashEscapes) activeString.sqlBackslashEscapes = true;
         if (syntax.dialect === 'powershell') {
           activeString.powerShellTokenPrefix = powerShellTokenKind;
           if (powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression') {
