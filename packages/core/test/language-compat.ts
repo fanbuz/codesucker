@@ -3939,6 +3939,45 @@ assert.deepEqual(
   'VB operator 后 XML/string 内伪署名不得误报，各 literal/comparison/string 闭合后的真实 tail 必须定位',
 );
 
+const visualBasicUnicodeXmlRoots = [
+  "Dim customer = <客户 属性='值'>don't REM @author Fake Unicode Root</客户> ' @author VB Unicode Root Tail",
+  "Dim nested = <root><%= <客户 属性='值'>don't REM @author Fake Unicode Nested Root</客户> %></root> ' @author VB Unicode Nested Root Tail",
+  `Dim document = <?xml version="1.0"?><!-- pre @author Fake Unicode Document --><客户 属性='值'>don't REM @author Fake Unicode Document Root</客户><?done value='post'?> ' @author VB Unicode Document Tail`,
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicUnicodeXmlRoots, 'vb'), [
+  "Dim customer = <客户 属性='值'>don't REM @author Fake Unicode Root</客户>",
+  "Dim nested = <root><%= <客户 属性='值'>don't REM @author Fake Unicode Nested Root</客户> %></root>",
+  `Dim document = <?xml version="1.0"?><!-- pre @author Fake Unicode Document --><客户 属性='值'>don't REM @author Fake Unicode Document Root</客户><?done value='post'?>`,
+], 'VB XML literal必须接受Unicode root/attribute name，并在top-level、nested embedded expression与document root中保护apostrophe、REM和伪署名');
+assert.deepEqual(
+  extractAttributions(visualBasicUnicodeXmlRoots, 'src/unicode-xml-roots.vb', 'vb')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'VB Unicode Root Tail', 1],
+    ['author', 'VB Unicode Nested Root Tail', 2],
+    ['author', 'VB Unicode Document Tail', 3],
+  ],
+  'VB Unicode XML root内部伪署名不得误报，top/nested/document闭合后的真实tail必须定位',
+);
+
+const visualBasicAstralXmlRoots = [
+  "Dim emoji = <😀 属性='值'>don't REM @author Fake Astral Root</😀> ' @author VB Astral XML Root Tail",
+  "Dim nestedEmoji = <root><%= <😀 属性='值'>don't REM @author Fake Astral Nested Root</😀> %></root> ' @author VB Astral XML Nested Tail",
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicAstralXmlRoots, 'vb'), [
+  "Dim emoji = <😀 属性='值'>don't REM @author Fake Astral Root</😀>",
+  "Dim nestedEmoji = <root><%= <😀 属性='值'>don't REM @author Fake Astral Nested Root</😀> %></root>",
+], 'VB XML 1.0 literal必须接受U+10000–U+EFFFF内合法且非ID_Start的astral NameStartChar，top与nested embedded中均须保护apostrophe、REM和伪署名');
+assert.deepEqual(
+  extractAttributions(visualBasicAstralXmlRoots, 'src/astral-xml-roots.vb', 'vb')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'VB Astral XML Root Tail', 1],
+    ['author', 'VB Astral XML Nested Tail', 2],
+  ],
+  'VB astral XML root内部伪署名不得误报，top与nested XML闭合后的真实tail必须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url <- "https://example.test/#fragment" # remove',
   "label <- '# literal'",
@@ -4451,6 +4490,60 @@ assert.deepEqual(hclAttributionSummary(hclUnclosedNestedHeredoc, 'infra/unclosed
   ['author', 'HCL Unclosed Nested Outer Tail', 8],
 ], 'HCL 未闭合 nested heredoc body 中伪署名不得误报，真正 outer terminator 后 tail 必须定位');
 
+const hclUnicodeHeredocDelimiters = [
+  'plain = <<结束',
+  '# literal @author Fake Unicode Plain Hash',
+  '// literal @author Fake Unicode Plain Slash',
+  '/* literal */ @author Fake Unicode Plain Block',
+  '结束',
+  'after_plain = true # @author HCL Unicode Plain Tail',
+  'indented = <<-终止',
+  '  # literal @author Fake Unicode Indented Hash',
+  '  终止 ',
+  '  // literal after pseudo terminator @author Fake Unicode Indented Slash',
+  '  终止',
+  'after_indented = true // @author HCL Unicode Indented Tail',
+  'outer = <<外层',
+  '${trimspace(<<内部',
+  '# literal @author Fake Unicode Nested Hash',
+  '  内部',
+  '内部 ',
+  '内部',
+  '# @author HCL Unicode Nested Expression Comment',
+  ')}',
+  '外层',
+  'after_nested = true # @author HCL Unicode Nested Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(hclUnicodeHeredocDelimiters, 'tf'), [
+  'plain = <<结束',
+  '# literal @author Fake Unicode Plain Hash',
+  '// literal @author Fake Unicode Plain Slash',
+  '/* literal */ @author Fake Unicode Plain Block',
+  '结束',
+  'after_plain = true',
+  'indented = <<-终止',
+  '  # literal @author Fake Unicode Indented Hash',
+  '  终止',
+  '  // literal after pseudo terminator @author Fake Unicode Indented Slash',
+  '  终止',
+  'after_indented = true',
+  'outer = <<外层',
+  '${trimspace(<<内部',
+  '# literal @author Fake Unicode Nested Hash',
+  '  内部',
+  '内部',
+  '内部',
+  ')}',
+  '外层',
+  'after_nested = true',
+], 'HCL heredoc必须接受Unicode delimiter：普通与<<-严格terminator规则不变，outer interpolation内nested Unicode heredoc仅在自身root scope终止');
+assert.deepEqual(hclAttributionSummary(hclUnicodeHeredocDelimiters, 'infra/unicode-heredoc-delimiters.tf'), [
+  ['author', 'HCL Unicode Plain Tail', 6],
+  ['author', 'HCL Unicode Indented Tail', 12],
+  ['author', 'HCL Unicode Nested Expression Comment', 19],
+  ['author', 'HCL Unicode Nested Outer Tail', 22],
+], 'HCL Unicode heredoc body和伪terminator中的伪署名不得误报，真正terminator后的tail及nested expression评论必须定位');
+
 assert.deepEqual(cleanedLines([
   'def url = "https://example.test/#fragment // literal" // remove',
   'def multiline = """',
@@ -4820,75 +4913,78 @@ assert.deepEqual(
 );
 
 const sqlEscapedQuotedLiterals = [
-  "SELECT 'single\\'quoted -- # /* @author Fake SQL Single */ and ''doubled''' AS value; -- @author SQL Single Tail",
-  'SELECT "double\\"quoted -- # /* @author Fake SQL Double */ and ""doubled""" AS value; /* @author SQL Double Tail */',
+  "SELECT 'single''quoted -- # /* @author Fake SQL Single */ and doubled' AS value; -- @author SQL Single Tail",
+  'SELECT "double""quoted -- # /* @author Fake SQL Double */ and doubled" AS value; /* @author SQL Double Tail */',
+  String.raw`SELECT E'single\'quoted -- # /* @author Fake SQL E String */ suffix' AS value; -- @author SQL E String Tail`,
 ].join('\n');
 assert.deepEqual(cleanedLines(sqlEscapedQuotedLiterals, 'sql'), [
-  "SELECT 'single\\'quoted -- # /* @author Fake SQL Single */ and ''doubled''' AS value;",
-  'SELECT "double\\"quoted -- # /* @author Fake SQL Double */ and ""doubled""" AS value;',
-], 'SQL 单/双引号内容中的 backslash escaped quote、doubled quote 与 --、#、/* */ 标记必须保留，闭合后的真实评论删除');
+  "SELECT 'single''quoted -- # /* @author Fake SQL Single */ and doubled' AS value;",
+  'SELECT "double""quoted -- # /* @author Fake SQL Double */ and doubled" AS value;',
+  String.raw`SELECT E'single\'quoted -- # /* @author Fake SQL E String */ suffix' AS value;`,
+], 'SQL standard quoted string仅使用doubled quote转义，显式E-string支持backslash escape；字符串内--/#/*标记保留，闭合后的真实评论删除');
 assert.deepEqual(
   extractAttributions(sqlEscapedQuotedLiterals, 'db/escaped-quotes.sql', 'sql')
     .map((item) => [item.kind, item.subject, item.line]),
   [
     ['author', 'SQL Single Tail', 1],
     ['author', 'SQL Double Tail', 2],
+    ['author', 'SQL E String Tail', 3],
   ],
-  'SQL quoted literal 内伪署名不得误报，单引号后的行评论与双引号后的块评论署名必须定位',
+  'SQL standard doubled quoted literal与E-string内伪署名不得误报，闭合后的真实line/block tail必须定位',
 );
 
 const sqlBackslashQuoteParity = [
-  String.raw`SELECT '\' AS x, 'foo -- literal'; -- @author Real`,
+  String.raw`SELECT 'path\' -- don't @author Real`,
   String.raw`SELECT '\\' AS x, 'even -- literal'; -- @author SQL Even Backslash Boundary`,
-  String.raw`SELECT 'odd\'quote -- literal' AS x; -- @author SQL Odd Backslash Escape`,
-  String.raw`SELECT 'triple\\\'quote /* literal */' AS x; -- @author SQL Triple Backslash Escape`,
+  String.raw`SELECT E'odd\'quote -- literal' AS x; -- @author SQL E Odd Backslash Escape`,
+  String.raw`SELECT E'triple\\\'quote /* literal */' AS x; -- @author SQL E Triple Backslash Escape`,
 ].join('\n');
 assert.deepEqual(cleanedLines(sqlBackslashQuoteParity, 'sql'), [
-  String.raw`SELECT '\' AS x, 'foo -- literal';`,
+  String.raw`SELECT 'path\'`,
   String.raw`SELECT '\\' AS x, 'even -- literal';`,
-  String.raw`SELECT 'odd\'quote -- literal' AS x;`,
-  String.raw`SELECT 'triple\\\'quote /* literal */' AS x;`,
-], 'SQL 单 backslash 后的 boundary quote 必须闭合，内部奇数 backslash escaped quote 保留，偶数 parity quote 正常闭合且后续字符串内 -- 保持字面');
+  String.raw`SELECT E'odd\'quote -- literal' AS x;`,
+  String.raw`SELECT E'triple\\\'quote /* literal */' AS x;`,
+], 'SQL standard plain string中的backslash不转义closing quote；显式E-string才按奇偶backslash parity保护escaped quote');
 assert.deepEqual(
   extractAttributions(sqlBackslashQuoteParity, 'db/backslash-parity.sql', 'sql')
     .map((item) => [item.kind, item.subject, item.line]),
   [
     ['author', 'Real', 1],
     ['author', 'SQL Even Backslash Boundary', 2],
-    ['author', 'SQL Odd Backslash Escape', 3],
-    ['author', 'SQL Triple Backslash Escape', 4],
+    ['author', 'SQL E Odd Backslash Escape', 3],
+    ['author', 'SQL E Triple Backslash Escape', 4],
   ],
-  'SQL backslash parity 字符串内伪评论不得截断扫描，闭合后的真实 tail 署名必须定位',
+  'SQL standard trailing-backslash quote后的真实comment与E-string parity闭合后的tail署名必须定位',
 );
 
 const sqlEscapedQuoteBeforeBoundaries = [
-  String.raw`SELECT '\' AS x, 'foo -- literal'; -- @author SQL Standard Boundary Tail`,
-  String.raw`SELECT 'prefix\' -- # /* @author Fake SQL Escaped Space */ suffix' AS x; -- @author SQL Escaped Space Tail`,
-  String.raw`SELECT 'prefix\',-- # /* @author Fake SQL Escaped Comma */ suffix' AS x; -- @author SQL Escaped Comma Tail`,
-  String.raw`SELECT 'prefix\') -- # /* @author Fake SQL Escaped Paren */ suffix' AS x; -- @author SQL Escaped Paren Tail`,
+  String.raw`SELECT 'prefix'' -- # /* @author Fake SQL Doubled Space */ suffix' AS x; -- @author SQL Doubled Space Tail`,
+  String.raw`SELECT E'prefix\' -- # /* @author Fake SQL E Escaped Space */ suffix' AS x; -- @author SQL E Escaped Space Tail`,
+  String.raw`SELECT E'prefix\',-- # /* @author Fake SQL E Escaped Comma */ suffix' AS x; -- @author SQL E Escaped Comma Tail`,
+  String.raw`SELECT E'prefix\') -- # /* @author Fake SQL E Escaped Paren */ suffix' AS x; -- @author SQL E Escaped Paren Tail`,
   String.raw`SELECT 'prefix\\' AS x, 'even -- literal'; -- @author SQL Even Boundary Contrast Tail`,
   String.raw`SELECT E'\' -- # /* @author Fake SQL E Escaped Boundary */ suffix' AS x; -- @author SQL E Escaped Boundary Tail`,
 ].join('\n');
 assert.deepEqual(cleanedLines(sqlEscapedQuoteBeforeBoundaries, 'sql'), [
-  String.raw`SELECT '\' AS x, 'foo -- literal';`,
-  String.raw`SELECT 'prefix\' -- # /* @author Fake SQL Escaped Space */ suffix' AS x;`,
-  String.raw`SELECT 'prefix\',-- # /* @author Fake SQL Escaped Comma */ suffix' AS x;`,
-  String.raw`SELECT 'prefix\') -- # /* @author Fake SQL Escaped Paren */ suffix' AS x;`,
+  String.raw`SELECT 'prefix'' -- # /* @author Fake SQL Doubled Space */ suffix' AS x;`,
+  String.raw`SELECT E'prefix\' -- # /* @author Fake SQL E Escaped Space */ suffix' AS x;`,
+  String.raw`SELECT E'prefix\',-- # /* @author Fake SQL E Escaped Comma */ suffix' AS x;`,
+  String.raw`SELECT E'prefix\') -- # /* @author Fake SQL E Escaped Paren */ suffix' AS x;`,
   String.raw`SELECT 'prefix\\' AS x, 'even -- literal';`,
   String.raw`SELECT E'\' -- # /* @author Fake SQL E Escaped Boundary */ suffix' AS x;`,
-], 'SQL non-empty plain string 的 backslash-escaped quote 后即使为空白、逗号或右括号仍须保护内部 --/#/*；标准单-backslash boundary、奇偶 parity 与 E-string 对照不得回归');
+], 'SQL standard doubled quote与显式E-string backslash escape后即使为空白、逗号或右括号仍须保护内部--/#/*；plain even-backslash boundary对照不得回归');
 assert.deepEqual(
   extractAttributions(sqlEscapedQuoteBeforeBoundaries, 'db/escaped-quote-boundaries.sql', 'sql')
     .map((item) => [item.kind, item.subject, item.line]),
   [
-    ['author', 'SQL Standard Boundary Tail', 1],
-    ['author', 'SQL Escaped Space Tail', 2],
-    ['author', 'SQL Escaped Comma Tail', 3],
-    ['author', 'SQL Escaped Paren Tail', 4],
+    ['author', 'SQL Doubled Space Tail', 1],
+    ['author', 'SQL E Escaped Space Tail', 2],
+    ['author', 'SQL E Escaped Comma Tail', 3],
+    ['author', 'SQL E Escaped Paren Tail', 4],
     ['author', 'SQL Even Boundary Contrast Tail', 5],
     ['author', 'SQL E Escaped Boundary Tail', 6],
   ],
-  'SQL escaped quote 后边界字符内的伪署名不得误报，标准/plain parity/E-string 闭合后的真实 tail 必须定位',
+  'SQL standard doubled quote与E-string escaped quote后边界字符内伪署名不得误报，闭合后的真实tail必须定位',
 );
 
 assert.deepEqual(cleanedLines([

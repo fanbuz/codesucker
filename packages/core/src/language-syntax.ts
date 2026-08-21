@@ -179,7 +179,7 @@ interface ActiveComment {
 
 interface ActiveString {
   rule: StringRule;
-  /** PostgreSQL E'...' 明确启用反斜杠转义；普通 SQL 字符串使用保守的词内启发式。 */
+  /** PostgreSQL E'...' 明确启用反斜杠转义；普通 SQL 字符串遵循标准 doubled-quote 语义。 */
   sqlBackslashEscapes?: boolean;
   groovyContexts?: GroovyContext[];
   hclContexts?: HclContext[];
@@ -1616,6 +1616,13 @@ function consumeHclTemplate(
   return { end: line.length, closed: false, code, comments };
 }
 
+// XML Name 的保守 Unicode 子集：ID_Start/ID_Continue 覆盖常用国际化名称，
+// 同时显式保留 XML 允许的冒号、连接符、点和 extender。
+const VB_XML_NAME = '[:_\\p{ID_Start}\\u{10000}-\\u{EFFFF}]'
+  + '[:_\\-\\.\\p{ID_Continue}\\u00B7\\u203F\\u2040\\u{10000}-\\u{EFFFF}]*';
+const VB_XML_OPENING_TAG = new RegExp(`^<(${VB_XML_NAME})(?=[\\s/>])`, 'u');
+const VB_XML_CLOSING_TAG = new RegExp(`^</(${VB_XML_NAME})(?=[\\s>])`, 'u');
+
 function canStartVbXml(code: string): boolean {
   const before = code.trimEnd();
   if (before === '') return true;
@@ -1629,7 +1636,7 @@ function isVbXmlStart(line: string, index: number, code: string): boolean {
   if (adjacentLessThanRun % 2 === 1) return false;
   if (!canStartVbXml(code)) return false;
   const source = line.slice(index);
-  return /^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(source)
+  return VB_XML_OPENING_TAG.test(source)
     || source.startsWith('<!--')
     || source.startsWith('<![CDATA[')
     || source.startsWith('<?');
@@ -1810,7 +1817,7 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
     if (state.documentPhase === 'beforeRoot'
       && !line.startsWith('<!--', cursor) && !line.startsWith('<?', cursor)
       && !line.startsWith('<%=', cursor)
-      && !/^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(line.slice(cursor))) {
+      && !VB_XML_OPENING_TAG.test(line.slice(cursor))) {
       return { end: cursor, closed: true, code, comments };
     }
 
@@ -1847,14 +1854,14 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
       continue;
     }
 
-    const closingTag = /^<\/([A-Za-z_][A-Za-z0-9_.:-]*)(?=[\s>])/.exec(line.slice(cursor));
+    const closingTag = VB_XML_CLOSING_TAG.exec(line.slice(cursor));
     if (closingTag) {
       state.tag = { name: closingTag[1], closing: true, quote: null };
       code += closingTag[0];
       cursor += closingTag[0].length;
       continue;
     }
-    const openingTag = /^<([A-Za-z_][A-Za-z0-9_.:-]*)(?=[\s/>])/.exec(line.slice(cursor));
+    const openingTag = VB_XML_OPENING_TAG.exec(line.slice(cursor));
     if (openingTag) {
       if (state.documentPhase === 'beforeRoot') state.documentPhase = 'inRoot';
       state.tag = { name: openingTag[1], closing: false, quote: null };
@@ -1884,7 +1891,8 @@ function dynamicRRawString(line: string, index: number, code: string): { open: s
 
 function hclHeredoc(line: string, index: number): ActiveHeredoc | null {
   // delimiter 后必须立即换行；拒绝 trailing token/comment 的模糊 opener。
-  const match = /^<<(-?)([A-Za-z_][A-Za-z0-9_-]*)$/.exec(line.slice(index));
+  // HCL identifier 使用 Unicode ID_Start/ID_Continue，并额外允许 `_` 起始及 `-` continuation。
+  const match = /^<<(-?)([\p{ID_Start}_][\p{ID_Continue}-]*)$/u.exec(line.slice(index));
   if (!match) return null;
   return {
     delimiter: match[2], allowIndent: match[1] === '-', contexts: [{ kind: 'template' }],
@@ -1920,19 +1928,9 @@ function escapedLength(
     while (line[end] === '\\') end++;
     const count = end - index;
     if (count % 2 === 1 && line.startsWith(rule.close, end)) {
-      const previous = line[index - 1] ?? '';
-      const next = line[end + rule.close.length] ?? '';
-      const wordBefore = /^[\p{L}\p{N}_$]$/u.test(previous);
-      const wordAfter = /^[\p{L}\p{N}_$]$/u.test(next);
-      const afterCandidate = line.slice(end + rule.close.length);
-      const commentShapedTail = /^[\s,)]*(?:--|\/\*)/.test(afterCandidate);
-      const laterClose = line.indexOf(rule.close, end + rule.close.length) !== -1;
-      // Generic .sql 同时服务标准 SQL 与 MySQL：词内 quote 明确按 escape；若 quote 后
-      // 仅经空白/有限边界标点即呈现评论标记，且本行仍有后续 close，也保守选择 MySQL 路径。
-      // 开头的 '\\' 没有 wordBefore，仍按标准 SQL boundary quote 闭合。
-      if (sqlBackslashEscapes || (wordBefore && (wordAfter || (commentShapedTail && laterClose)))) {
-        return count + rule.close.length;
-      }
+      // Generic .sql 遵循标准 SQL：反斜杠是普通字符，quote 在下一轮闭合字符串。
+      // 只有语法上明确的 PostgreSQL E'...' 才消费 backslash-escaped quote。
+      if (sqlBackslashEscapes) return count + rule.close.length;
     }
     return count;
   }
