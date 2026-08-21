@@ -1686,6 +1686,169 @@ assert.deepEqual(attributionSummary(powerShellExplicitGenericContinuationInExpan
   ['author', 'PS Explicit Generic Expandable Outer Tail', 20],
 ], 'PowerShell expandable $() 的 continued generic 内容伪署名不得误报，新 token 评论、nested here tails 与 outer tail 必须定位');
 
+const powerShellNumericPrefixContinuationBody = [
+  'Write-Output 1abc`',
+  '# literal @author Fake Decimal Prefix Bareword',
+  'Write-Output 0xZZ`',
+  '# literal @author Fake Invalid Hex Bareword',
+  'Write-Output 1efoo`',
+  '# literal @author Fake Exponent Prefix Bareword',
+  'Write-Output 123`',
+  '# literal @author Fake Pure Integer Terminal Backtick',
+  'Write-Output 0x2A`',
+  '# literal @author Fake Pure Hex Terminal Backtick',
+  'Write-Output 1.5`',
+  '# literal @author Fake Pure Real Terminal Backtick',
+  'Write-Output 1"x"`',
+  '# literal @author Fake Numeric Quoted Segment',
+  'Write-Output 1+2`',
+  '# literal @author Fake Numeric Plus Expression',
+  'Write-Output 1/2`',
+  '# literal @author Fake Numeric Slash Expression',
+  'Write-Output 1]`',
+  '# literal @author Fake Numeric Closing Bracket',
+];
+const powerShellNumericPrefixContinuationExpected = powerShellNumericPrefixContinuationBody;
+
+const powerShellNumericPrefixContinuationTopLevel = powerShellNumericPrefixContinuationBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellNumericPrefixContinuationTopLevel, 'ps1'),
+  powerShellNumericPrefixContinuationExpected,
+  'PowerShell 顶层 terminal backtick 不是 numeric boundary；bareword、纯 numeric、quoted/operator/bracket 组合均须保守回退为 generic continuation');
+assert.deepEqual(attributionSummary(powerShellNumericPrefixContinuationTopLevel, 'src/numeric-prefix-continuation-top.ps1'), [],
+  'PowerShell 顶层 numeric-like token terminal backtick 后的 literal # 与伪署名均不得误报');
+
+const powerShellNumericPrefixContinuationInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellNumericPrefixContinuationBody,
+  ') suffix" # @author PS Numeric Prefix Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNumericPrefixContinuationInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellNumericPrefixContinuationExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 bareword、纯 numeric 与无 mode 的 numeric-like 组合遇 terminal backtick 均须维持 generic continuation');
+assert.deepEqual(attributionSummary(powerShellNumericPrefixContinuationInExpandableString, 'src/numeric-prefix-continuation-expandable.ps1'), [
+  ['author', 'PS Numeric Prefix Expandable Outer Tail', 22],
+], 'PowerShell expandable numeric-like token terminal backtick 后内容伪署名不得误报，仅 outer tail 必须定位');
+
+const powerShellNumericPrefixContinuationInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellNumericPrefixContinuationBody,
+  ')',
+  '"@; # @author PS Numeric Prefix Here Terminator Tail',
+  'Write-Output $outer # @author PS Numeric Prefix Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNumericPrefixContinuationInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellNumericPrefixContinuationExpected,
+  ')',
+  '"@;',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 numeric-like token 遇 terminal backtick 均须保守恢复 generic，并在 expression 后恢复 outer here-string');
+assert.deepEqual(attributionSummary(powerShellNumericPrefixContinuationInOuterHereString, 'src/numeric-prefix-continuation-outer-here.ps1'), [
+  ['author', 'PS Numeric Prefix Here Terminator Tail', 24],
+  ['author', 'PS Numeric Prefix Here Outer Tail', 25],
+], 'PowerShell outer here numeric-like token terminal backtick 后内容伪署名不得误报，terminator tail 与 outer tail 必须定位');
+
+const powerShellNestedSubexpressionGenericContinuation = [
+  '$message = "prefix $(',
+  'Write-Output foo$(1)`',
+  '# literal @author Fake Nested Subexpression) suffix" # @author PS Nested Subexpression Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedSubexpressionGenericContinuation, 'ps1'), [
+  '$message = "prefix $(',
+  'Write-Output foo$(1)`',
+  '# literal @author Fake Nested Subexpression) suffix"',
+], 'PowerShell ordinary expandable $() 内 nested subexpression 闭合后必须恢复外层 foo generic token，使 terminal tick 后首个 # 保持字面并允许后续 ) 闭合结构');
+assert.deepEqual(attributionSummary(powerShellNestedSubexpressionGenericContinuation, 'src/nested-subexpression-generic.ps1'), [
+  ['author', 'PS Nested Subexpression Outer Tail', 3],
+], 'PowerShell nested subexpression 返回 generic token 后的伪署名不得误报，outer string 闭合后的真实 tail 必须定位');
+
+const powerShellNestedSubexpressionGenericInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  'Write-Output foo$(1)`',
+  '# literal @author Fake Nested Here Subexpression)',
+  '"@; # @author PS Nested Here Subexpression Terminator Tail',
+  'Write-Output $outer # @author PS Nested Here Subexpression Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedSubexpressionGenericInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  'Write-Output foo$(1)`',
+  '# literal @author Fake Nested Here Subexpression)',
+  '"@;',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 nested subexpression 后必须恢复 generic continuation，次行 literal # 后的 ) 仍须闭合 expression');
+assert.deepEqual(attributionSummary(powerShellNestedSubexpressionGenericInOuterHereString, 'src/nested-subexpression-generic-outer-here.ps1'), [
+  ['author', 'PS Nested Here Subexpression Terminator Tail', 5],
+  ['author', 'PS Nested Here Subexpression Outer Tail', 6],
+], 'PowerShell outer here nested subexpression continuation 内容伪署名不得误报，terminator 与 outer tail 必须定位');
+
+const powerShellNestedSubexpressionTokenKindsBody = [
+  'Write-Output pre$(Get-X)post`',
+  '# literal @author Fake Nested Suffix Continuation',
+  'Write-Output pre$(1)#literal @author Fake Nested Same Line; # @author PS Nested Same Line Tail',
+  'Write-Output pre$($(1))post`',
+  '# literal @author Fake Doubly Nested Continuation',
+  'Write-Output pre`$(literal)post`',
+  '# literal @author Fake Escaped Subexpression Opener',
+  'Write-Output pre`$(literal)`',
+  '# @author PS Escaped Dollar Paren Boundary',
+  'Write-Output $($x)`',
+  '# @author PS Token Start Subexpression Boundary',
+];
+const powerShellNestedSubexpressionTokenKindsExpected = [
+  powerShellNestedSubexpressionTokenKindsBody[0],
+  powerShellNestedSubexpressionTokenKindsBody[1],
+  'Write-Output pre$(1)#literal @author Fake Nested Same Line;',
+  ...powerShellNestedSubexpressionTokenKindsBody.slice(3, 8),
+  powerShellNestedSubexpressionTokenKindsBody[9],
+];
+
+const powerShellNestedSubexpressionTokenKindsInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellNestedSubexpressionTokenKindsBody,
+  ') suffix" # @author PS Nested Token Kinds Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedSubexpressionTokenKindsInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellNestedSubexpressionTokenKindsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 nested subexpression 必须恢复 pre/post generic；escaped $ 后 ordinary paren 仅在有 post 时重开 generic，无 post 与 token-start $() 均恢复 nonGeneric');
+assert.deepEqual(attributionSummary(powerShellNestedSubexpressionTokenKindsInExpandableString, 'src/nested-subexpression-token-kinds.ps1'), [
+  ['author', 'PS Nested Same Line Tail', 4],
+  ['author', 'PS Escaped Dollar Paren Boundary', 10],
+  ['author', 'PS Token Start Subexpression Boundary', 12],
+  ['author', 'PS Nested Token Kinds Expandable Outer Tail', 13],
+], 'PowerShell nested subexpression generic 内容伪署名不得误报，ForceStart、ordinary paren/token-start $() 后评论与 outer tail 必须定位');
+
+const powerShellNestedSubexpressionTokenKindsInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellNestedSubexpressionTokenKindsBody,
+  ')',
+  '"@; # @author PS Nested Token Kinds Here Terminator Tail',
+  'Write-Output $outer # @author PS Nested Token Kinds Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedSubexpressionTokenKindsInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellNestedSubexpressionTokenKindsExpected,
+  ')',
+  '"@;',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 nested/escaped subexpression 的 return token kind 必须稳定，ordinary paren 有无 post 分流后须闭合 expression 与 here-string');
+assert.deepEqual(attributionSummary(powerShellNestedSubexpressionTokenKindsInOuterHereString, 'src/nested-subexpression-token-kinds-outer-here.ps1'), [
+  ['author', 'PS Nested Same Line Tail', 5],
+  ['author', 'PS Escaped Dollar Paren Boundary', 11],
+  ['author', 'PS Token Start Subexpression Boundary', 13],
+  ['author', 'PS Nested Token Kinds Here Terminator Tail', 15],
+  ['author', 'PS Nested Token Kinds Here Outer Tail', 16],
+], 'PowerShell outer here nested subexpression generic 内容伪署名不得误报，真实内部、terminator 与 outer tails 必须定位');
+
 const powerShellHashtableEscapedBracesTopLevel = [
   '@{',
   'Token=foo`{literal`}tail',

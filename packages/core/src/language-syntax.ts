@@ -191,11 +191,18 @@ type PowerShellContext =
   | {
     kind: 'expression'; depth: number; braces: PowerShellBraceKind[];
     tokenKind: PowerShellTokenKind; continuedToken?: boolean;
+    /** nested $() 闭合后恢复外层 expression 的 token 语境。 */
+    returnTokenKind?: PowerShellTokenKind;
   }
   | { kind: 'comment' };
 
 type PowerShellBraceKind = 'hashtable' | 'ordinary';
 type PowerShellTokenKind = 'none' | 'generic' | 'nonGeneric';
+
+interface PowerShellSubexpression {
+  depth: number;
+  returnTokenKind: PowerShellTokenKind;
+}
 
 interface ActiveHeredoc {
   delimiter: string;
@@ -233,10 +240,11 @@ const POWERSHELL_TYPE_LITERAL = '\\[[\\p{L}_][^\\]\\r\\n]*\\]';
 const POWERSHELL_SAFE_MEMBER_INDEX = `(?:[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY}|${POWERSHELL_VARIABLE}|${POWERSHELL_IDENTIFIER}|${POWERSHELL_QUOTED_ATOM})`;
 const POWERSHELL_MEMBER = `(?:(?:::|\\.)(?:${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE})|\\[\\p{White_Space}*${POWERSHELL_SAFE_MEMBER_INDEX}\\p{White_Space}*\\])`;
 const POWERSHELL_VARIABLE_EXPRESSION = `${POWERSHELL_VARIABLE}(?:${POWERSHELL_MEMBER})*`;
-const POWERSHELL_ATOMIC_EXPRESSION = new RegExp(
-  `^(?:${POWERSHELL_VARIABLE_EXPRESSION}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER}|[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY})`,
+const POWERSHELL_VARIABLE_OR_STATIC_EXPRESSION = new RegExp(
+  `^(?:${POWERSHELL_VARIABLE_EXPRESSION}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER})`,
   'u',
 );
+const POWERSHELL_NUMERIC_EXPRESSION = new RegExp(`^[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY}`, 'u');
 const POWERSHELL_BASIC_ASSIGNMENT_TARGET = `(?:${POWERSHELL_TYPE_LITERAL}\\p{White_Space}*${POWERSHELL_VARIABLE}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE}(?:${POWERSHELL_MEMBER})*)`;
 const POWERSHELL_BASIC_ASSIGNMENT_TARGETS = `${POWERSHELL_BASIC_ASSIGNMENT_TARGET}(?:\\p{White_Space}*,\\p{White_Space}*${POWERSHELL_BASIC_ASSIGNMENT_TARGET})*`;
 const POWERSHELL_ASSIGNMENT_TARGET = `(?:${POWERSHELL_BASIC_ASSIGNMENT_TARGET}|\\(\\p{White_Space}*${POWERSHELL_BASIC_ASSIGNMENT_TARGETS}\\p{White_Space}*\\))`;
@@ -327,8 +335,23 @@ function isPowerShellHashtableEntryAssignment(code: string, braces: PowerShellBr
   return braces[braces.length - 1] === 'hashtable' && POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT.test(code);
 }
 
-function powerShellAtomicExpressionLength(line: string, index: number): number {
-  return POWERSHELL_ATOMIC_EXPRESSION.exec(line.slice(index))?.[0].length ?? 0;
+function powerShellAtomicExpression(
+  line: string,
+  index: number,
+): { length: number; bounded: boolean } | null {
+  const source = line.slice(index);
+  const variableOrStatic = POWERSHELL_VARIABLE_OR_STATIC_EXPRESSION.exec(source);
+  const match = variableOrStatic ?? POWERSHELL_NUMERIC_EXPRESSION.exec(source);
+  if (!match) return null;
+  const end = index + match[0].length;
+  const next = line[end];
+  // argument-mode 中字母、引号、/ : - 等均可继续组成 generic token。
+  // numeric 在 argument mode 中只有 EOF/ForceStart 可确认终止；= ] 与行末 backtick
+  // 仍可属于 generic token。变量/static member 则有明确语法终点。
+  const bounded = end === line.length || isPowerShellForceStartChar(next)
+    || (variableOrStatic !== null && (next === '=' || next === ']'
+      || (next === '`' && end === line.length - 1)));
+  return { length: match[0].length, bounded };
 }
 
 function nextPowerShellTokenKind(
@@ -493,11 +516,22 @@ function consumePowerShellExpandable(
       else if (context.tokenKind === 'none') context.tokenKind = 'generic';
       continue;
     }
-    const atomicLength = powerShellAtomicExpressionLength(line, cursor);
-    if (atomicLength > 0) {
-      code += line.slice(cursor, cursor + atomicLength);
-      cursor += atomicLength;
-      if (context.tokenKind === 'none') context.tokenKind = 'nonGeneric';
+    if (line.startsWith('$(', cursor)) {
+      code += '$(';
+      contexts.push({
+        kind: 'expression', depth: 1, braces: [], tokenKind: 'none',
+        returnTokenKind: context.tokenKind === 'generic' ? 'generic' : 'nonGeneric',
+      });
+      cursor += 2;
+      continue;
+    }
+    const atomic = powerShellAtomicExpression(line, cursor);
+    if (atomic) {
+      code += line.slice(cursor, cursor + atomic.length);
+      cursor += atomic.length;
+      if (context.tokenKind === 'none') {
+        context.tokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
+      }
       continue;
     }
     const genericActive = context.tokenKind === 'generic';
@@ -567,9 +601,18 @@ function consumePowerShellExpandable(
     if (line[cursor] === ')') {
       code += ')';
       context.depth--;
-      context.tokenKind = 'nonGeneric';
       cursor++;
-      if (context.depth === 0) contexts.pop();
+      if (context.depth === 0) {
+        const returnTokenKind = context.returnTokenKind;
+        contexts.pop();
+        const parent = contexts[contexts.length - 1];
+        if (returnTokenKind && parent?.kind === 'expression') {
+          parent.tokenKind = returnTokenKind;
+        }
+      } else {
+        // () 后的附加字符会开始新 argument；无附加字符时也不续 generic。
+        context.tokenKind = 'none';
+      }
       continue;
     }
     if (isPowerShellLineComment(line, cursor, code, hashtableEntry, genericActive)) {
@@ -1049,6 +1092,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
   let activeHeredoc: ActiveHeredoc | null = null;
   let activeVbXml: ActiveVbXml | null = null;
   const powerShellBraces: PowerShellBraceKind[] = [];
+  const powerShellSubexpressions: PowerShellSubexpression[] = [];
   let activePowerShellContinuedToken = false;
 
   for (const raw of rawLines) {
@@ -1264,11 +1308,23 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           else if (powerShellTokenKind === 'none') powerShellTokenKind = 'generic';
           continue;
         }
-        const atomicLength = powerShellAtomicExpressionLength(raw, index);
-        if (atomicLength > 0) {
-          code += raw.slice(index, index + atomicLength);
-          index += atomicLength;
-          if (powerShellTokenKind === 'none') powerShellTokenKind = 'nonGeneric';
+        if (raw.startsWith('$(', index)) {
+          code += '$(';
+          powerShellSubexpressions.push({
+            depth: 1,
+            returnTokenKind: powerShellTokenKind === 'generic' ? 'generic' : 'nonGeneric',
+          });
+          powerShellTokenKind = 'none';
+          index += 2;
+          continue;
+        }
+        const atomic = powerShellAtomicExpression(raw, index);
+        if (atomic) {
+          code += raw.slice(index, index + atomic.length);
+          index += atomic.length;
+          if (powerShellTokenKind === 'none') {
+            powerShellTokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
+          }
           continue;
         }
         const genericActive = powerShellTokenKind === 'generic';
@@ -1293,6 +1349,24 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += '}';
           powerShellBraces.pop();
           powerShellTokenKind = 'none';
+          index++;
+          continue;
+        }
+        const subexpression = powerShellSubexpressions[powerShellSubexpressions.length - 1];
+        if (subexpression && raw[index] === '(') {
+          code += '(';
+          subexpression.depth++;
+          powerShellTokenKind = 'none';
+          index++;
+          continue;
+        }
+        if (subexpression && raw[index] === ')') {
+          code += ')';
+          subexpression.depth--;
+          powerShellTokenKind = subexpression.depth === 0
+            ? subexpression.returnTokenKind
+            : 'none';
+          if (subexpression.depth === 0) powerShellSubexpressions.pop();
           index++;
           continue;
         }
