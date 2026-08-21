@@ -684,6 +684,259 @@ assert.deepEqual(
   'PowerShell escaped/非展开 $() 中的伪署名不得误报，真实 terminator 同行后的注释署名必须定位',
 );
 
+const attributionSummary = (source: string, file: string) => extractAttributions(source, file, 'ps1')
+  .map((item) => [item.kind, item.subject, item.line]);
+
+const powerShellTokenTailAtQuotesTopLevel = [
+  'Write-Output https://example.test/@"',
+  '# literal <# literal #> @author Fake Top URL',
+  'url-last" # @author PS Top URL Tail',
+  'Write-Output C:\\tools\\@"',
+  '# literal <# literal #> @author Fake Top Windows Path',
+  'windows-last" # @author PS Top Windows Tail',
+  "Write-Output /opt/tools/@'",
+  '# literal <# literal #> @author Fake Top Unix Path',
+  "unix-last' # @author PS Top Unix Tail",
+  'Write-Output option-@"',
+  '# literal <# literal #> @author Fake Top Dash',
+  'dash-last" # @author PS Top Dash Tail',
+  "Write-Output scheme:@'",
+  '# literal <# literal #> @author Fake Top Colon',
+  "colon-last' # @author PS Top Colon Tail",
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellTokenTailAtQuotesTopLevel, 'ps1'), [
+  'Write-Output https://example.test/@"',
+  '# literal <# literal #> @author Fake Top URL',
+  'url-last"',
+  'Write-Output C:\\tools\\@"',
+  '# literal <# literal #> @author Fake Top Windows Path',
+  'windows-last"',
+  "Write-Output /opt/tools/@'",
+  '# literal <# literal #> @author Fake Top Unix Path',
+  "unix-last'",
+  'Write-Output option-@"',
+  '# literal <# literal #> @author Fake Top Dash',
+  'dash-last"',
+  "Write-Output scheme:@'",
+  '# literal <# literal #> @author Fake Top Colon',
+  "colon-last'",
+], 'PowerShell 顶层 URL、Windows/Unix path、dash/colon token 尾的 @"/@\' 不得误开 here-string');
+assert.deepEqual(attributionSummary(powerShellTokenTailAtQuotesTopLevel, 'src/token-tail-top.ps1'), [
+  ['author', 'PS Top URL Tail', 3],
+  ['author', 'PS Top Windows Tail', 6],
+  ['author', 'PS Top Unix Tail', 9],
+  ['author', 'PS Top Dash Tail', 12],
+  ['author', 'PS Top Colon Tail', 15],
+], 'PowerShell 顶层 token 尾 ordinary string 内伪署名不得误报，闭合后的真实署名必须定位');
+
+const powerShellTokenTailAtQuotesInExpandableString = [
+  '$message = "prefix $(',
+  '  Write-Output https://example.test/@"',
+  '# literal <# literal #> @author Fake Nested URL',
+  'url-last" # @author PS Nested URL Tail',
+  '  Write-Output C:\\tools\\@"',
+  '# literal <# literal #> @author Fake Nested Windows Path',
+  'windows-last" # @author PS Nested Windows Tail',
+  "  Write-Output /opt/tools/@'",
+  '# literal <# literal #> @author Fake Nested Unix Path',
+  "unix-last' # @author PS Nested Unix Tail",
+  '  Write-Output option-@"',
+  '# literal <# literal #> @author Fake Nested Dash',
+  'dash-last" # @author PS Nested Dash Tail',
+  "  Write-Output scheme:@'",
+  '# literal <# literal #> @author Fake Nested Colon',
+  "colon-last' # @author PS Nested Colon Tail",
+  ') suffix" # @author PS Nested Token Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellTokenTailAtQuotesInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  '  Write-Output https://example.test/@"',
+  '# literal <# literal #> @author Fake Nested URL',
+  'url-last"',
+  '  Write-Output C:\\tools\\@"',
+  '# literal <# literal #> @author Fake Nested Windows Path',
+  'windows-last"',
+  "  Write-Output /opt/tools/@'",
+  '# literal <# literal #> @author Fake Nested Unix Path',
+  "unix-last'",
+  '  Write-Output option-@"',
+  '# literal <# literal #> @author Fake Nested Dash',
+  'dash-last"',
+  "  Write-Output scheme:@'",
+  '# literal <# literal #> @author Fake Nested Colon',
+  "colon-last'",
+  ') suffix"',
+], 'PowerShell ordinary expandable string 的 $() 内 path/dash/colon token 尾 @"/@\' 必须按普通跨行字符串处理');
+assert.deepEqual(attributionSummary(powerShellTokenTailAtQuotesInExpandableString, 'src/token-tail-expandable.ps1'), [
+  ['author', 'PS Nested URL Tail', 4],
+  ['author', 'PS Nested Windows Tail', 7],
+  ['author', 'PS Nested Unix Tail', 10],
+  ['author', 'PS Nested Dash Tail', 13],
+  ['author', 'PS Nested Colon Tail', 16],
+  ['author', 'PS Nested Token Outer Tail', 17],
+], 'PowerShell expandable $() 的 token 尾 ordinary string 伪署名不得误报，内部与 outer tail 署名必须定位');
+
+const powerShellTokenTailAtQuotesInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  '  Write-Output https://example.test/@"',
+  '# literal <# literal #> @author Fake Here URL',
+  'url-last" # @author PS Here URL Tail',
+  '  Write-Output C:\\tools\\@"',
+  '# literal <# literal #> @author Fake Here Windows Path',
+  'windows-last" # @author PS Here Windows Tail',
+  "  Write-Output /opt/tools/@'",
+  '# literal <# literal #> @author Fake Here Unix Path',
+  "unix-last' # @author PS Here Unix Tail",
+  '  Write-Output option-@"',
+  '# literal <# literal #> @author Fake Here Dash',
+  'dash-last" # @author PS Here Dash Tail',
+  "  Write-Output scheme:@'",
+  '# literal <# literal #> @author Fake Here Colon',
+  "colon-last' # @author PS Here Colon Tail",
+  ')',
+  '"@',
+  'Write-Output $outer # @author PS Here Token Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellTokenTailAtQuotesInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  '  Write-Output https://example.test/@"',
+  '# literal <# literal #> @author Fake Here URL',
+  'url-last"',
+  '  Write-Output C:\\tools\\@"',
+  '# literal <# literal #> @author Fake Here Windows Path',
+  'windows-last"',
+  "  Write-Output /opt/tools/@'",
+  '# literal <# literal #> @author Fake Here Unix Path',
+  "unix-last'",
+  '  Write-Output option-@"',
+  '# literal <# literal #> @author Fake Here Dash',
+  'dash-last"',
+  "  Write-Output scheme:@'",
+  '# literal <# literal #> @author Fake Here Colon',
+  "colon-last'",
+  ')',
+  '"@',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here-string 的 $() 内 path/dash/colon token 尾 @"/@\' 不得误开 nested here-string');
+assert.deepEqual(attributionSummary(powerShellTokenTailAtQuotesInOuterHereString, 'src/token-tail-outer-here.ps1'), [
+  ['author', 'PS Here URL Tail', 5],
+  ['author', 'PS Here Windows Tail', 8],
+  ['author', 'PS Here Unix Tail', 11],
+  ['author', 'PS Here Dash Tail', 14],
+  ['author', 'PS Here Colon Tail', 17],
+  ['author', 'PS Here Token Outer Tail', 20],
+], 'PowerShell outer here $() 的 token 尾 ordinary string 伪署名不得误报，内部与 outer tail 署名必须定位');
+
+const powerShellLegalHereStringOpeners = [
+  '$legalDouble = @"',
+  '# literal @author Fake Legal Double',
+  '"@; # @author PS Legal Equals Double Tail',
+  "$legalSingle = $(@'",
+  '# literal @author Fake Legal Single',
+  "'@) # @author PS Legal Paren Single Tail",
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellLegalHereStringOpeners, 'ps1'), [
+  '$legalDouble = @"',
+  '# literal @author Fake Legal Double',
+  '"@;',
+  "$legalSingle = $(@'",
+  '# literal @author Fake Legal Single',
+  "'@)",
+], 'PowerShell =@" 与 $(@\' 仍必须识别为合法 here-string opener，并在真实 terminator 后恢复扫描');
+assert.deepEqual(attributionSummary(powerShellLegalHereStringOpeners, 'src/legal-here-openers.ps1'), [
+  ['author', 'PS Legal Equals Double Tail', 3],
+  ['author', 'PS Legal Paren Single Tail', 6],
+], 'PowerShell 合法 here-string 内容伪署名不得误报，terminator 后真实署名必须定位');
+
+const powerShellTokenizerBody = [
+  'Write-Output --body=@"',
+  '# literal <# literal #> @author Fake Body Double',
+  'double-last" # @author PS Body Double Tail',
+  "Write-Output --body=@'",
+  '# literal <# literal #> @author Fake Body Single',
+  "single-last' # @author PS Body Single Tail",
+  'Write-Output --body=#literal-@author-Fake-Line-Token',
+  'Write-Output --body=<#literal-@author-Fake-Block-Token#>',
+  'Write-Output done # @author PS Body Whitespace Line',
+  '$value = (# @author PS Body Paren Line',
+  '  1)',
+  'Invoke-Thing(foo,<# @author PS Body Comma Block #>bar)',
+];
+const powerShellTokenizerBodyExpected = [
+  'Write-Output --body=@"',
+  '# literal <# literal #> @author Fake Body Double',
+  'double-last"',
+  "Write-Output --body=@'",
+  '# literal <# literal #> @author Fake Body Single',
+  "single-last'",
+  'Write-Output --body=#literal-@author-Fake-Line-Token',
+  'Write-Output --body=<#literal-@author-Fake-Block-Token#>',
+  'Write-Output done',
+  '$value = (',
+  '  1)',
+  'Invoke-Thing(foo, bar)',
+];
+
+const powerShellTokenizerTopLevel = powerShellTokenizerBody.join('\n');
+assert.deepEqual(
+  cleanedLines(powerShellTokenizerTopLevel, 'ps1'),
+  powerShellTokenizerBodyExpected,
+  'PowerShell 顶层 --body=@"/@\'、--body=# 与 --body=<# 都应按 token 内容处理，真实边界评论仍须删除',
+);
+assert.deepEqual(attributionSummary(powerShellTokenizerTopLevel, 'src/tokenizer-top.ps1'), [
+  ['author', 'PS Body Double Tail', 3],
+  ['author', 'PS Body Single Tail', 6],
+  ['author', 'PS Body Whitespace Line', 9],
+  ['author', 'PS Body Paren Line', 10],
+  ['author', 'PS Body Comma Block', 12],
+], 'PowerShell 顶层 token 内伪署名不得误报，空白/(/, 后真实 line/block comment 署名必须定位');
+
+const powerShellTokenizerInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellTokenizerBody,
+  ') suffix" # @author PS Tokenizer Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellTokenizerInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellTokenizerBodyExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable string 的 $() 内 --body=@quote/#/<# 必须按 token 内容处理，真实评论与 outer tail 仍须删除');
+assert.deepEqual(attributionSummary(powerShellTokenizerInExpandableString, 'src/tokenizer-expandable.ps1'), [
+  ['author', 'PS Body Double Tail', 4],
+  ['author', 'PS Body Single Tail', 7],
+  ['author', 'PS Body Whitespace Line', 10],
+  ['author', 'PS Body Paren Line', 11],
+  ['author', 'PS Body Comma Block', 13],
+  ['author', 'PS Tokenizer Expandable Outer Tail', 14],
+], 'PowerShell expandable $() 的 token 内伪署名不得误报，真实评论及 outer tail 署名必须定位');
+
+const powerShellTokenizerInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellTokenizerBody,
+  ')',
+  '"@',
+  'Write-Output $outer # @author PS Tokenizer Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellTokenizerInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellTokenizerBodyExpected,
+  ')',
+  '"@',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here-string 的 $() 内 --body=@quote/#/<# 必须按 token 内容处理，真实评论与 here tail 仍须删除');
+assert.deepEqual(attributionSummary(powerShellTokenizerInOuterHereString, 'src/tokenizer-outer-here.ps1'), [
+  ['author', 'PS Body Double Tail', 5],
+  ['author', 'PS Body Single Tail', 8],
+  ['author', 'PS Body Whitespace Line', 11],
+  ['author', 'PS Body Paren Line', 12],
+  ['author', 'PS Body Comma Block', 14],
+  ['author', 'PS Tokenizer Here Outer Tail', 17],
+], 'PowerShell outer here $() 的 token 内伪署名不得误报，真实评论及 outer tail 署名必须定位');
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',

@@ -227,31 +227,27 @@ function isPowerShellRequires(line: string): boolean {
   return /^\s*#requires\b/i.test(line);
 }
 
-function isPowerShellLineComment(line: string, index: number): boolean {
+function isPowerShellLineComment(line: string, index: number, code: string): boolean {
   if (line[index] !== '#') return false;
-  if (index === 0) return true;
-  // PowerShell 的 # 只有从新 token 开始时才是注释；裸参数 token 内的 # 是普通字符。
-  return /[\s;|&(){}\[\],=]/.test(line[index - 1]);
+  return isPowerShellTokenStart(code);
 }
 
-function isPowerShellBlockComment(line: string, index: number): boolean {
+function isPowerShellBlockComment(line: string, index: number, code: string): boolean {
   if (!line.startsWith('<#', index)) return false;
-  if (index === 0) return true;
-  // 与 # 行注释一致，只在新 token 起点识别，避免 Foo<#Bar#> 一类裸 token 被截断。
-  return /[\s;|&(){}\[\],=]/.test(line[index - 1]);
+  return isPowerShellTokenStart(code);
 }
 
-function powerShellHereStringHeader(line: string, index: number): '"' | "'" | null {
+function powerShellHereStringHeader(line: string, index: number, code: string): '"' | "'" | null {
   const quote = line.startsWith('@"', index) ? '"' : line.startsWith("@'", index) ? "'" : null;
-  if (!quote || !isPowerShellHereStringTokenStart(line, index)
+  if (!quote || !isPowerShellTokenStart(code)
     || line.slice(index + 2).trim() !== '') return null;
   return quote;
 }
 
-function isPowerShellHereStringTokenStart(line: string, index: number): boolean {
-  if (index === 0) return true;
-  // @ 是普通 bareword token 的合法组成部分；仅在空白或语法分隔符之后解释为 here-string header。
-  return /[\s;|&(){}\[\],=:+*\/%!<>?-]/.test(line[index - 1]);
+function isPowerShellTokenStart(code: string): boolean {
+  if (code === '') return true;
+  // 官方 ForceStartNewToken 集合：argument mode 中 =、[]、/、-、: 等仍可属于 generic token。
+  return /[\p{White_Space}&(),;{}|]$/u.test(code);
 }
 
 function batchCommentStart(line: string): number | null {
@@ -288,7 +284,7 @@ function canOpenString(rule: StringRule, line: string, index: number, code: stri
   if (!line.startsWith(rule.open, index)) return false;
   if (rule.openAtLineEnd && line.slice(index + rule.open.length).trim() !== '') return false;
   if (rule.openAtLineEnd && rule.closeAtLineStart
-    && !isPowerShellHereStringTokenStart(line, index)) return false;
+    && !isPowerShellTokenStart(code)) return false;
   if (rule.contextual === 'groovy-slashy' && !canStartGroovySlashy(code)) return false;
   return true;
 }
@@ -366,7 +362,7 @@ function consumePowerShellExpandable(
       continue;
     }
 
-    const hereStringQuote = powerShellHereStringHeader(line, cursor);
+    const hereStringQuote = powerShellHereStringHeader(line, cursor, code);
     if (hereStringQuote) {
       code += `@${hereStringQuote}`;
       contexts.push({ kind: 'string', quote: hereStringQuote, hereString: true });
@@ -379,7 +375,7 @@ function consumePowerShellExpandable(
       cursor++;
       continue;
     }
-    if (isPowerShellBlockComment(line, cursor)) {
+    if (isPowerShellBlockComment(line, cursor, code)) {
       const commentStart = cursor;
       const closeIndex = line.indexOf('#>', cursor + 2);
       cursor = closeIndex === -1 ? line.length : closeIndex + 2;
@@ -404,7 +400,7 @@ function consumePowerShellExpandable(
       if (context.depth === 0) contexts.pop();
       continue;
     }
-    if (isPowerShellLineComment(line, cursor)) {
+    if (isPowerShellLineComment(line, cursor, code)) {
       comments.push(line.slice(cursor));
       return { end: line.length, closed: false, code, comments };
     }
@@ -1070,7 +1066,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
 
       const block = syntax.blockComments.find((rule) => raw.startsWith(rule.open, index)
         && !(syntax.dialect === 'powershell' && rule.open === '<#'
-          && !isPowerShellBlockComment(raw, index)));
+          && !isPowerShellBlockComment(raw, index, code)));
       if (block) {
         if (block.nested) {
           const commentStart = index;
@@ -1099,7 +1095,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       }
 
       const lineComment = syntax.lineComments.find((token) => raw.startsWith(token, index)
-        && !(syntax.dialect === 'powershell' && token === '#' && !isPowerShellLineComment(raw, index)));
+        && !(syntax.dialect === 'powershell' && token === '#'
+          && !isPowerShellLineComment(raw, index, code)));
       if (lineComment) {
         comments.push(raw.slice(index));
         hadComment = true;
