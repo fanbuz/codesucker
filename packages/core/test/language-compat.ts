@@ -3089,6 +3089,54 @@ assert.deepEqual(attributionSummary(powerShellConfirmedAtomicAdjacentInExpandabl
   ['author', 'PS Atomic Adjacent Expandable Outer Tail', 10],
 ], 'PowerShell expandable expression 内 atomic 邻接评论与 outer tail 署名必须定位，command token 伪署名不得误报');
 
+const powerShellConfirmedQuotedAdjacentComments = [
+  '$double="value # literal <# fake #>"# @author PS Double Quoted Adjacent Hash',
+  "$single='value # literal <# fake #>'# @author PS Single Quoted Adjacent Hash",
+  '$doubleBlock="value"<# @author PS Double Quoted Adjacent Block #>+1',
+  "$singleBlock='value'<# @author PS Single Quoted Adjacent Block #>+1",
+  'Write-Output pre"ok"#literal @author Fake Command Double Hash',
+  "Write-Output pre'ok'#literal @author Fake Command Single Hash",
+  "Write-Output pre'ok'<#literal @author Fake Command Single Block#>tail",
+].join('\n');
+const powerShellConfirmedQuotedAdjacentCommentsExpected = [
+  '$double="value # literal <# fake #>"',
+  "$single='value # literal <# fake #>'",
+  '$doubleBlock="value" +1',
+  "$singleBlock='value' +1",
+  'Write-Output pre"ok"#literal @author Fake Command Double Hash',
+  "Write-Output pre'ok'#literal @author Fake Command Single Hash",
+  "Write-Output pre'ok'<#literal @author Fake Command Single Block#>tail",
+];
+assert.deepEqual(
+  cleanedLines(powerShellConfirmedQuotedAdjacentComments, 'ps1'),
+  powerShellConfirmedQuotedAdjacentCommentsExpected,
+  'PowerShell confirmed RHS 普通单双 quoted atomic 闭合后无空白 #/<# 必须开启评论；command quoted argument 后相同标记必须保持 generic 字面量',
+);
+assert.deepEqual(attributionSummary(powerShellConfirmedQuotedAdjacentComments, 'src/quoted-adjacent-comments.ps1'), [
+  ['author', 'PS Double Quoted Adjacent Hash', 1],
+  ['author', 'PS Single Quoted Adjacent Hash', 2],
+  ['author', 'PS Double Quoted Adjacent Block', 3],
+  ['author', 'PS Single Quoted Adjacent Block', 4],
+], 'PowerShell confirmed quoted atomic 后真实邻接评论署名必须定位，command quoted token 内伪署名不得误报');
+
+const powerShellConfirmedQuotedAdjacentInExpandable = [
+  '$message = "prefix $(',
+  ...powerShellConfirmedQuotedAdjacentComments.split('\n'),
+  ') suffix" # @author PS Quoted Adjacent Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedQuotedAdjacentInExpandable, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellConfirmedQuotedAdjacentCommentsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 confirmed quoted atomic 邻接评论与 command generic 负例必须复用 top-level 语义并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellConfirmedQuotedAdjacentInExpandable, 'src/quoted-adjacent-expandable.ps1'), [
+  ['author', 'PS Double Quoted Adjacent Hash', 2],
+  ['author', 'PS Single Quoted Adjacent Hash', 3],
+  ['author', 'PS Double Quoted Adjacent Block', 4],
+  ['author', 'PS Single Quoted Adjacent Block', 5],
+  ['author', 'PS Quoted Adjacent Expandable Outer Tail', 9],
+], 'PowerShell expandable $() 内 confirmed quoted 邻接评论与 outer tail 必须定位，command generic 伪署名不得误报');
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',
@@ -3314,6 +3362,48 @@ assert.deepEqual(
     ['author', 'VB Nested XML CDATA Tail', 10],
   ],
   'VB standalone/nested XML 与字符串中的伪署名不得误报，节点闭合及普通 comparison 后真实评论署名必须定位',
+);
+
+const visualBasicXmlAfterExpressionOperators = [
+  "Dim afterIsNot = value IsNot <root attr='value'>don't REM @author Fake IsNot XML</root> ' @author VB IsNot XML Tail",
+  "Dim secondAndAlso = <first/> AndAlso <second attr='value'>don't REM @author Fake AndAlso XML</second> ' @author VB AndAlso Second XML Tail",
+  "Dim afterOrElse = flag OrElse <second attr='value'>don't REM @author Fake OrElse XML</second> ' @author VB OrElse XML Tail",
+  "Dim awaited = Await <x attr='value'>don't REM @author Fake Await XML</x> ' @author VB Await XML Tail",
+  "Dim typed = TypeOf <x attr='value'>don't REM @author Fake TypeOf XML</x> Is XElement ' @author VB TypeOf XML Tail",
+  "Dim added = 1 + <x attr='value'>don't REM @author Fake Plus XML</x> ' @author VB Plus XML Tail",
+  "Dim shiftedXml = value<<<x attr='value'>don't REM @author Fake Shift XML</x> ' @author VB Shift XML Tail",
+  "value<<count ' @author VB Shift Comparison Tail",
+  "If left IsNot right AndAlso value < other Then ' @author VB Ordinary Comparison Tail",
+  `Dim text = "IsNot <root>don't REM @author Fake Operator String</root>" ' @author VB Operator String Tail`,
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicXmlAfterExpressionOperators, 'vb'), [
+  "Dim afterIsNot = value IsNot <root attr='value'>don't REM @author Fake IsNot XML</root>",
+  "Dim secondAndAlso = <first/> AndAlso <second attr='value'>don't REM @author Fake AndAlso XML</second>",
+  "Dim afterOrElse = flag OrElse <second attr='value'>don't REM @author Fake OrElse XML</second>",
+  "Dim awaited = Await <x attr='value'>don't REM @author Fake Await XML</x>",
+  "Dim typed = TypeOf <x attr='value'>don't REM @author Fake TypeOf XML</x> Is XElement",
+  "Dim added = 1 + <x attr='value'>don't REM @author Fake Plus XML</x>",
+  "Dim shiftedXml = value<<<x attr='value'>don't REM @author Fake Shift XML</x>",
+  'value<<count',
+  'If left IsNot right AndAlso value < other Then',
+  `Dim text = "IsNot <root>don't REM @author Fake Operator String</root>"`,
+], 'VB keyword/symbol expression operator 后的 XML literal 必须保护内部 apostrophe、REM 与伪署名；shift、普通 comparison 与 string 负例不得误进 XML');
+assert.deepEqual(
+  extractAttributions(visualBasicXmlAfterExpressionOperators, 'src/xml-after-operators.vb', 'vb')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'VB IsNot XML Tail', 1],
+    ['author', 'VB AndAlso Second XML Tail', 2],
+    ['author', 'VB OrElse XML Tail', 3],
+    ['author', 'VB Await XML Tail', 4],
+    ['author', 'VB TypeOf XML Tail', 5],
+    ['author', 'VB Plus XML Tail', 6],
+    ['author', 'VB Shift XML Tail', 7],
+    ['author', 'VB Shift Comparison Tail', 8],
+    ['author', 'VB Ordinary Comparison Tail', 9],
+    ['author', 'VB Operator String Tail', 10],
+  ],
+  'VB operator 后 XML/string 内伪署名不得误报，各 literal/comparison/string 闭合后的真实 tail 必须定位',
 );
 
 assert.deepEqual(cleanedLines([

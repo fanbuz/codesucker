@@ -336,6 +336,17 @@ function followsPowerShellExpressionOperator(code: string, rhsMode: PowerShellRh
     && powerShellContinuationReason('expression', code, false) === 'operator';
 }
 
+function isPowerShellQuotedAtomCommentBoundary(
+  line: string,
+  index: number,
+  tokenPrefix: PowerShellTokenKind,
+  rhsMode: PowerShellRhsMode,
+): boolean {
+  return tokenPrefix !== 'generic'
+    && (rhsMode === 'statementStart' || rhsMode === 'expression')
+    && (line[index] === '#' || line.startsWith('<#', index));
+}
+
 function isPowerShellLineComment(
   line: string,
   index: number,
@@ -733,6 +744,12 @@ function consumePowerShellExpandable(
         cursor += 2;
         if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
         contexts.pop();
+        const parent = contexts[contexts.length - 1];
+        if (parent?.kind === 'expression') {
+          parent.atomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
+            line, cursor, parent.tokenKind, parent.rhsMode ?? null,
+          );
+        }
         continue;
       }
       if (context.quote === '"' && line[cursor] === '`') {
@@ -757,6 +774,12 @@ function consumePowerShellExpandable(
         cursor++;
         if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
         contexts.pop();
+        const parent = contexts[contexts.length - 1];
+        if (parent?.kind === 'expression') {
+          parent.atomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
+            line, cursor, parent.tokenKind, parent.rhsMode ?? null,
+          );
+        }
         continue;
       }
       code += line[cursor];
@@ -1347,11 +1370,14 @@ function consumeHclTemplate(
 function canStartVbXml(code: string): boolean {
   const before = code.trimEnd();
   if (before === '') return true;
-  if (/[=([{,:&+]$/.test(before)) return true;
-  return /\b(?:return|yield)\s*$/i.test(before);
+  if (/(?:<<|>>|<=|>=|<>|[-+*\/\\^<>=([{,:&])$/.test(before)) return true;
+  return /\b(?:and|andalso|await|is|isnot|like|mod|not|or|orelse|return|typeof|xor|yield)$/i
+    .test(before);
 }
 
 function isVbXmlStart(line: string, index: number, code: string): boolean {
+  const adjacentLessThanRun = /<+$/.exec(code)?.[0].length ?? 0;
+  if (adjacentLessThanRun % 2 === 1) return false;
   if (!canStartVbXml(code)) return false;
   const source = line.slice(index);
   return /^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(source)
@@ -1835,6 +1861,10 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           if (consumed.comments.length > 0) hadComment = true;
           index = consumed.end;
           if (consumed.closed) {
+            powerShellAtomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
+              raw, index, activeString.powerShellTokenPrefix ?? 'none',
+              activeString.powerShellRhsMode ?? null,
+            );
             powerShellTokenKind = activeString.powerShellTokenPrefix === 'generic'
               ? 'generic'
               : 'nonGeneric';
@@ -1879,6 +1909,10 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += rule.close;
           index += rule.close.length;
           if (syntax.dialect === 'powershell') {
+            powerShellAtomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
+              raw, index, activeString.powerShellTokenPrefix ?? 'none',
+              activeString.powerShellRhsMode ?? null,
+            );
             powerShellTokenKind = activeString.powerShellTokenPrefix === 'generic'
               ? 'generic'
               : 'nonGeneric';
