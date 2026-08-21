@@ -241,6 +241,19 @@ function isPowerShellBlockComment(line: string, index: number): boolean {
   return /[\s;|&(){}\[\],=]/.test(line[index - 1]);
 }
 
+function powerShellHereStringHeader(line: string, index: number): '"' | "'" | null {
+  const quote = line.startsWith('@"', index) ? '"' : line.startsWith("@'", index) ? "'" : null;
+  if (!quote || !isPowerShellHereStringTokenStart(line, index)
+    || line.slice(index + 2).trim() !== '') return null;
+  return quote;
+}
+
+function isPowerShellHereStringTokenStart(line: string, index: number): boolean {
+  if (index === 0) return true;
+  // @ 是普通 bareword token 的合法组成部分；仅在空白或语法分隔符之后解释为 here-string header。
+  return /[\s;|&(){}\[\],=:+*\/%!<>?-]/.test(line[index - 1]);
+}
+
 function batchCommentStart(line: string): number | null {
   const match = /^(\s*)(?:@?\s*)(?:::|rem(?:[.\s]|$))/i.exec(line);
   return match ? match[1].length : null;
@@ -274,6 +287,8 @@ function canStartGroovySlashy(code: string): boolean {
 function canOpenString(rule: StringRule, line: string, index: number, code: string): boolean {
   if (!line.startsWith(rule.open, index)) return false;
   if (rule.openAtLineEnd && line.slice(index + rule.open.length).trim() !== '') return false;
+  if (rule.openAtLineEnd && rule.closeAtLineStart
+    && !isPowerShellHereStringTokenStart(line, index)) return false;
   if (rule.contextual === 'groovy-slashy' && !canStartGroovySlashy(code)) return false;
   return true;
 }
@@ -314,10 +329,13 @@ function consumePowerShellExpandable(
     }
 
     if (context.kind === 'string') {
-      if (context.hereString && contexts.length === 1 && cursor === 0 && line.startsWith('"@', cursor)) {
-        code += '"@';
+      const hereStringClose = `${context.quote}@`;
+      if (context.hereString && cursor === 0 && line.startsWith(hereStringClose, cursor)) {
+        code += hereStringClose;
         cursor += 2;
-        return { end: cursor, closed: true, code, comments };
+        if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
+        contexts.pop();
+        continue;
       }
       if (context.quote === '"' && line[cursor] === '`') {
         const length = Math.min(2, line.length - cursor);
@@ -348,6 +366,13 @@ function consumePowerShellExpandable(
       continue;
     }
 
+    const hereStringQuote = powerShellHereStringHeader(line, cursor);
+    if (hereStringQuote) {
+      code += `@${hereStringQuote}`;
+      contexts.push({ kind: 'string', quote: hereStringQuote, hereString: true });
+      cursor += 2;
+      continue;
+    }
     if (line[cursor] === '"' || line[cursor] === "'") {
       code += line[cursor];
       contexts.push({ kind: 'string', quote: line[cursor] as '"' | "'" });

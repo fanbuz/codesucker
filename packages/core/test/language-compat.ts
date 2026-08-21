@@ -363,6 +363,104 @@ assert.deepEqual(
   'PowerShell here-string 字面文本中的伪署名不得误报，$() 内部和 here-string 后的真实署名必须定位',
 );
 
+const powerShellNestedHereStringsInExpandableString = [
+  '$message = "prefix $(',
+  '  $double = @"',
+  'double " quote # literal <# literal #> @author Fake Nested Double',
+  '"@',
+  "  $single = @'",
+  "single ' quote # literal <# literal #> @author Fake Nested Single",
+  "'@",
+  '  # @author PS Nested Here Expression Maintainer',
+  '  "$double$single"',
+  ') suffix" # @author PS Nested Here Tail Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedHereStringsInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  '  $double = @"',
+  'double " quote # literal <# literal #> @author Fake Nested Double',
+  '"@',
+  "  $single = @'",
+  "single ' quote # literal <# literal #> @author Fake Nested Single",
+  "'@",
+  '  "$double$single"',
+  ') suffix"',
+], 'PowerShell 普通 expandable string 的 $() 内 nested 双/单 here-string 必须跨行保留，首列终止后恢复 expression 与 outer string');
+assert.deepEqual(
+  extractAttributions(powerShellNestedHereStringsInExpandableString, 'src/nested-here-in-string.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Nested Here Expression Maintainer',
+      file: 'src/nested-here-in-string.ps1',
+      line: 8,
+      text: '  # @author PS Nested Here Expression Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Nested Here Tail Maintainer',
+      file: 'src/nested-here-in-string.ps1',
+      line: 10,
+      text: ') suffix" # @author PS Nested Here Tail Maintainer',
+    },
+  ],
+  'PowerShell nested here-string 内容中的伪署名不得误报，expression 与 outer string 后的真实署名必须定位',
+);
+
+const powerShellNestedHereStringsInOuterHereString = [
+  '$outer = @"',
+  'outer before # literal @author Fake Outer Here',
+  '$(',
+  '  $double = @"',
+  'inner double " quote # <# #> @author Fake Inner Double',
+  '"@',
+  "  $single = @'",
+  "inner single ' quote # <# #> @author Fake Inner Single",
+  "'@",
+  '  # @author PS Outer Here Expression Maintainer',
+  '  "$double$single"',
+  ')',
+  'outer after # literal',
+  '"@',
+  'Write-Output $outer # @author PS Outer Here Tail Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedHereStringsInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  'outer before # literal @author Fake Outer Here',
+  '$(',
+  '  $double = @"',
+  'inner double " quote # <# #> @author Fake Inner Double',
+  '"@',
+  "  $single = @'",
+  "inner single ' quote # <# #> @author Fake Inner Single",
+  "'@",
+  '  "$double$single"',
+  ')',
+  'outer after # literal',
+  '"@',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here-string 的 $() 内 nested here-string 只能由对应首列 terminator 结束，随后必须恢复 outer here-string');
+assert.deepEqual(
+  extractAttributions(powerShellNestedHereStringsInOuterHereString, 'src/nested-here-in-outer-here.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Outer Here Expression Maintainer',
+      file: 'src/nested-here-in-outer-here.ps1',
+      line: 10,
+      text: '  # @author PS Outer Here Expression Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Outer Here Tail Maintainer',
+      file: 'src/nested-here-in-outer-here.ps1',
+      line: 15,
+      text: 'Write-Output $outer # @author PS Outer Here Tail Maintainer',
+    },
+  ],
+  'PowerShell outer/nested here-string 的字面伪署名不得误报，expression 与 outer here-string 后真实署名必须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'Write-Output https://example.test/#fragment',
   'Write-Output foo#bar',
@@ -396,6 +494,194 @@ assert.deepEqual(
     text: '<# nested-looking text #> $after = 2 # @author First Close Maintainer',
   }],
   'PowerShell 首个 #> 后的真实行注释署名必须定位',
+);
+
+const powerShellEmbeddedAtQuotesTopLevel = [
+  'Write-Output foo@"',
+  '# literal in ordinary double string @author Fake Top Double',
+  'last" # @author PS Top Double Tail Maintainer',
+  "Write-Output foo@'",
+  '# literal in ordinary single string @author Fake Top Single',
+  "last' # @author PS Top Single Tail Maintainer",
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellEmbeddedAtQuotesTopLevel, 'ps1'), [
+  'Write-Output foo@"',
+  '# literal in ordinary double string @author Fake Top Double',
+  'last"',
+  "Write-Output foo@'",
+  '# literal in ordinary single string @author Fake Top Single',
+  "last'",
+], 'PowerShell token 内的 foo@"/foo@\' 不得误开 here-string，应按普通跨行字符串保护内容并处理闭合后的真实注释');
+assert.deepEqual(
+  extractAttributions(powerShellEmbeddedAtQuotesTopLevel, 'src/embedded-at-quotes.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Top Double Tail Maintainer',
+      file: 'src/embedded-at-quotes.ps1',
+      line: 3,
+      text: 'last" # @author PS Top Double Tail Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Top Single Tail Maintainer',
+      file: 'src/embedded-at-quotes.ps1',
+      line: 6,
+      text: "last' # @author PS Top Single Tail Maintainer",
+    },
+  ],
+  'PowerShell token 内普通字符串的伪署名不得误报，闭合后的真实署名必须定位',
+);
+
+const powerShellEmbeddedAtQuotesInExpandableString = [
+  '$message = "prefix $(',
+  '  Write-Output foo@"',
+  '# literal in nested ordinary double @author Fake Nested Double',
+  'last" # @author PS Nested Ordinary Double Tail',
+  "  Write-Output foo@'",
+  '# literal in nested ordinary single @author Fake Nested Single',
+  "last' # @author PS Nested Ordinary Single Tail",
+  ') suffix" # @author PS Embedded-At Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellEmbeddedAtQuotesInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  '  Write-Output foo@"',
+  '# literal in nested ordinary double @author Fake Nested Double',
+  'last"',
+  "  Write-Output foo@'",
+  '# literal in nested ordinary single @author Fake Nested Single',
+  "last'",
+  ') suffix"',
+], 'PowerShell 普通 expandable string 的 $() 内 foo@"/foo@\' 必须按 ordinary string 闭合，再恢复 expression 与 outer string');
+assert.deepEqual(
+  extractAttributions(powerShellEmbeddedAtQuotesInExpandableString, 'src/embedded-at-in-string.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Nested Ordinary Double Tail',
+      file: 'src/embedded-at-in-string.ps1',
+      line: 4,
+      text: 'last" # @author PS Nested Ordinary Double Tail',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Nested Ordinary Single Tail',
+      file: 'src/embedded-at-in-string.ps1',
+      line: 7,
+      text: "last' # @author PS Nested Ordinary Single Tail",
+    },
+    {
+      kind: 'author',
+      subject: 'PS Embedded-At Outer Tail',
+      file: 'src/embedded-at-in-string.ps1',
+      line: 8,
+      text: ') suffix" # @author PS Embedded-At Outer Tail',
+    },
+  ],
+  'PowerShell expandable $() 的 ordinary string 内容伪署名不得误报，string/expression/outer tail 署名必须定位',
+);
+
+const powerShellEmbeddedAtQuotesInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  '  Write-Output foo@"',
+  '# literal in outer-here expression double @author Fake Here Double',
+  'last" # @author PS Outer-Here Ordinary Double Tail',
+  "  Write-Output foo@'",
+  '# literal in outer-here expression single @author Fake Here Single',
+  "last' # @author PS Outer-Here Ordinary Single Tail",
+  ')',
+  '"@',
+  'Write-Output $outer # @author PS Embedded-At Here Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellEmbeddedAtQuotesInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  '  Write-Output foo@"',
+  '# literal in outer-here expression double @author Fake Here Double',
+  'last"',
+  "  Write-Output foo@'",
+  '# literal in outer-here expression single @author Fake Here Single',
+  "last'",
+  ')',
+  '"@',
+  'Write-Output $outer',
+], 'PowerShell outer here-string 的 $() 内 foo@"/foo@\' 必须按 ordinary string 处理，再恢复 expression 与 outer here-string');
+assert.deepEqual(
+  extractAttributions(powerShellEmbeddedAtQuotesInOuterHereString, 'src/embedded-at-in-here.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Outer-Here Ordinary Double Tail',
+      file: 'src/embedded-at-in-here.ps1',
+      line: 5,
+      text: 'last" # @author PS Outer-Here Ordinary Double Tail',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Outer-Here Ordinary Single Tail',
+      file: 'src/embedded-at-in-here.ps1',
+      line: 8,
+      text: "last' # @author PS Outer-Here Ordinary Single Tail",
+    },
+    {
+      kind: 'author',
+      subject: 'PS Embedded-At Here Tail',
+      file: 'src/embedded-at-in-here.ps1',
+      line: 11,
+      text: 'Write-Output $outer # @author PS Embedded-At Here Tail',
+    },
+  ],
+  'PowerShell outer here-string $() 的 ordinary string 伪署名不得误报，内部与 outer tail 真实署名必须定位',
+);
+
+const powerShellHereStringHeaderAndTerminatorBoundaries = [
+  '$double = [string]::Concat(@"   \t',
+  'double body " quote # literal <# literal #>',
+  '`$(Write-Output foo;<# @author Fake Escaped Expansion #>bar)',
+  '  "@',
+  "'@",
+  '"@); # @author PS Double Here Resume Maintainer',
+  "$single = [string]::Concat(@' \t",
+  "single body ' quote # literal <# literal #>",
+  '$(Write-Output foo;<# @author Fake Single Literal #>bar)',
+  "  '@",
+  '"@',
+  "'@); # @author PS Single Here Resume Maintainer",
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellHereStringHeaderAndTerminatorBoundaries, 'ps1'), [
+  '$double = [string]::Concat(@"',
+  'double body " quote # literal <# literal #>',
+  '`$(Write-Output foo;<# @author Fake Escaped Expansion #>bar)',
+  '  "@',
+  "'@",
+  '"@);',
+  "$single = [string]::Concat(@'",
+  "single body ' quote # literal <# literal #>",
+  '$(Write-Output foo;<# @author Fake Single Literal #>bar)',
+  "  '@",
+  '"@',
+  "'@);",
+], 'PowerShell here-string header 允许尾随空白；缩进/异种 terminator、escaped $() 与 single-here $() 必须保持正文，首列真 terminator 后恢复扫描');
+assert.deepEqual(
+  extractAttributions(powerShellHereStringHeaderAndTerminatorBoundaries, 'src/here-boundaries.ps1', 'ps1'),
+  [
+    {
+      kind: 'author',
+      subject: 'PS Double Here Resume Maintainer',
+      file: 'src/here-boundaries.ps1',
+      line: 6,
+      text: '"@); # @author PS Double Here Resume Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'PS Single Here Resume Maintainer',
+      file: 'src/here-boundaries.ps1',
+      line: 12,
+      text: "'@); # @author PS Single Here Resume Maintainer",
+    },
+  ],
+  'PowerShell escaped/非展开 $() 中的伪署名不得误报，真实 terminator 同行后的注释署名必须定位',
 );
 
 assert.deepEqual(cleanedLines([
