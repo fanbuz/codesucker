@@ -3242,6 +3242,48 @@ assert.deepEqual(
   'VB nested XML 内嵌表达式的真实署名必须传播到最外层提取结果，outer tail 署名仍须定位',
 );
 
+const visualBasicStandaloneXmlNodes = [
+  "Dim comment = <!-- don't @author Fake XML Comment --> ' @author VB XML Comment Tail",
+  "Dim cdata = <![CDATA[it's REM @author Fake XML CDATA]]> ' @author VB XML CDATA Tail",
+  "Dim instruction = <?target value='quoted' REM @author Fake XML PI?> ' @author VB XML PI Tail",
+  `Dim stylesheet = <?xml-stylesheet href='theme.xsl' title="don't REM @author Fake XML Stylesheet"?> ' @author VB XML Stylesheet PI Tail`,
+  `Dim document = <?xml version="1.0"?><!-- pre don't @author Fake XML Pre --><?setup value='pre' REM @author Fake XML Pre PI?><root attr='value'>don't REM @author Fake XML Document</root><!-- post don't @author Fake XML Post --><?done value='post'?> ' @author VB XML Document Tail`,
+  `Dim embeddedDocument = <?xml version="1.0"?><%= CreateRoot("don't @author Fake Embedded Root", "REM ' literal") %><!-- post don't @author Fake Embedded Post --><?done value='post'?> ' @author VB Embedded Root Document Tail`,
+  "If value < other AndAlso other > 0 Then ' @author VB Comparison Tail",
+  `Dim text = "<!-- don't REM @author Fake XML String -->" ' @author VB XML String Tail`,
+  "Dim nestedComment = <root><%= <!-- don't @author Fake Nested XML Comment --> %></root> ' @author VB Nested XML Comment Tail",
+  "Dim nestedCdata = <root><%= <![CDATA[it's REM @author Fake Nested XML CDATA]]> %></root> ' @author VB Nested XML CDATA Tail",
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicStandaloneXmlNodes, 'vb'), [
+  "Dim comment = <!-- don't @author Fake XML Comment -->",
+  "Dim cdata = <![CDATA[it's REM @author Fake XML CDATA]]>",
+  "Dim instruction = <?target value='quoted' REM @author Fake XML PI?>",
+  `Dim stylesheet = <?xml-stylesheet href='theme.xsl' title="don't REM @author Fake XML Stylesheet"?>`,
+  `Dim document = <?xml version="1.0"?><!-- pre don't @author Fake XML Pre --><?setup value='pre' REM @author Fake XML Pre PI?><root attr='value'>don't REM @author Fake XML Document</root><!-- post don't @author Fake XML Post --><?done value='post'?>`,
+  `Dim embeddedDocument = <?xml version="1.0"?><%= CreateRoot("don't @author Fake Embedded Root", "REM ' literal") %><!-- post don't @author Fake Embedded Post --><?done value='post'?>`,
+  'If value < other AndAlso other > 0 Then',
+  `Dim text = "<!-- don't REM @author Fake XML String -->"`,
+  "Dim nestedComment = <root><%= <!-- don't @author Fake Nested XML Comment --> %></root>",
+  "Dim nestedCdata = <root><%= <![CDATA[it's REM @author Fake Nested XML CDATA]]> %></root>",
+], 'VB standalone XML comment/CDATA/PI/document literal 与 nested embedded XML 必须保护 apostrophe、REM 和伪署名；普通 comparison 与 string 对照须保持原语义');
+assert.deepEqual(
+  extractAttributions(visualBasicStandaloneXmlNodes, 'src/standalone-xml-nodes.vb', 'vb')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'VB XML Comment Tail', 1],
+    ['author', 'VB XML CDATA Tail', 2],
+    ['author', 'VB XML PI Tail', 3],
+    ['author', 'VB XML Stylesheet PI Tail', 4],
+    ['author', 'VB XML Document Tail', 5],
+    ['author', 'VB Embedded Root Document Tail', 6],
+    ['author', 'VB Comparison Tail', 7],
+    ['author', 'VB XML String Tail', 8],
+    ['author', 'VB Nested XML Comment Tail', 9],
+    ['author', 'VB Nested XML CDATA Tail', 10],
+  ],
+  'VB standalone/nested XML 与字符串中的伪署名不得误报，节点闭合及普通 comparison 后真实评论署名必须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url <- "https://example.test/#fragment" # remove',
   "label <- '# literal'",
@@ -4180,6 +4222,67 @@ assert.deepEqual(
     ['author', 'Batch For Do At Rem', 4],
   ],
   'Batch ELSE/FOR DO 的真实 REM 署名必须定位，各类负例中的伪署名不得误报',
+);
+
+const batchRedirectedRemComments = [
+  '>nul REM @author Batch Leading Redirect Rem',
+  '2>nul REM @author Batch Descriptor Redirect Rem',
+  '1>>log @REM @author Batch Append Redirect Rem',
+  '2>&1 REM @author Batch Handle Merge Rem',
+  'echo ok & 2>nul REM @author Batch Inline Redirect Rem',
+  'echo ready && 2>nul 1>>log REM @author Batch Chained Redirects Rem',
+  'echo merged || 2>nul 1>&2 3>>log @REM @author Batch Multiple Handle Redirects Rem',
+  '2>nul 1>>log @REM @author Batch Leading Multiple Redirects Rem',
+  '^>nul REM @author Fake Escaped Redirect Rem',
+  '">nul REM @author Fake Quoted Redirect Rem"',
+  'echo >nul REM @author Fake Echo Redirect Text',
+  'echo "2>nul REM @author Fake Echo Quoted Redirect"',
+  '>nul echo REM @author Fake Redirected Echo Command',
+  'echo >nul echo REM @author Fake Echo After Redirect',
+  '^>REM @author Fake Escaped Redirect Operator',
+  '2>"unterminated REM @author Fake Unterminated Redirect Target',
+  'echo ok | 2>nul REM @author Fake Single Pipe Redirect Rem',
+  '2>foo|bar REM @author Fake Unquoted Pipe Target Rem',
+  '2>foo&bar REM @author Fake Unquoted Ampersand Target Rem',
+  '2>foo^ REM @author Fake Escaped Space Redirect Target Rem',
+  '2>"foo|bar" REM @author Batch Quoted Pipe Target Rem',
+  '2>foo^|bar REM @author Batch Escaped Pipe Target Rem',
+  '2>&- REM @author Batch Close Handle Rem',
+].join('\n');
+assert.deepEqual(cleanedLines(batchRedirectedRemComments, 'bat'), [
+  'echo ok',
+  'echo ready',
+  'echo merged',
+  '^>nul REM @author Fake Escaped Redirect Rem',
+  '">nul REM @author Fake Quoted Redirect Rem"',
+  'echo >nul REM @author Fake Echo Redirect Text',
+  'echo "2>nul REM @author Fake Echo Quoted Redirect"',
+  '>nul echo REM @author Fake Redirected Echo Command',
+  'echo >nul echo REM @author Fake Echo After Redirect',
+  '^>REM @author Fake Escaped Redirect Operator',
+  '2>"unterminated REM @author Fake Unterminated Redirect Target',
+  'echo ok | 2>nul REM @author Fake Single Pipe Redirect Rem',
+  '2>foo|bar REM @author Fake Unquoted Pipe Target Rem',
+  '2>foo&bar REM @author Fake Unquoted Ampersand Target Rem',
+  '2>foo^ REM @author Fake Escaped Space Redirect Target Rem',
+], 'Batch line-start/inline/chained redirection 后 REM 必须连同 command segment 删除；未转义 target `|/&`、escaped operator、quoted/echo/unterminated target 与 single-pipe 负例必须保守保留');
+assert.deepEqual(
+  extractAttributions(batchRedirectedRemComments, 'scripts/redirected-rem.bat', 'bat')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Batch Leading Redirect Rem', 1],
+    ['author', 'Batch Descriptor Redirect Rem', 2],
+    ['author', 'Batch Append Redirect Rem', 3],
+    ['author', 'Batch Handle Merge Rem', 4],
+    ['author', 'Batch Inline Redirect Rem', 5],
+    ['author', 'Batch Chained Redirects Rem', 6],
+    ['author', 'Batch Multiple Handle Redirects Rem', 7],
+    ['author', 'Batch Leading Multiple Redirects Rem', 8],
+    ['author', 'Batch Quoted Pipe Target Rem', 21],
+    ['author', 'Batch Escaped Pipe Target Rem', 22],
+    ['author', 'Batch Close Handle Rem', 23],
+  ],
+  'Batch redirected REM 的真实署名必须定位，escaped/quoted/echo/single-pipe 负例中的伪署名不得误报',
 );
 
 const keepCases = [

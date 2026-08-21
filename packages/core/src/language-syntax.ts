@@ -256,6 +256,10 @@ interface ActiveVbXml {
   stack: string[];
   tag: { name: string; closing: boolean; quote: '"' | "'" | null } | null;
   specialClose: string | null;
+  specialRoot?: boolean;
+  specialDocumentDeclaration?: boolean;
+  documentPhase?: 'beforeRoot' | 'inRoot' | 'afterRoot';
+  embeddedDocumentRoot?: boolean;
   embedded: ActiveVbEmbedded | null;
 }
 
@@ -565,6 +569,9 @@ function batchLastCommandSegment(code: string): { text: string; separatorStart: 
       continue;
     }
     if (quoted || escaped) continue;
+    // n>&m / n<&m 的 ampersand 是句柄重定向的一部分，不是命令分隔符。
+    if (value === '&' && (code[cursor - 1] === '>' || code[cursor - 1] === '<')
+      && /[\d-]/.test(code[cursor + 1] ?? '')) continue;
     if (value === '&') {
       const length = code[cursor + 1] === '&' ? 2 : 1;
       separatorStart = cursor;
@@ -581,6 +588,12 @@ function batchLastCommandSegment(code: string): { text: string; separatorStart: 
   return { text: code.slice(segmentStart).trim(), separatorStart };
 }
 
+function isBatchRedirectionOnly(command: string): boolean {
+  const target = String.raw`(?:&(?:\d+|-)|"[^"]*"|(?:\^.|[^\s<>&|^])+)`;
+  const redirection = String.raw`\d*(?:>>?|<)\s*${target}`;
+  return new RegExp(String.raw`^@?(?:${redirection})(?:\s+${redirection})*$`).test(command);
+}
+
 function batchInlineRemBoundary(line: string, index: number, code: string): number | null {
   if (!/^rem(?:[.\s]|$)/i.test(line.slice(index))) return null;
   const directSeparated = /\s$/.test(code) || /\s@$/.test(code);
@@ -588,6 +601,7 @@ function batchInlineRemBoundary(line: string, index: number, code: string): numb
     const atPrefix = /\s@$/.test(code);
     const directCode = atPrefix ? code.slice(0, -1).trimEnd() : code.trimEnd();
     const commandSegment = batchLastCommandSegment(directCode);
+    if (isBatchRedirectionOnly(commandSegment.text)) return commandSegment.separatorStart;
     const elseCount = commandSegment.text.match(/\belse\b/ig)?.length ?? 0;
     const doCount = commandSegment.text.match(/\bdo\b/ig)?.length ?? 0;
     const provenElse = elseCount === 1
@@ -1339,7 +1353,11 @@ function canStartVbXml(code: string): boolean {
 
 function isVbXmlStart(line: string, index: number, code: string): boolean {
   if (!canStartVbXml(code)) return false;
-  return /^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(line.slice(index));
+  const source = line.slice(index);
+  return /^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(source)
+    || source.startsWith('<!--')
+    || source.startsWith('<![CDATA[')
+    || source.startsWith('<?');
 }
 
 function newVbXmlState(): ActiveVbXml {
@@ -1387,6 +1405,10 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
       }
       if (line.startsWith('%>', cursor)) {
         state.embedded = null;
+        if (state.embeddedDocumentRoot) {
+          state.embeddedDocumentRoot = false;
+          state.documentPhase = 'afterRoot';
+        }
         code += '%>';
         cursor += 2;
         continue;
@@ -1428,7 +1450,19 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
       const end = closeIndex + state.specialClose.length;
       code += line.slice(cursor, end);
       cursor = end;
+      const rootSpecial = state.specialRoot === true;
+      const documentDeclaration = state.specialDocumentDeclaration === true;
       state.specialClose = null;
+      state.specialRoot = false;
+      state.specialDocumentDeclaration = false;
+      if (documentDeclaration) {
+        state.documentPhase = 'beforeRoot';
+        continue;
+      }
+      if (state.documentPhase) continue;
+      if (rootSpecial) {
+        return { end: cursor, closed: true, code, comments };
+      }
       continue;
     }
 
@@ -1457,7 +1491,13 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
         state.tag = null;
         code += '/>';
         cursor += 2;
-        if (state.stack.length === 0) return { end: cursor, closed: true, code, comments };
+        if (state.stack.length === 0) {
+          if (state.documentPhase === 'inRoot') {
+            state.documentPhase = 'afterRoot';
+            continue;
+          }
+          return { end: cursor, closed: true, code, comments };
+        }
         continue;
       }
       if (line[cursor] === '>') {
@@ -1469,7 +1509,13 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
         state.tag = null;
         code += '>';
         cursor++;
-        if (state.stack.length === 0) return { end: cursor, closed: true, code, comments };
+        if (state.stack.length === 0) {
+          if (state.documentPhase === 'inRoot') {
+            state.documentPhase = 'afterRoot';
+            continue;
+          }
+          return { end: cursor, closed: true, code, comments };
+        }
         continue;
       }
       code += line[cursor];
@@ -1477,25 +1523,49 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
       continue;
     }
 
+    if (state.documentPhase && /\s/.test(line[cursor])) {
+      code += line[cursor];
+      cursor++;
+      continue;
+    }
+    if (state.documentPhase === 'afterRoot'
+      && !line.startsWith('<!--', cursor) && !line.startsWith('<?', cursor)) {
+      return { end: cursor, closed: true, code, comments };
+    }
+    if (state.documentPhase === 'beforeRoot'
+      && !line.startsWith('<!--', cursor) && !line.startsWith('<?', cursor)
+      && !line.startsWith('<%=', cursor)
+      && !/^<[A-Za-z_][A-Za-z0-9_.:-]*(?=[\s/>])/.test(line.slice(cursor))) {
+      return { end: cursor, closed: true, code, comments };
+    }
+
     if (line.startsWith('<!--', cursor)) {
+      state.specialRoot = state.stack.length === 0;
+      state.specialDocumentDeclaration = false;
       state.specialClose = '-->';
       code += '<!--';
       cursor += 4;
       continue;
     }
     if (line.startsWith('<![CDATA[', cursor)) {
+      state.specialRoot = state.stack.length === 0;
+      state.specialDocumentDeclaration = false;
       state.specialClose = ']]>';
       code += '<![CDATA[';
       cursor += 9;
       continue;
     }
     if (line.startsWith('<?', cursor)) {
+      state.specialRoot = state.stack.length === 0;
+      state.specialDocumentDeclaration = state.documentPhase === undefined && state.specialRoot
+        && /^<\?xml(?:\s|\?>)/i.test(line.slice(cursor));
       state.specialClose = '?>';
       code += '<?';
       cursor += 2;
       continue;
     }
     if (line.startsWith('<%=', cursor)) {
+      state.embeddedDocumentRoot = state.documentPhase === 'beforeRoot';
       state.embedded = newVbEmbeddedState();
       code += '<%=';
       cursor += 3;
@@ -1511,6 +1581,7 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): Consumed
     }
     const openingTag = /^<([A-Za-z_][A-Za-z0-9_.:-]*)(?=[\s/>])/.exec(line.slice(cursor));
     if (openingTag) {
+      if (state.documentPhase === 'beforeRoot') state.documentPhase = 'inRoot';
       state.tag = { name: openingTag[1], closing: false, quote: null };
       code += openingTag[0];
       cursor += openingTag[0].length;
