@@ -558,6 +558,37 @@ assert.deepEqual(
   'PowerShell 首个 #> 后的真实行注释署名必须定位',
 );
 
+const powerShellNonNestedBlockComments = [
+  '<# outer <# inner #> Write-Output top-visible #>',
+  'Write-Output top-tail # @author PS First Close Top Tail',
+  '$message = "prefix $(',
+  '  <# outer <# inner #> Write-Output expression-visible #>',
+  '  Write-Output expression-tail # @author PS First Close Expandable Tail',
+  ') suffix" # @author PS First Close Outer Tail',
+  'Write-Output before;<# @author PS Ordinary Block Maintainer #>after # @author PS Ordinary Block Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNonNestedBlockComments, 'ps1'), [
+  ' Write-Output top-visible',
+  'Write-Output top-tail',
+  '$message = "prefix $(',
+  '   Write-Output expression-visible',
+  '  Write-Output expression-tail',
+  ') suffix"',
+  'Write-Output before; after',
+], 'PowerShell block comment官方语义为non-nesting：top-level与ordinary expandable $()均须由首个#>闭合并立即恢复代码扫描；普通真实block/tail仍须删除');
+assert.deepEqual(
+  extractAttributions(powerShellNonNestedBlockComments, 'src/non-nested-block-comments.ps1', 'ps1')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'PS First Close Top Tail', 2],
+    ['author', 'PS First Close Expandable Tail', 5],
+    ['author', 'PS First Close Outer Tail', 6],
+    ['author', 'PS Ordinary Block Maintainer', 7],
+    ['author', 'PS Ordinary Block Tail', 7],
+  ],
+  'PowerShell first-close后的真实tail、$()与outer tail、普通block/tail署名必须定位，nested-looking opener不得改变comment边界',
+);
+
 const powerShellEmbeddedAtQuotesTopLevel = [
   'Write-Output foo@"',
   '# literal in ordinary double string @author Fake Top Double',

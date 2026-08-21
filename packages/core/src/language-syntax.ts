@@ -87,6 +87,9 @@ const PASCAL: LanguageSyntax = {
 
 const POWERSHELL: LanguageSyntax = {
   lineComments: ['#'],
+  // Microsoft Learn `about_Comments`: `<# ... #>` is not nestable. Keep `nested` unset so
+  // both the top-level scanner and expandable `$()` scanner close at the first `#>`.
+  // https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_comments
   blockComments: [{ open: '<#', close: '#>' }],
   strings: [
     quote("@'", 'double', { close: "'@", multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
