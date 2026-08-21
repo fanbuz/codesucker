@@ -362,6 +362,35 @@ assert.deepEqual(
   'VB XML 注入的嵌套 XML 属性伪署名不得误报，最外层闭合后的真实署名仍须定位',
 );
 
+const visualBasicXmlAttributeExpressions = [
+  "Dim basic = <child attr=<%= value %>/> ' @author Basic Attribute Maintainer",
+  "Dim complex = <root attr=<%= If(flag, \"' @author Fake />\", \"safe\") %>><%= <child attr='value'/> %></root> ' @author Complex Attribute Maintainer",
+].join('\n');
+assert.deepEqual(cleanedLines(visualBasicXmlAttributeExpressions, 'vb'), [
+  'Dim basic = <child attr=<%= value %>/>',
+  "Dim complex = <root attr=<%= If(flag, \"' @author Fake />\", \"safe\") %>><%= <child attr='value'/> %></root>",
+], 'VB XML tag 属性中的 <%= %> 表达式、表达式字符串和 nested XML 必须保留，/> 后的真实注释仍须删除');
+assert.deepEqual(
+  extractAttributions(visualBasicXmlAttributeExpressions, 'src/xml-attribute-expression.vb', 'vb'),
+  [
+    {
+      kind: 'author',
+      subject: 'Basic Attribute Maintainer',
+      file: 'src/xml-attribute-expression.vb',
+      line: 1,
+      text: "Dim basic = <child attr=<%= value %>/> ' @author Basic Attribute Maintainer",
+    },
+    {
+      kind: 'author',
+      subject: 'Complex Attribute Maintainer',
+      file: 'src/xml-attribute-expression.vb',
+      line: 2,
+      text: "Dim complex = <root attr=<%= If(flag, \"' @author Fake />\", \"safe\") %>><%= <child attr='value'/> %></root> ' @author Complex Attribute Maintainer",
+    },
+  ],
+  'VB XML 属性表达式字符串中的伪署名不得误报，/> 后的真实署名仍须定位',
+);
+
 assert.deepEqual(cleanedLines([
   'url <- "https://example.test/#fragment" # remove',
   "label <- '# literal'",
@@ -445,6 +474,53 @@ assert.deepEqual(cleanedLines([
   'after = true',
 ], 'HCL heredoc 终止符不得包含尾空格；<<- 仅额外允许前导缩进，真实终止符后的注释仍须删除');
 
+const hclInterpolationComments = [
+  'block = "${replace(var.x,/* } # " ignored delimiters */"#","-")}" # @author HCL Block Maintainer',
+  'line = "${(',
+  '  var.enabled // } # " ignored delimiters',
+  '  ? "#"',
+  '  : "-"',
+  ')}" # @author HCL Line Maintainer',
+].join('\n');
+assert.deepEqual(cleanedLines(hclInterpolationComments, 'tf'), [
+  'block = "${replace(var.x, "#","-")}"',
+  'line = "${(',
+  '  var.enabled',
+  '  ? "#"',
+  '  : "-"',
+  ')}"',
+], 'HCL 插值表达式内的块/行注释不得让其中的花括号、# 或引号提前结束模板，尾部真实注释仍须删除');
+assert.deepEqual(
+  extractAttributions(hclInterpolationComments, 'infra/commented-expression.tf', 'tf'),
+  [
+    {
+      kind: 'author',
+      subject: 'HCL Block Maintainer',
+      file: 'infra/commented-expression.tf',
+      line: 1,
+      text: 'block = "${replace(var.x,/* } # " ignored delimiters */"#","-")}" # @author HCL Block Maintainer',
+    },
+    {
+      kind: 'author',
+      subject: 'HCL Line Maintainer',
+      file: 'infra/commented-expression.tf',
+      line: 6,
+      text: ')}" # @author HCL Line Maintainer',
+    },
+  ],
+  'HCL 插值注释语境不得吞掉模板闭合后的真实署名证据',
+);
+
+assert.deepEqual(cleanedLines([
+  'compact = "${jsonencode([for/* gap */x in var.xs : x])}" # remove after compact expression',
+  'multiline = "${jsonencode([for/* gap starts',
+  'and continues */x in var.xs : x])}" # remove after multiline expression',
+].join('\n'), 'hcl'), [
+  'compact = "${jsonencode([for x in var.xs : x])}"',
+  'multiline = "${jsonencode([for',
+  'x in var.xs : x])}"',
+], 'HCL 删除同行块注释时必须在相邻 token 间保留等价空白，跨行块注释必须保留换行边界');
+
 assert.deepEqual(cleanedLines([
   'def url = "https://example.test/#fragment // literal" // remove',
   'def multiline = """',
@@ -497,6 +573,34 @@ assert.deepEqual(cleanedLines([
   ':build',
   'echo done',
 ], 'Batch 只应在注释语境删除 REM/::，命令文本与普通标签必须保留');
+
+const batchChainedComments = [
+  'echo ready & REM @author Chained Batch Maintainer',
+  'echo REM is command text',
+  'echo ready && REM success-only comment',
+  'echo ready || REM fallback comment',
+  'echo ready | REM @author Piped Text Is Not A Scanner Comment',
+  'echo ready && echo REM is still command text',
+].join('\n');
+assert.deepEqual(cleanedLines(batchChainedComments, 'bat'), [
+  'echo ready',
+  'echo REM is command text',
+  'echo ready',
+  'echo ready',
+  'echo ready | REM @author Piped Text Is Not A Scanner Comment',
+  'echo ready && echo REM is still command text',
+], 'Batch REM 在 &/&&/|| 命令边界后应连同悬空分隔符删除，单个 | 边界和 echo 参数中的 REM 必须保留');
+assert.deepEqual(
+  extractAttributions(batchChainedComments, 'scripts/chained.bat', 'bat'),
+  [{
+    kind: 'author',
+    subject: 'Chained Batch Maintainer',
+    file: 'scripts/chained.bat',
+    line: 1,
+    text: 'echo ready & REM @author Chained Batch Maintainer',
+  }],
+  'Batch 命令链 REM 注释中的署名必须定位，单个 | 后和 echo 参数中的 REM 不得产生误报',
+);
 
 const keepCases = [
   ['pas', 'value := 1; // keep'],

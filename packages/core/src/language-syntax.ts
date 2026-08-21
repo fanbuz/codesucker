@@ -74,7 +74,7 @@ const GROOVY: LanguageSyntax = {
 const HCL: LanguageSyntax = {
   lineComments: ['//', '#'],
   blockComments: [{ open: '/*', close: '*/' }],
-  strings: [quote('"', 'backslash', { embedded: 'hcl-template' })],
+  strings: [quote('"', 'backslash', { multiline: true, embedded: 'hcl-template' })],
   dialect: 'hcl',
 };
 
@@ -163,7 +163,7 @@ interface ActiveComment {
 interface ActiveString {
   rule: StringRule;
   groovyContexts?: GroovyContext[];
-  hclContexts?: Array<{ kind: 'template' } | { kind: 'expression'; depth: number }>;
+  hclContexts?: HclContext[];
   powershellContexts?: PowerShellContext[];
 }
 
@@ -171,6 +171,11 @@ type GroovyContext =
   | { kind: 'string'; rule: StringRule }
   | { kind: 'expression'; depth: number; code: string }
   | { kind: 'comment'; close: '*/' };
+
+type HclContext =
+  | { kind: 'template' }
+  | { kind: 'expression'; depth: number }
+  | { kind: 'comment' };
 
 type PowerShellContext =
   | { kind: 'string'; quote: '"' | "'" }
@@ -210,6 +215,18 @@ function isPowerShellLineComment(line: string, index: number): boolean {
 function batchCommentStart(line: string): number | null {
   const match = /^(\s*)(?:@?\s*)(?:::|rem(?:[.\s]|$))/i.exec(line);
   return match ? match[1].length : null;
+}
+
+function batchInlineRemBoundary(line: string, index: number, code: string): number | null {
+  if (!/^rem(?:[.\s]|$)/i.test(line.slice(index))) return null;
+  // REM 不能作为管道右侧命令；只接受命令链的 &、&&、||，排除单个 |。
+  const match = /(?:&&|\|\||&)\s*@?\s*$/.exec(code);
+  if (!match) return null;
+
+  // ^& / ^| 是 echo 等命令 token 的字面量字符，不是新命令段边界。
+  let carets = 0;
+  for (let cursor = match.index - 1; cursor >= 0 && code[cursor] === '^'; cursor--) carets++;
+  return carets % 2 === 0 ? match.index : null;
 }
 
 function isVbRem(line: string, index: number): boolean {
@@ -399,54 +416,92 @@ function consumeHclTemplate(
   line: string,
   index: number,
   contexts: NonNullable<ActiveString['hclContexts']>,
-): { end: number; closed: boolean } {
+): { end: number; closed: boolean; code: string; comments: string[] } {
   let cursor = index;
+  let code = '';
+  const comments: string[] = [];
   while (cursor < line.length) {
     const context = contexts[contexts.length - 1];
+    if (context.kind === 'comment') {
+      const closeIndex = line.indexOf('*/', cursor);
+      const end = closeIndex === -1 ? line.length : closeIndex + 2;
+      comments.push(line.slice(cursor, end));
+      cursor = end;
+      if (closeIndex === -1) return { end: line.length, closed: false, code, comments };
+      contexts.pop();
+      continue;
+    }
     if (context.kind === 'template') {
       if (line[cursor] === '\\') {
-        cursor += Math.min(2, line.length - cursor);
+        const length = Math.min(2, line.length - cursor);
+        code += line.slice(cursor, cursor + length);
+        cursor += length;
         continue;
       }
       // $${ / %%{ 分别表示字面量 ${ / %{，不能进入模板表达式。
       if (line.startsWith('$${', cursor) || line.startsWith('%%{', cursor)) {
+        code += line.slice(cursor, cursor + 3);
         cursor += 3;
         continue;
       }
       if (line.startsWith('${', cursor) || line.startsWith('%{', cursor)) {
+        code += line.slice(cursor, cursor + 2);
         contexts.push({ kind: 'expression', depth: 1 });
         cursor += 2;
         continue;
       }
       if (line[cursor] === '"') {
+        code += '"';
         cursor++;
-        if (contexts.length === 1) return { end: cursor, closed: true };
+        if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
         contexts.pop();
         continue;
       }
+      code += line[cursor];
       cursor++;
       continue;
     }
 
+    if (line.startsWith('/*', cursor)) {
+      const closeIndex = line.indexOf('*/', cursor + 2);
+      const end = closeIndex === -1 ? line.length : closeIndex + 2;
+      comments.push(line.slice(cursor, end));
+      cursor = end;
+      if (closeIndex === -1) {
+        contexts.push({ kind: 'comment' });
+        return { end: line.length, closed: false, code, comments };
+      }
+      // HCL 注释在词法上等价于空白；仅在两侧没有现成空白时补一个，防止 for/*...*/x -> forx。
+      if (code !== '' && !/\s$/.test(code) && cursor < line.length && !/\s/.test(line[cursor])) code += ' ';
+      continue;
+    }
+    if (line.startsWith('//', cursor) || line[cursor] === '#') {
+      comments.push(line.slice(cursor));
+      return { end: line.length, closed: false, code, comments };
+    }
     if (line[cursor] === '"') {
+      code += '"';
       contexts.push({ kind: 'template' });
       cursor++;
       continue;
     }
     if (line[cursor] === '{') {
+      code += '{';
       context.depth++;
       cursor++;
       continue;
     }
     if (line[cursor] === '}') {
+      code += '}';
       context.depth--;
       cursor++;
       if (context.depth === 0) contexts.pop();
       continue;
     }
+    code += line[cursor];
     cursor++;
   }
-  return { end: line.length, closed: false };
+  return { end: line.length, closed: false, code, comments };
 }
 
 function canStartVbXml(code: string): boolean {
@@ -463,6 +518,10 @@ function isVbXmlStart(line: string, index: number, code: string): boolean {
 
 function newVbXmlState(): ActiveVbXml {
   return { stack: [], tag: null, specialClose: null, embedded: null };
+}
+
+function newVbEmbeddedState(): ActiveVbEmbedded {
+  return { quote: null, nestedXml: null, code: '' };
 }
 
 function appendVbEmbeddedCode(state: ActiveVbEmbedded, value: string): void {
@@ -531,6 +590,12 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
 
     if (state.tag) {
       const tag = state.tag;
+      // VB XML 允许在活动标签（包括属性值）中注入表达式；退出后恢复原 tag/quote 状态。
+      if (line.startsWith('<%=', cursor)) {
+        state.embedded = newVbEmbeddedState();
+        cursor += 3;
+        continue;
+      }
       if (tag.quote) {
         if (line[cursor] === tag.quote) tag.quote = null;
         cursor++;
@@ -578,7 +643,7 @@ function consumeVbXml(line: string, index: number, state: ActiveVbXml): { end: n
       continue;
     }
     if (line.startsWith('<%=', cursor)) {
-      state.embedded = { quote: null, nestedXml: null, code: '' };
+      state.embedded = newVbEmbeddedState();
       cursor += 3;
       continue;
     }
@@ -750,7 +815,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         }
         if (activeString.hclContexts) {
           const consumed = consumeHclTemplate(raw, index, activeString.hclContexts);
-          code += raw.slice(index, consumed.end);
+          code += consumed.code;
+          comments.push(...consumed.comments);
+          if (consumed.comments.length > 0) hadComment = true;
           index = consumed.end;
           if (consumed.closed) activeString = null;
           continue;
@@ -846,6 +913,16 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           index = consumed.end;
           if (!consumed.closed) activeVbXml = state;
           continue;
+        }
+      }
+
+      if (syntax.dialect === 'batch') {
+        const commentBoundary = batchInlineRemBoundary(raw, index, code);
+        if (commentBoundary !== null) {
+          code = code.slice(0, commentBoundary).trimEnd();
+          comments.push(raw.slice(index));
+          hadComment = true;
+          break;
         }
       }
 
