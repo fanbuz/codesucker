@@ -1541,6 +1541,151 @@ assert.deepEqual(attributionSummary(powerShellBacktickContinuationInExpandableSt
   ['author', 'PS Backtick Continuation Outer Tail', 14],
 ], 'PowerShell expandable $() backtick 续行/偶数对照内容伪署名不得误报，内部及 outer tail 真实署名必须定位');
 
+const powerShellBacktickTokenBoundaryBody = [
+  'Write-Output foo`',
+  '# literal @author Fake Foo One Backtick',
+  'Write-Output foo```',
+  '# literal @author Fake Foo Three Backticks',
+  'Write-Output value `',
+  '# @author PS Whitespace One Backtick',
+  'Write-Output value,`',
+  '# @author PS Force Boundary One Backtick',
+  '$value=`',
+  '# @author PS Assignment Boundary One Backtick',
+  'Write-Output value ```',
+  '# literal @author Fake Whitespace Three Backticks',
+  'Write-Output value,```',
+  '# literal @author Fake Force Boundary Three Backticks',
+  '$other=```',
+  '# literal @author Fake Assignment Boundary Three Backticks',
+];
+const powerShellBacktickTokenBoundaryExpected = [
+  ...powerShellBacktickTokenBoundaryBody.slice(0, 5),
+  powerShellBacktickTokenBoundaryBody[6],
+  powerShellBacktickTokenBoundaryBody[8],
+  ...powerShellBacktickTokenBoundaryBody.slice(10),
+];
+
+const powerShellBacktickTokenBoundaryTopLevel = powerShellBacktickTokenBoundaryBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellBacktickTokenBoundaryTopLevel, 'ps1'),
+  powerShellBacktickTokenBoundaryExpected,
+  'PowerShell 顶层单 backtick 仅在 generic token 内延续 token；空白、ForceStartNewToken 与 assignment 边界后的下一行 # 仍是真实评论，三 backtick 先形成 literal token 后继续');
+assert.deepEqual(attributionSummary(powerShellBacktickTokenBoundaryTopLevel, 'src/backtick-token-boundary-top.ps1'), [
+  ['author', 'PS Whitespace One Backtick', 6],
+  ['author', 'PS Force Boundary One Backtick', 8],
+  ['author', 'PS Assignment Boundary One Backtick', 10],
+], 'PowerShell 顶层 foo/三 backtick 续行中的伪署名必须保留，单 backtick token 边界后的真实署名必须定位');
+
+const powerShellBacktickTokenBoundaryInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellBacktickTokenBoundaryBody,
+  ') suffix" # @author PS Backtick Boundary Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellBacktickTokenBoundaryInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellBacktickTokenBoundaryExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 backtick continuation 必须区分已开始 generic token 与空白/ForceStartNewToken/assignment 边界');
+assert.deepEqual(attributionSummary(powerShellBacktickTokenBoundaryInExpandableString, 'src/backtick-token-boundary-expandable.ps1'), [
+  ['author', 'PS Whitespace One Backtick', 7],
+  ['author', 'PS Force Boundary One Backtick', 9],
+  ['author', 'PS Assignment Boundary One Backtick', 11],
+  ['author', 'PS Backtick Boundary Expandable Outer Tail', 18],
+], 'PowerShell expandable $() token 边界后的真实评论与 outer tail 必须定位，continued generic token 内伪署名不得误报');
+
+const powerShellBacktickTokenBoundaryInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellBacktickTokenBoundaryBody,
+  ')',
+  '"@',
+  'Write-Output $outer # @author PS Backtick Boundary Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellBacktickTokenBoundaryInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellBacktickTokenBoundaryExpected,
+  ')',
+  '"@',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 backtick continuation 也必须保留 token-start 边界，且最终恢复 outer here-string');
+assert.deepEqual(attributionSummary(powerShellBacktickTokenBoundaryInOuterHereString, 'src/backtick-token-boundary-outer-here.ps1'), [
+  ['author', 'PS Whitespace One Backtick', 8],
+  ['author', 'PS Force Boundary One Backtick', 10],
+  ['author', 'PS Assignment Boundary One Backtick', 12],
+  ['author', 'PS Backtick Boundary Here Outer Tail', 21],
+], 'PowerShell outer here $() token 边界后的真实评论及 outer tail 必须定位，continued token 内容不得产生伪署名');
+
+const powerShellExplicitGenericContinuationBody = [
+  'Write-Output foo`',
+  '@"',
+  '# literal <# literal #> @author Fake Continued Generic Quote',
+  'foo-last" # @author PS Continued Generic Quote Tail',
+  'Write-Output foo`',
+  '# literal @author Fake Continued Generic Hash',
+  'Write-Output foo`',
+  '   # @author PS Leading Whitespace Ends Generic',
+  'Write-Output $x`',
+  '@"',
+  'variable " # <# literal #> @author Fake Complete Variable Here',
+  '"@; # @author PS Complete Variable Here Tail',
+  'Write-Output "done"`',
+  '# @author PS Complete String Boundary',
+  'Write-Output (1)`',
+  "@'",
+  "paren ' # <# literal #> @author Fake Complete Paren Here",
+  "'@; # @author PS Complete Paren Here Tail",
+];
+const powerShellExplicitGenericContinuationExpected = [
+  'Write-Output foo`',
+  '@"',
+  '# literal <# literal #> @author Fake Continued Generic Quote',
+  'foo-last"',
+  'Write-Output foo`',
+  '# literal @author Fake Continued Generic Hash',
+  'Write-Output foo`',
+  'Write-Output $x`',
+  '@"',
+  'variable " # <# literal #> @author Fake Complete Variable Here',
+  '"@;',
+  'Write-Output "done"`',
+  'Write-Output (1)`',
+  "@'",
+  "paren ' # <# literal #> @author Fake Complete Paren Here",
+  "'@;",
+];
+
+const powerShellExplicitGenericContinuationTopLevel = powerShellExplicitGenericContinuationBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellExplicitGenericContinuationTopLevel, 'ps1'),
+  powerShellExplicitGenericContinuationExpected,
+  'PowerShell 顶层行末 backtick 仅在显式 generic token 活跃时延续；完整 variable/string/paren token 后的次行必须恢复新 token 语义');
+assert.deepEqual(attributionSummary(powerShellExplicitGenericContinuationTopLevel, 'src/explicit-generic-continuation-top.ps1'), [
+  ['author', 'PS Continued Generic Quote Tail', 4],
+  ['author', 'PS Leading Whitespace Ends Generic', 8],
+  ['author', 'PS Complete Variable Here Tail', 12],
+  ['author', 'PS Complete String Boundary', 14],
+  ['author', 'PS Complete Paren Here Tail', 18],
+], 'PowerShell 顶层 continued generic 内 #/伪署名必须保留，前导空白及完整 token 后的真实评论与 here terminator 署名必须定位');
+
+const powerShellExplicitGenericContinuationInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellExplicitGenericContinuationBody,
+  ') suffix" # @author PS Explicit Generic Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellExplicitGenericContinuationInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellExplicitGenericContinuationExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内也必须显式跟踪 generic token，完整 variable/string/paren 后不得阻塞下一行 here-string 或评论');
+assert.deepEqual(attributionSummary(powerShellExplicitGenericContinuationInExpandableString, 'src/explicit-generic-continuation-expandable.ps1'), [
+  ['author', 'PS Continued Generic Quote Tail', 5],
+  ['author', 'PS Leading Whitespace Ends Generic', 9],
+  ['author', 'PS Complete Variable Here Tail', 13],
+  ['author', 'PS Complete String Boundary', 15],
+  ['author', 'PS Complete Paren Here Tail', 19],
+  ['author', 'PS Explicit Generic Expandable Outer Tail', 20],
+], 'PowerShell expandable $() 的 continued generic 内容伪署名不得误报，新 token 评论、nested here tails 与 outer tail 必须定位');
+
 const powerShellHashtableEscapedBracesTopLevel = [
   '@{',
   'Token=foo`{literal`}tail',
@@ -1662,6 +1807,196 @@ assert.deepEqual(attributionSummary(powerShellEscapedGenericHashtableInExpandabl
   ['author', 'PS Expandable Escaped Generic Body Tail', 20],
   ['author', 'PS Escaped Generic Outer Tail', 23],
 ], 'PowerShell expandable hashtable escaped generic token 内伪署名不得误报，真实内部评论、Body tail 与 outer tail 必须定位');
+
+const powerShellNumericHashtableEntries = [
+  '1=@"',
+  'integer " # <# literal #> @author Fake Numeric Integer',
+  '"@; # @author PS Numeric Integer Tail',
+  "0x2A=@'",
+  "hex ' # <# literal #> @author Fake Numeric Hex",
+  "'@; # @author PS Numeric Hex Tail",
+  '-3=@"',
+  'negative " # <# literal #> @author Fake Numeric Negative',
+  '"@; # @author PS Numeric Negative Tail',
+  "1.5=@'",
+  "decimal ' # <# literal #> @author Fake Numeric Decimal",
+  "'@; # @author PS Numeric Decimal Tail",
+  '(-$offset)=@"',
+  'unary variable " # <# literal #> @author Fake Unary Variable Key',
+  '"@; # @author PS Unary Variable Key Tail',
+];
+const powerShellNumericHashtableExpected = [
+  '1=@"',
+  'integer " # <# literal #> @author Fake Numeric Integer',
+  '"@;',
+  "0x2A=@'",
+  "hex ' # <# literal #> @author Fake Numeric Hex",
+  "'@;",
+  '-3=@"',
+  'negative " # <# literal #> @author Fake Numeric Negative',
+  '"@;',
+  "1.5=@'",
+  "decimal ' # <# literal #> @author Fake Numeric Decimal",
+  "'@;",
+  '(-$offset)=@"',
+  'unary variable " # <# literal #> @author Fake Unary Variable Key',
+  '"@;',
+];
+
+const powerShellNumericHashtableTopLevel = [
+  '@{',
+  ...powerShellNumericHashtableEntries,
+  '}',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNumericHashtableTopLevel, 'psd1'), [
+  '@{',
+  ...powerShellNumericHashtableExpected,
+  '}',
+], 'PowerShell .psd1 hashtable 的 decimal、hex、负数、小数及 parenthesized unary variable key 紧接 =@ 时必须开启 here-string');
+assert.deepEqual(attributionSummary(powerShellNumericHashtableTopLevel, 'config/numeric-keys.psd1'), [
+  ['author', 'PS Numeric Integer Tail', 4],
+  ['author', 'PS Numeric Hex Tail', 7],
+  ['author', 'PS Numeric Negative Tail', 10],
+  ['author', 'PS Numeric Decimal Tail', 13],
+  ['author', 'PS Unary Variable Key Tail', 16],
+], 'PowerShell numeric/unary hashtable key 的 here-string 内容伪署名不得误报，terminator tail 必须定位');
+
+const powerShellNumericHashtableInExpandableString = [
+  '$message = "prefix $(',
+  '$table = @{',
+  ...powerShellNumericHashtableEntries,
+  '}',
+  'Write-Output $table',
+  ') suffix" # @author PS Numeric Hashtable Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNumericHashtableInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  '$table = @{',
+  ...powerShellNumericHashtableExpected,
+  '}',
+  'Write-Output $table',
+  ') suffix"',
+], 'PowerShell expandable $() hashtable 内 numeric/unary key 的 nested here-string 必须闭合并恢复 expression 与 outer string');
+assert.deepEqual(attributionSummary(powerShellNumericHashtableInExpandableString, 'src/numeric-keys-expandable.ps1'), [
+  ['author', 'PS Numeric Integer Tail', 5],
+  ['author', 'PS Numeric Hex Tail', 8],
+  ['author', 'PS Numeric Negative Tail', 11],
+  ['author', 'PS Numeric Decimal Tail', 14],
+  ['author', 'PS Unary Variable Key Tail', 17],
+  ['author', 'PS Numeric Hashtable Expandable Outer Tail', 20],
+], 'PowerShell expandable numeric/unary hashtable key 的内容伪署名不得误报，value tails 与 outer tail 必须定位');
+
+const powerShellNumericAssignmentOutsideHashtable = [
+  '& { 1=@"',
+  '# literal <# literal #> @author Fake Scriptblock Numeric Assignment',
+  'scriptblock-last" # @author PS Scriptblock Numeric Assignment Tail',
+  '}',
+  "Write-Output 0x2A=@'",
+  '# literal <# literal #> @author Fake Command Numeric Assignment',
+  "command-last' # @author PS Command Numeric Assignment Tail",
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNumericAssignmentOutsideHashtable, 'ps1'), [
+  '& { 1=@"',
+  '# literal <# literal #> @author Fake Scriptblock Numeric Assignment',
+  'scriptblock-last"',
+  '}',
+  "Write-Output 0x2A=@'",
+  '# literal <# literal #> @author Fake Command Numeric Assignment',
+  "command-last'",
+], 'PowerShell ordinary scriptblock/command 中 numeric =@quote 必须保持 ordinary multiline string，不得借用 hashtable key 语义');
+assert.deepEqual(attributionSummary(powerShellNumericAssignmentOutsideHashtable, 'src/numeric-assignment-negative.ps1'), [
+  ['author', 'PS Scriptblock Numeric Assignment Tail', 3],
+  ['author', 'PS Command Numeric Assignment Tail', 7],
+], 'PowerShell 非 hashtable numeric =@quote 内容伪署名必须保留，ordinary quote 闭合后的真实评论必须定位');
+
+const powerShellNumericCommandInExpandableString = [
+  '$message = "prefix $(',
+  'Write-Output 1=@"',
+  '# literal <# literal #> @author Fake Expandable Command Numeric Assignment',
+  'last" # @author PS Expandable Command Numeric Assignment Tail',
+  ') suffix" # @author PS Numeric Command Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNumericCommandInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  'Write-Output 1=@"',
+  '# literal <# literal #> @author Fake Expandable Command Numeric Assignment',
+  'last"',
+  ') suffix"',
+], 'PowerShell expandable $() ordinary command 的 numeric =@quote 不得误开 nested here-string，闭合后必须恢复 expression');
+assert.deepEqual(attributionSummary(powerShellNumericCommandInExpandableString, 'src/numeric-command-expandable.ps1'), [
+  ['author', 'PS Expandable Command Numeric Assignment Tail', 4],
+  ['author', 'PS Numeric Command Expandable Outer Tail', 5],
+], 'PowerShell expandable command numeric =@quote 内容伪署名不得误报，内部及 outer tail 必须定位');
+
+const powerShellInvalidNumericHashtableEntries = [
+  '1a=@"',
+  '# literal <# literal #> @author Fake Invalid Numeric Alphanumeric',
+  'alpha-last" # @author PS Invalid Numeric Alphanumeric Tail',
+  "0xZZ=@'",
+  '# literal <# literal #> @author Fake Invalid Numeric Hex',
+  "hex-last' # @author PS Invalid Numeric Hex Tail",
+  '1__0=@"',
+  '# literal <# literal #> @author Fake Invalid Numeric Separators',
+  'separator-last" # @author PS Invalid Numeric Separators Tail',
+  "1e=@'",
+  '# literal <# literal #> @author Fake Invalid Numeric Exponent',
+  "exponent-last' # @author PS Invalid Numeric Exponent Tail",
+];
+const powerShellInvalidNumericHashtableExpected = [
+  '1a=@"',
+  '# literal <# literal #> @author Fake Invalid Numeric Alphanumeric',
+  'alpha-last"',
+  "0xZZ=@'",
+  '# literal <# literal #> @author Fake Invalid Numeric Hex',
+  "hex-last'",
+  '1__0=@"',
+  '# literal <# literal #> @author Fake Invalid Numeric Separators',
+  'separator-last"',
+  "1e=@'",
+  '# literal <# literal #> @author Fake Invalid Numeric Exponent',
+  "exponent-last'",
+];
+
+const powerShellInvalidNumericHashtableTopLevel = [
+  '@{',
+  ...powerShellInvalidNumericHashtableEntries,
+  '}',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellInvalidNumericHashtableTopLevel, 'psd1'), [
+  '@{',
+  ...powerShellInvalidNumericHashtableExpected,
+  '}',
+], 'PowerShell .psd1 hashtable 内 1a、0xZZ、1__0、1e 非法 numeric key 的 =@quote 必须保持 ordinary multiline string');
+assert.deepEqual(attributionSummary(powerShellInvalidNumericHashtableTopLevel, 'config/invalid-numeric-keys.psd1'), [
+  ['author', 'PS Invalid Numeric Alphanumeric Tail', 4],
+  ['author', 'PS Invalid Numeric Hex Tail', 7],
+  ['author', 'PS Invalid Numeric Separators Tail', 10],
+  ['author', 'PS Invalid Numeric Exponent Tail', 13],
+], 'PowerShell 非法 numeric hashtable key 后 ordinary string 内容伪署名不得误报，闭合后的真实评论必须定位');
+
+const powerShellInvalidNumericHashtableInExpandableString = [
+  '$message = "prefix $(',
+  '$table = @{',
+  ...powerShellInvalidNumericHashtableEntries,
+  '}',
+  'Write-Output $table',
+  ') suffix" # @author PS Invalid Numeric Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellInvalidNumericHashtableInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  '$table = @{',
+  ...powerShellInvalidNumericHashtableExpected,
+  '}',
+  'Write-Output $table',
+  ') suffix"',
+], 'PowerShell expandable $() hashtable 内非法 numeric key 不得误开 nested here-string，并须恢复 expression 与 outer string');
+assert.deepEqual(attributionSummary(powerShellInvalidNumericHashtableInExpandableString, 'src/invalid-numeric-keys-expandable.ps1'), [
+  ['author', 'PS Invalid Numeric Alphanumeric Tail', 5],
+  ['author', 'PS Invalid Numeric Hex Tail', 8],
+  ['author', 'PS Invalid Numeric Separators Tail', 11],
+  ['author', 'PS Invalid Numeric Exponent Tail', 14],
+  ['author', 'PS Invalid Numeric Expandable Outer Tail', 17],
+], 'PowerShell expandable invalid numeric key ordinary string 内容伪署名不得误报，内部 tails 与 outer tail 必须定位');
 
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',

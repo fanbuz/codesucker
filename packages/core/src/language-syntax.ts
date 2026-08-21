@@ -172,6 +172,8 @@ interface ActiveString {
   groovyContexts?: GroovyContext[];
   hclContexts?: HclContext[];
   powershellContexts?: PowerShellContext[];
+  /** PowerShell quoted segment 闭合后恢复进入前的 token 语境。 */
+  powerShellTokenPrefix?: PowerShellTokenKind;
 }
 
 type GroovyContext =
@@ -186,10 +188,14 @@ type HclContext =
 
 type PowerShellContext =
   | { kind: 'string'; quote: '"' | "'"; hereString?: boolean }
-  | { kind: 'expression'; depth: number; braces: PowerShellBraceKind[]; continuedToken?: boolean }
+  | {
+    kind: 'expression'; depth: number; braces: PowerShellBraceKind[];
+    tokenKind: PowerShellTokenKind; continuedToken?: boolean;
+  }
   | { kind: 'comment' };
 
 type PowerShellBraceKind = 'hashtable' | 'ordinary';
+type PowerShellTokenKind = 'none' | 'generic' | 'nonGeneric';
 
 interface ActiveHeredoc {
   delimiter: string;
@@ -218,9 +224,19 @@ interface ConsumedSource {
 }
 
 const POWERSHELL_IDENTIFIER = '[\\p{L}_][\\p{L}\\p{N}_]*';
-const POWERSHELL_VARIABLE = '(?:\\$\\{[^{}\\r\\n]+\\}|\\$[\\p{L}_][\\p{L}\\p{N}_:]*)';
+const POWERSHELL_BACKTICK_ESCAPE = '`(?:u\\{[0-9a-fA-F]{1,6}\\}|[^\\r\\n])';
+const POWERSHELL_VARIABLE = `(?:\\$\\{(?:${POWERSHELL_BACKTICK_ESCAPE}|[^\`{}\\r\\n])+\\}|\\$[\\p{L}_][\\p{L}\\p{N}_:]*)`;
+const POWERSHELL_DECIMAL_DIGITS = '[0-9](?:_?[0-9])*';
+const POWERSHELL_UNSIGNED_NUMERIC_KEY = `(?:(?:0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|0[bB][01](?:_?[01])*)(?:[lL])?|(?:${POWERSHELL_DECIMAL_DIGITS}(?:\\.(?:${POWERSHELL_DECIMAL_DIGITS})?)?|\\.${POWERSHELL_DECIMAL_DIGITS})(?:[eE][+-]?${POWERSHELL_DECIMAL_DIGITS})?(?:[dDlL]|[kKmMgGtTpP][bB])?)`;
+const POWERSHELL_QUOTED_ATOM = `(?:"(?:\`.|""|[^"])*"|'(?:''|[^'])*')`;
 const POWERSHELL_TYPE_LITERAL = '\\[[\\p{L}_][^\\]\\r\\n]*\\]';
-const POWERSHELL_MEMBER = `(?:(?:::|\\.)(?:${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE})|\\[[^\\]\\r\\n]+\\])`;
+const POWERSHELL_SAFE_MEMBER_INDEX = `(?:[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY}|${POWERSHELL_VARIABLE}|${POWERSHELL_IDENTIFIER}|${POWERSHELL_QUOTED_ATOM})`;
+const POWERSHELL_MEMBER = `(?:(?:::|\\.)(?:${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE})|\\[\\p{White_Space}*${POWERSHELL_SAFE_MEMBER_INDEX}\\p{White_Space}*\\])`;
+const POWERSHELL_VARIABLE_EXPRESSION = `${POWERSHELL_VARIABLE}(?:${POWERSHELL_MEMBER})*`;
+const POWERSHELL_ATOMIC_EXPRESSION = new RegExp(
+  `^(?:${POWERSHELL_VARIABLE_EXPRESSION}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER}|[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY})`,
+  'u',
+);
 const POWERSHELL_BASIC_ASSIGNMENT_TARGET = `(?:${POWERSHELL_TYPE_LITERAL}\\p{White_Space}*${POWERSHELL_VARIABLE}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE}(?:${POWERSHELL_MEMBER})*)`;
 const POWERSHELL_BASIC_ASSIGNMENT_TARGETS = `${POWERSHELL_BASIC_ASSIGNMENT_TARGET}(?:\\p{White_Space}*,\\p{White_Space}*${POWERSHELL_BASIC_ASSIGNMENT_TARGET})*`;
 const POWERSHELL_ASSIGNMENT_TARGET = `(?:${POWERSHELL_BASIC_ASSIGNMENT_TARGET}|\\(\\p{White_Space}*${POWERSHELL_BASIC_ASSIGNMENT_TARGETS}\\p{White_Space}*\\))`;
@@ -229,7 +245,8 @@ const POWERSHELL_ASSIGNMENT_END = new RegExp(
   `(?:^|[;{(])\\p{White_Space}*(?:${POWERSHELL_ASSIGNMENT_TARGETS}\\p{White_Space}*=\\p{White_Space}*)*${POWERSHELL_ASSIGNMENT_TARGETS}\\p{White_Space}*(?:\\?\\?=|[+\\-*\\/%]?=)$`,
   'u',
 );
-const POWERSHELL_HASHTABLE_KEY = `(?:${POWERSHELL_IDENTIFIER}(?:[.-]${POWERSHELL_IDENTIFIER})*|"(?:\`.|""|[^"])*"|'(?:''|[^'])*')`;
+const POWERSHELL_PARENTHESIZED_UNARY_KEY = `\\(\\p{White_Space}*(?:[+-]\\p{White_Space}*)?(?:${POWERSHELL_UNSIGNED_NUMERIC_KEY}|${POWERSHELL_VARIABLE_EXPRESSION})\\p{White_Space}*\\)`;
+const POWERSHELL_HASHTABLE_KEY = `(?:${POWERSHELL_IDENTIFIER}(?:[.-]${POWERSHELL_IDENTIFIER})*|${POWERSHELL_QUOTED_ATOM}|[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY}|${POWERSHELL_VARIABLE_EXPRESSION}|${POWERSHELL_PARENTHESIZED_UNARY_KEY})`;
 const POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT = new RegExp(
   `(?:^|[;{])\\p{White_Space}*${POWERSHELL_HASHTABLE_KEY}\\p{White_Space}*=$`,
   'u',
@@ -308,6 +325,25 @@ function endsWithPowerShellAssignment(code: string): boolean {
 
 function isPowerShellHashtableEntryAssignment(code: string, braces: PowerShellBraceKind[]): boolean {
   return braces[braces.length - 1] === 'hashtable' && POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT.test(code);
+}
+
+function powerShellAtomicExpressionLength(line: string, index: number): number {
+  return POWERSHELL_ATOMIC_EXPRESSION.exec(line.slice(index))?.[0].length ?? 0;
+}
+
+function nextPowerShellTokenKind(
+  current: PowerShellTokenKind,
+  value: string,
+  nextCode: string,
+  braces: PowerShellBraceKind[],
+): PowerShellTokenKind {
+  if (isPowerShellForceStartChar(value)) return 'none';
+  if (value === '=' && (endsWithPowerShellAssignment(nextCode)
+    || isPowerShellHashtableEntryAssignment(nextCode, braces))) return 'none';
+  if (current !== 'none') return current;
+  // 变量/数字由 atomic matcher 整体消费；这里保护特殊变量与类型/数组开头。
+  if (value === '$' || value === '[') return 'nonGeneric';
+  return 'generic';
 }
 
 function powerShellHashtableOpenLength(
@@ -394,8 +430,10 @@ function consumePowerShellExpandable(
   let code = '';
   const comments: string[] = [];
   const initialContext = contexts[contexts.length - 1];
-  let continuedToken = initialContext.kind === 'expression' && initialContext.continuedToken === true;
-  if (initialContext.kind === 'expression') initialContext.continuedToken = false;
+  if (initialContext.kind === 'expression') {
+    initialContext.tokenKind = initialContext.continuedToken === true ? 'generic' : 'none';
+    initialContext.continuedToken = false;
+  }
   while (cursor < line.length) {
     const context = contexts[contexts.length - 1];
     if (context.kind === 'comment') {
@@ -431,7 +469,7 @@ function consumePowerShellExpandable(
       }
       if (context.quote === '"' && line.startsWith('$(', cursor)) {
         code += '$(';
-        contexts.push({ kind: 'expression', depth: 1, braces: [] });
+        contexts.push({ kind: 'expression', depth: 1, braces: [], tokenKind: 'none' });
         cursor += 2;
         continue;
       }
@@ -451,31 +489,43 @@ function consumePowerShellExpandable(
       const length = powerShellEscapeLength(line, cursor);
       code += line.slice(cursor, cursor + length);
       cursor += length;
-      if (length === 1) context.continuedToken = true;
+      if (length === 1) context.continuedToken = context.tokenKind === 'generic';
+      else if (context.tokenKind === 'none') context.tokenKind = 'generic';
       continue;
     }
-    const hashtableEntry = !continuedToken
+    const atomicLength = powerShellAtomicExpressionLength(line, cursor);
+    if (atomicLength > 0) {
+      code += line.slice(cursor, cursor + atomicLength);
+      cursor += atomicLength;
+      if (context.tokenKind === 'none') context.tokenKind = 'nonGeneric';
+      continue;
+    }
+    const genericActive = context.tokenKind === 'generic';
+    const hashtableEntry = !genericActive
       && isPowerShellHashtableEntryAssignment(code, context.braces);
     const hereStringQuote = powerShellHereStringHeader(
-      line, cursor, code, hashtableEntry, continuedToken,
+      line, cursor, code, hashtableEntry, genericActive,
     );
     if (hereStringQuote) {
       code += `@${hereStringQuote}`;
+      context.tokenKind = 'nonGeneric';
       contexts.push({ kind: 'string', quote: hereStringQuote, hereString: true });
       cursor += 2;
       continue;
     }
     if (line[cursor] === '"' || line[cursor] === "'") {
       code += line[cursor];
+      if (context.tokenKind === 'none') context.tokenKind = 'nonGeneric';
       contexts.push({ kind: 'string', quote: line[cursor] as '"' | "'" });
       cursor++;
       continue;
     }
-    if (isPowerShellBlockComment(line, cursor, code, hashtableEntry, continuedToken)) {
+    if (isPowerShellBlockComment(line, cursor, code, hashtableEntry, genericActive)) {
       const commentStart = cursor;
       const closeIndex = line.indexOf('#>', cursor + 2);
       cursor = closeIndex === -1 ? line.length : closeIndex + 2;
       comments.push(line.slice(commentStart, cursor));
+      context.tokenKind = 'none';
       if (closeIndex === -1) {
         contexts.push({ kind: 'comment' });
         return { end: line.length, closed: false, code, comments };
@@ -484,50 +534,52 @@ function consumePowerShellExpandable(
       continue;
     }
     const hashtableOpenLength = powerShellHashtableOpenLength(
-      line, cursor, code, context.braces, continuedToken,
+      line, cursor, code, context.braces, genericActive,
     );
     if (hashtableOpenLength > 0) {
       code += line.slice(cursor, cursor + hashtableOpenLength);
       context.braces.push('hashtable');
-      continuedToken = false;
+      context.tokenKind = 'none';
       cursor += hashtableOpenLength;
       continue;
     }
     if (line[cursor] === '{') {
       code += '{';
       context.braces.push('ordinary');
-      continuedToken = false;
+      context.tokenKind = 'none';
       cursor++;
       continue;
     }
     if (line[cursor] === '}') {
       code += '}';
       context.braces.pop();
-      continuedToken = false;
+      context.tokenKind = 'none';
       cursor++;
       continue;
     }
     if (line[cursor] === '(') {
       code += '(';
       context.depth++;
-      continuedToken = false;
+      context.tokenKind = 'none';
       cursor++;
       continue;
     }
     if (line[cursor] === ')') {
       code += ')';
       context.depth--;
-      continuedToken = false;
+      context.tokenKind = 'nonGeneric';
       cursor++;
       if (context.depth === 0) contexts.pop();
       continue;
     }
-    if (isPowerShellLineComment(line, cursor, code, hashtableEntry, continuedToken)) {
+    if (isPowerShellLineComment(line, cursor, code, hashtableEntry, genericActive)) {
       comments.push(line.slice(cursor));
       return { end: line.length, closed: false, code, comments };
     }
-    if (isPowerShellForceStartChar(line[cursor])) continuedToken = false;
-    code += line[cursor];
+    const value = line[cursor];
+    const nextCode = code + value;
+    context.tokenKind = nextPowerShellTokenKind(context.tokenKind, value, nextCode, context.braces);
+    code = nextCode;
     cursor++;
   }
   return { end: line.length, closed: false, code, comments };
@@ -1005,7 +1057,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     let hadComment = false;
     let hadStringContent = activeString !== null || activeHeredoc !== null || activeVbXml !== null;
     let index = 0;
-    let powerShellContinuedToken = activePowerShellContinuedToken;
+    let powerShellTokenKind: PowerShellTokenKind = activePowerShellContinuedToken
+      ? 'generic'
+      : 'none';
     activePowerShellContinuedToken = false;
 
     if (activeHeredoc) {
@@ -1064,7 +1118,12 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           comments.push(...consumed.comments);
           if (consumed.comments.length > 0) hadComment = true;
           index = consumed.end;
-          if (consumed.closed) activeString = null;
+          if (consumed.closed) {
+            powerShellTokenKind = activeString.powerShellTokenPrefix === 'generic'
+              ? 'generic'
+              : 'nonGeneric';
+            activeString = null;
+          }
           continue;
         }
         if (activeString.groovyContexts) {
@@ -1096,6 +1155,11 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         if (atValidClose) {
           code += rule.close;
           index += rule.close.length;
+          if (syntax.dialect === 'powershell') {
+            powerShellTokenKind = activeString.powerShellTokenPrefix === 'generic'
+              ? 'generic'
+              : 'nonGeneric';
+          }
           activeString = null;
           continue;
         }
@@ -1196,42 +1260,51 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           const length = powerShellEscapeLength(raw, index);
           code += raw.slice(index, index + length);
           index += length;
-          if (length === 1) activePowerShellContinuedToken = true;
+          if (length === 1) activePowerShellContinuedToken = powerShellTokenKind === 'generic';
+          else if (powerShellTokenKind === 'none') powerShellTokenKind = 'generic';
           continue;
         }
+        const atomicLength = powerShellAtomicExpressionLength(raw, index);
+        if (atomicLength > 0) {
+          code += raw.slice(index, index + atomicLength);
+          index += atomicLength;
+          if (powerShellTokenKind === 'none') powerShellTokenKind = 'nonGeneric';
+          continue;
+        }
+        const genericActive = powerShellTokenKind === 'generic';
         const hashtableOpenLength = powerShellHashtableOpenLength(
-          raw, index, code, powerShellBraces, powerShellContinuedToken,
+          raw, index, code, powerShellBraces, genericActive,
         );
         if (hashtableOpenLength > 0) {
           code += raw.slice(index, index + hashtableOpenLength);
           powerShellBraces.push('hashtable');
-          powerShellContinuedToken = false;
+          powerShellTokenKind = 'none';
           index += hashtableOpenLength;
           continue;
         }
         if (raw[index] === '{') {
           code += '{';
           powerShellBraces.push('ordinary');
-          powerShellContinuedToken = false;
+          powerShellTokenKind = 'none';
           index++;
           continue;
         }
         if (raw[index] === '}') {
           code += '}';
           powerShellBraces.pop();
-          powerShellContinuedToken = false;
+          powerShellTokenKind = 'none';
           index++;
           continue;
         }
       }
 
       const powerShellHashtableEntry = syntax.dialect === 'powershell'
-        && !powerShellContinuedToken
+        && powerShellTokenKind !== 'generic'
         && isPowerShellHashtableEntryAssignment(code, powerShellBraces);
       const block = syntax.blockComments.find((rule) => raw.startsWith(rule.open, index)
         && !(syntax.dialect === 'powershell' && rule.open === '<#'
           && !isPowerShellBlockComment(
-            raw, index, code, powerShellHashtableEntry, powerShellContinuedToken,
+            raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
           )));
       if (block) {
         if (block.nested) {
@@ -1251,6 +1324,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         index = end;
         if (closeIndex === -1) activeComment = { close: block.close, depth: 1 };
         else if (syntax.dialect === 'powershell') code = appendCommentGap(code, raw, index);
+        if (syntax.dialect === 'powershell') powerShellTokenKind = 'none';
         continue;
       }
 
@@ -1263,7 +1337,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       const lineComment = syntax.lineComments.find((token) => raw.startsWith(token, index)
         && !(syntax.dialect === 'powershell' && token === '#'
           && !isPowerShellLineComment(
-            raw, index, code, powerShellHashtableEntry, powerShellContinuedToken,
+            raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
           )));
       if (lineComment) {
         comments.push(raw.slice(index));
@@ -1272,18 +1346,24 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       }
 
       const string = syntax.strings.find((rule) => canOpenString(
-        rule, raw, index, code, powerShellHashtableEntry, powerShellContinuedToken,
+        rule, raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
       ));
       if (string) {
         code += string.open;
         index += string.open.length;
         activeString = startString(string);
+        if (syntax.dialect === 'powershell') {
+          activeString.powerShellTokenPrefix = powerShellTokenKind;
+        }
         hadStringContent = true;
         continue scan;
       }
 
-      if (syntax.dialect === 'powershell' && isPowerShellForceStartChar(raw[index])) {
-        powerShellContinuedToken = false;
+      if (syntax.dialect === 'powershell') {
+        const value = raw[index];
+        powerShellTokenKind = nextPowerShellTokenKind(
+          powerShellTokenKind, value, code + value, powerShellBraces,
+        );
       }
       code += raw[index];
       index++;
