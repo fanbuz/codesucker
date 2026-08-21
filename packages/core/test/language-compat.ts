@@ -1899,6 +1899,453 @@ assert.deepEqual(attributionSummary(powerShellAssignmentCommandModeInOuterHereSt
   ['author', 'PS Assignment Command Here Outer Tail', 16],
 ], 'PowerShell outer here assignment command-mode 内容伪署名不得误报，ordinary/here/terminator/outer tails 必须定位');
 
+const powerShellCommandChainStatementBoundaryBody = [
+  'cmd && $b=@"',
+  'and " # <# literal #> @author Fake And Chain Assignment Here',
+  '"@; # @author PS And Chain Assignment Here Tail',
+  "cmd || $b=@'",
+  "or ' # <# literal #> @author Fake Or Chain Assignment Here",
+  "'@; # @author PS Or Chain Assignment Here Tail",
+  '& $cmd $x=@"',
+  '# literal <# literal #> @author Fake Call Operator Assignment Token',
+  'call-last" # @author PS Call Operator Assignment Token Tail',
+  "1 | Write-Output $x=@'",
+  '# literal <# literal #> @author Fake Pipeline Assignment Token',
+  "pipeline-last' # @author PS Pipeline Assignment Token Tail",
+];
+const powerShellCommandChainStatementBoundaryExpected = [
+  powerShellCommandChainStatementBoundaryBody[0],
+  powerShellCommandChainStatementBoundaryBody[1],
+  '"@;',
+  powerShellCommandChainStatementBoundaryBody[3],
+  powerShellCommandChainStatementBoundaryBody[4],
+  "'@;",
+  powerShellCommandChainStatementBoundaryBody[6],
+  powerShellCommandChainStatementBoundaryBody[7],
+  'call-last"',
+  powerShellCommandChainStatementBoundaryBody[9],
+  powerShellCommandChainStatementBoundaryBody[10],
+  "pipeline-last'",
+];
+
+const powerShellCommandChainStatementBoundaryTopLevel = powerShellCommandChainStatementBoundaryBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellCommandChainStatementBoundaryTopLevel, 'ps1'),
+  powerShellCommandChainStatementBoundaryExpected,
+  'PowerShell 顶层 cmd &&/|| 后必须恢复新 statement assignment here-string；单 & call 与 pipeline 右侧 $x=@quote 仍为 command token ordinary string');
+assert.deepEqual(attributionSummary(powerShellCommandChainStatementBoundaryTopLevel, 'src/command-chain-statement-boundary-top.ps1'), [
+  ['author', 'PS And Chain Assignment Here Tail', 3],
+  ['author', 'PS Or Chain Assignment Here Tail', 6],
+  ['author', 'PS Call Operator Assignment Token Tail', 9],
+  ['author', 'PS Pipeline Assignment Token Tail', 12],
+], 'PowerShell command chain 新 statement here 与 call/pipeline ordinary quote 内容伪署名不得误报，真实 tails 必须定位');
+
+const powerShellCommandChainStatementBoundaryInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellCommandChainStatementBoundaryBody,
+  ') suffix" # @author PS Command Chain Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellCommandChainStatementBoundaryInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellCommandChainStatementBoundaryExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 &&/|| statement assignment 与 &/pipeline command token 必须正确分流并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellCommandChainStatementBoundaryInExpandableString, 'src/command-chain-statement-boundary-expandable.ps1'), [
+  ['author', 'PS And Chain Assignment Here Tail', 4],
+  ['author', 'PS Or Chain Assignment Here Tail', 7],
+  ['author', 'PS Call Operator Assignment Token Tail', 10],
+  ['author', 'PS Pipeline Assignment Token Tail', 13],
+  ['author', 'PS Command Chain Expandable Outer Tail', 14],
+], 'PowerShell expandable command chain/call/pipeline 内容伪署名不得误报，真实内部与 outer tails 必须定位');
+
+const powerShellConfirmedRhsExpressionBody = [
+  '$sum=$a+$b`',
+  '# @author PS Confirmed Sum RHS',
+  '$static=[T]::M`',
+  '# @author PS Confirmed Static RHS',
+  '$member=$obj.Items[0]`',
+  '# @author PS Confirmed Member Index RHS',
+  '$compare=($a -eq $b)`',
+  '# @author PS Confirmed Comparison RHS',
+  '$logical=$a -and !$b`',
+  '# @author PS Confirmed Logical RHS',
+  '$unary=-$a`',
+  '# @author PS Confirmed Unary RHS',
+  '$multiline=$a +',
+  '$b`',
+  '# @author PS Confirmed Multiline Operator RHS',
+  '$table=@{',
+  'Sum=$a+$b`',
+  '# @author PS Hashtable Sum RHS',
+  'Member=$obj.Items[0]`',
+  '# @author PS Hashtable Member Index RHS',
+  'Compare=($a -eq $b)`',
+  '# @author PS Hashtable Comparison RHS',
+  '}',
+  '$cmd1=Write-Output $x`',
+  '# literal @author Fake Confirmed Assignment Command',
+  '$cmd2=& $cmd $x`',
+  '# literal @author Fake Confirmed Call Command',
+  '$cmd3=$a | Write-Output $x`',
+  '# literal @author Fake Confirmed Pipeline Command',
+  '$left=$right=$a+$b`',
+  '# @author PS Confirmed Chained Expression RHS',
+];
+const powerShellConfirmedRhsExpressionExpected = [
+  powerShellConfirmedRhsExpressionBody[0],
+  powerShellConfirmedRhsExpressionBody[2],
+  powerShellConfirmedRhsExpressionBody[4],
+  powerShellConfirmedRhsExpressionBody[6],
+  powerShellConfirmedRhsExpressionBody[8],
+  powerShellConfirmedRhsExpressionBody[10],
+  powerShellConfirmedRhsExpressionBody[12],
+  powerShellConfirmedRhsExpressionBody[13],
+  powerShellConfirmedRhsExpressionBody[15],
+  powerShellConfirmedRhsExpressionBody[16],
+  powerShellConfirmedRhsExpressionBody[18],
+  powerShellConfirmedRhsExpressionBody[20],
+  ...powerShellConfirmedRhsExpressionBody.slice(22, 30),
+];
+
+const powerShellConfirmedRhsExpressionTopLevel = powerShellConfirmedRhsExpressionBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedRhsExpressionTopLevel, 'ps1'),
+  powerShellConfirmedRhsExpressionExpected,
+  'PowerShell 顶层 confirmed RHS 须跨 arithmetic/member/index/comparison/logical/unary/paren 与物理行 operator 保持 expression mode；command/call/pipeline 切换后保守 generic');
+assert.deepEqual(attributionSummary(powerShellConfirmedRhsExpressionTopLevel, 'src/confirmed-rhs-expression-top.ps1'), [
+  ['author', 'PS Confirmed Sum RHS', 2],
+  ['author', 'PS Confirmed Static RHS', 4],
+  ['author', 'PS Confirmed Member Index RHS', 6],
+  ['author', 'PS Confirmed Comparison RHS', 8],
+  ['author', 'PS Confirmed Logical RHS', 10],
+  ['author', 'PS Confirmed Unary RHS', 12],
+  ['author', 'PS Confirmed Multiline Operator RHS', 15],
+  ['author', 'PS Hashtable Sum RHS', 18],
+  ['author', 'PS Hashtable Member Index RHS', 20],
+  ['author', 'PS Hashtable Comparison RHS', 22],
+  ['author', 'PS Confirmed Chained Expression RHS', 31],
+], 'PowerShell 顶层 confirmed expression/hashtable/chained RHS 后真实署名必须定位，command-mode continuation 伪署名不得误报');
+
+const powerShellConfirmedRhsExpressionInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellConfirmedRhsExpressionBody,
+  ') suffix" # @author PS Confirmed RHS Expression Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedRhsExpressionInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellConfirmedRhsExpressionExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 confirmed expression RHS 与 command-mode 分流须跨行稳定，并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellConfirmedRhsExpressionInExpandableString, 'src/confirmed-rhs-expression-expandable.ps1'), [
+  ['author', 'PS Confirmed Sum RHS', 3],
+  ['author', 'PS Confirmed Static RHS', 5],
+  ['author', 'PS Confirmed Member Index RHS', 7],
+  ['author', 'PS Confirmed Comparison RHS', 9],
+  ['author', 'PS Confirmed Logical RHS', 11],
+  ['author', 'PS Confirmed Unary RHS', 13],
+  ['author', 'PS Confirmed Multiline Operator RHS', 16],
+  ['author', 'PS Hashtable Sum RHS', 19],
+  ['author', 'PS Hashtable Member Index RHS', 21],
+  ['author', 'PS Hashtable Comparison RHS', 23],
+  ['author', 'PS Confirmed Chained Expression RHS', 32],
+  ['author', 'PS Confirmed RHS Expression Expandable Outer Tail', 33],
+], 'PowerShell expandable confirmed expression RHS 后真实评论与 outer tail 必须定位，command continuations 伪署名不得误报');
+
+const powerShellConfirmedRhsExpressionInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellConfirmedRhsExpressionBody,
+  ')',
+  '"@; # @author PS Confirmed RHS Expression Here Terminator Tail',
+  'Write-Output $outer # @author PS Confirmed RHS Expression Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedRhsExpressionInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellConfirmedRhsExpressionExpected,
+  ')',
+  '"@;',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 confirmed expression/hashtable/chained RHS 与 command-mode 须分流并恢复 outer here');
+assert.deepEqual(attributionSummary(powerShellConfirmedRhsExpressionInOuterHereString, 'src/confirmed-rhs-expression-outer-here.ps1'), [
+  ['author', 'PS Confirmed Sum RHS', 4],
+  ['author', 'PS Confirmed Static RHS', 6],
+  ['author', 'PS Confirmed Member Index RHS', 8],
+  ['author', 'PS Confirmed Comparison RHS', 10],
+  ['author', 'PS Confirmed Logical RHS', 12],
+  ['author', 'PS Confirmed Unary RHS', 14],
+  ['author', 'PS Confirmed Multiline Operator RHS', 17],
+  ['author', 'PS Hashtable Sum RHS', 20],
+  ['author', 'PS Hashtable Member Index RHS', 22],
+  ['author', 'PS Hashtable Comparison RHS', 24],
+  ['author', 'PS Confirmed Chained Expression RHS', 33],
+  ['author', 'PS Confirmed RHS Expression Here Terminator Tail', 35],
+  ['author', 'PS Confirmed RHS Expression Here Outer Tail', 36],
+], 'PowerShell outer here confirmed expression RHS 后真实评论、terminator/outer tails 必须定位，command continuation 伪署名不得误报');
+
+const powerShellMultilineRhsStructureBody = [
+  '$paren=(',
+  '$x`',
+  '# @author PS Open Paren RHS',
+  ')',
+  '$range=1..$x`',
+  '# @author PS Range Operator RHS',
+  '$band=$a -band $b`',
+  '# @author PS Bitwise Operator RHS',
+  '$replace=$a -replace "a","b"`',
+  '# @author PS Replace Operator RHS',
+  '$ternary=$a ? $b : $x`',
+  '# @author PS Ternary Operator RHS',
+  '$index=$items[',
+  '0]`',
+  '# @author PS Open Index RHS',
+  '$hash=@{',
+  'Value=$x`',
+  '# @author PS Open Hashtable RHS',
+  '}',
+  'Write-Output first,',
+  '$x=@"',
+  '# literal <# literal #> @author Fake Multiline Comma Command',
+  'command-last" # @author PS Multiline Comma Command Tail',
+  'cmd |&',
+  "$x=@'",
+  '# literal <# literal #> @author Fake Multiline Pipe Command',
+  "pipe-last' # @author PS Multiline Pipe Command Tail",
+];
+const powerShellMultilineRhsStructureExpected = [
+  powerShellMultilineRhsStructureBody[0],
+  powerShellMultilineRhsStructureBody[1],
+  powerShellMultilineRhsStructureBody[3],
+  powerShellMultilineRhsStructureBody[4],
+  powerShellMultilineRhsStructureBody[6],
+  powerShellMultilineRhsStructureBody[8],
+  powerShellMultilineRhsStructureBody[10],
+  powerShellMultilineRhsStructureBody[12],
+  powerShellMultilineRhsStructureBody[13],
+  powerShellMultilineRhsStructureBody[15],
+  powerShellMultilineRhsStructureBody[16],
+  powerShellMultilineRhsStructureBody[18],
+  powerShellMultilineRhsStructureBody[19],
+  powerShellMultilineRhsStructureBody[20],
+  powerShellMultilineRhsStructureBody[21],
+  'command-last"',
+  powerShellMultilineRhsStructureBody[23],
+  powerShellMultilineRhsStructureBody[24],
+  powerShellMultilineRhsStructureBody[25],
+  "pipe-last'",
+];
+
+const powerShellMultilineRhsStructureTopLevel = powerShellMultilineRhsStructureBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellMultilineRhsStructureTopLevel, 'ps1'),
+  powerShellMultilineRhsStructureExpected,
+  'PowerShell 顶层 confirmed RHS 须跨开放 paren/index/hashtable 与 range/bitwise/replace/ternary 保持 expression mode；comma 与 |& 跨行保持 command mode');
+assert.deepEqual(attributionSummary(powerShellMultilineRhsStructureTopLevel, 'src/multiline-rhs-structure-top.ps1'), [
+  ['author', 'PS Open Paren RHS', 3],
+  ['author', 'PS Range Operator RHS', 6],
+  ['author', 'PS Bitwise Operator RHS', 8],
+  ['author', 'PS Replace Operator RHS', 10],
+  ['author', 'PS Ternary Operator RHS', 12],
+  ['author', 'PS Open Index RHS', 15],
+  ['author', 'PS Open Hashtable RHS', 18],
+  ['author', 'PS Multiline Comma Command Tail', 23],
+  ['author', 'PS Multiline Pipe Command Tail', 27],
+], 'PowerShell 顶层 multiline RHS 后真实署名必须定位，跨行 comma/pipe command ordinary quote 内容伪署名不得误报');
+
+const powerShellMultilineRhsStructureInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellMultilineRhsStructureBody,
+  ') suffix" # @author PS Multiline RHS Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellMultilineRhsStructureInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellMultilineRhsStructureExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内开放结构/运算符 expression mode 与跨行 comma/|& command mode 必须分流并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellMultilineRhsStructureInExpandableString, 'src/multiline-rhs-structure-expandable.ps1'), [
+  ['author', 'PS Open Paren RHS', 4],
+  ['author', 'PS Range Operator RHS', 7],
+  ['author', 'PS Bitwise Operator RHS', 9],
+  ['author', 'PS Replace Operator RHS', 11],
+  ['author', 'PS Ternary Operator RHS', 13],
+  ['author', 'PS Open Index RHS', 16],
+  ['author', 'PS Open Hashtable RHS', 19],
+  ['author', 'PS Multiline Comma Command Tail', 24],
+  ['author', 'PS Multiline Pipe Command Tail', 28],
+  ['author', 'PS Multiline RHS Expandable Outer Tail', 29],
+], 'PowerShell expandable multiline RHS 后真实评论与 outer tail 必须定位，跨行 command ordinary quote 伪署名不得误报');
+
+const powerShellCommandContinuationGapTopLevel = [
+  'Write-Output first,',
+  '',
+  '# @author PS Comma Continuation Gap Comment',
+  '$x=@"',
+  '# literal <# literal #> @author Fake Comma Continuation Gap',
+  'comma-last" # @author PS Comma Continuation Gap Tail',
+  'cmd |&',
+  '# @author PS Pipe Continuation Gap Comment',
+  '',
+  "$x=@'",
+  '# literal <# literal #> @author Fake Pipe Continuation Gap',
+  "pipe-last' # @author PS Pipe Continuation Gap Tail",
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellCommandContinuationGapTopLevel, 'ps1'), [
+  'Write-Output first,',
+  '$x=@"',
+  '# literal <# literal #> @author Fake Comma Continuation Gap',
+  'comma-last"',
+  'cmd |&',
+  "$x=@'",
+  '# literal <# literal #> @author Fake Pipe Continuation Gap',
+  "pipe-last'",
+], 'PowerShell 顶层 command comma/|& continuation 必须跨空行与纯评论保持 command mode，后续 $x=@quote 只能是 ordinary string');
+assert.deepEqual(attributionSummary(powerShellCommandContinuationGapTopLevel, 'src/command-continuation-gap-top.ps1'), [
+  ['author', 'PS Comma Continuation Gap Comment', 3],
+  ['author', 'PS Comma Continuation Gap Tail', 6],
+  ['author', 'PS Pipe Continuation Gap Comment', 8],
+  ['author', 'PS Pipe Continuation Gap Tail', 12],
+], 'PowerShell command continuation gap 中真实 comment/tail 必须定位，ordinary quote 内容伪署名不得误报');
+
+const powerShellCommandContinuationGapInExpandableString = [
+  '$message = "prefix $(',
+  'Write-Output first,',
+  '# @author PS Expandable Comma Gap Comment',
+  '$x=@"',
+  '# literal <# literal #> @author Fake Expandable Comma Gap',
+  'comma-last" # @author PS Expandable Comma Gap Tail',
+  'cmd |&',
+  '# @author PS Expandable Pipe Gap Comment',
+  "$x=@'",
+  '# literal <# literal #> @author Fake Expandable Pipe Gap',
+  "pipe-last' # @author PS Expandable Pipe Gap Tail",
+  ') suffix" # @author PS Command Gap Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellCommandContinuationGapInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  'Write-Output first,',
+  '$x=@"',
+  '# literal <# literal #> @author Fake Expandable Comma Gap',
+  'comma-last"',
+  'cmd |&',
+  "$x=@'",
+  '# literal <# literal #> @author Fake Expandable Pipe Gap',
+  "pipe-last'",
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 command comma/|& continuation 必须跨纯评论保持 command mode 并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellCommandContinuationGapInExpandableString, 'src/command-continuation-gap-expandable.ps1'), [
+  ['author', 'PS Expandable Comma Gap Comment', 3],
+  ['author', 'PS Expandable Comma Gap Tail', 6],
+  ['author', 'PS Expandable Pipe Gap Comment', 8],
+  ['author', 'PS Expandable Pipe Gap Tail', 11],
+  ['author', 'PS Command Gap Expandable Outer Tail', 12],
+], 'PowerShell expandable command continuation gap 的真实 comments/tails 必须定位，ordinary quote 伪署名不得误报');
+
+const powerShellTrailingWordOperatorBody = [
+  '$not=-not',
+  '$x`',
+  '# @author PS Trailing Not Operator RHS',
+  '$bnot=-bnot',
+  '$x`',
+  '# @author PS Trailing Bnot Operator RHS',
+  '$compare=$a -ceq',
+  '$b`',
+  '# @author PS Trailing Ceq Operator RHS',
+  '$replace=$a -ireplace',
+  '"a"`',
+  '# @author PS Trailing Ireplace Operator RHS',
+  '$split=$a -csplit',
+  '","`',
+  '# @author PS Trailing Csplit Operator RHS',
+];
+const powerShellTrailingWordOperatorExpected = powerShellTrailingWordOperatorBody.filter((_, index) => index % 3 !== 2);
+
+const powerShellTrailingWordOperatorTopLevel = powerShellTrailingWordOperatorBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellTrailingWordOperatorTopLevel, 'ps1'),
+  powerShellTrailingWordOperatorExpected,
+  'PowerShell 顶层 -not/-bnot/-ceq/-ireplace/-csplit trailing operator 必须跨物理行保持 confirmed expression mode');
+assert.deepEqual(attributionSummary(powerShellTrailingWordOperatorTopLevel, 'src/trailing-word-operator-top.ps1'), [
+  ['author', 'PS Trailing Not Operator RHS', 3],
+  ['author', 'PS Trailing Bnot Operator RHS', 6],
+  ['author', 'PS Trailing Ceq Operator RHS', 9],
+  ['author', 'PS Trailing Ireplace Operator RHS', 12],
+  ['author', 'PS Trailing Csplit Operator RHS', 15],
+], 'PowerShell 顶层 trailing word operator 跨行 operand 后真实署名必须定位');
+
+const powerShellTrailingWordOperatorInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellTrailingWordOperatorBody,
+  ') suffix" # @author PS Trailing Word Operator Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellTrailingWordOperatorInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellTrailingWordOperatorExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 trailing word operator 必须跨行保持 expression mode 并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellTrailingWordOperatorInExpandableString, 'src/trailing-word-operator-expandable.ps1'), [
+  ['author', 'PS Trailing Not Operator RHS', 4],
+  ['author', 'PS Trailing Bnot Operator RHS', 7],
+  ['author', 'PS Trailing Ceq Operator RHS', 10],
+  ['author', 'PS Trailing Ireplace Operator RHS', 13],
+  ['author', 'PS Trailing Csplit Operator RHS', 16],
+  ['author', 'PS Trailing Word Operator Expandable Outer Tail', 17],
+], 'PowerShell expandable trailing word operator operands 后真实评论与 outer tail 必须定位');
+
+const powerShellNestedCommandInRhsBody = [
+  '$r=(',
+  'Write-Output first,',
+  '$x=@"',
+  '# literal <# literal #> @author Fake Nested Comma Command',
+  'comma-last" # @author PS Nested Comma Command Tail',
+  '$nested=$a+$b`',
+  '# @author PS Nested Assignment RHS',
+  '$nested | Write-Output first,',
+  "$x=@'",
+  '# literal <# literal #> @author Fake Nested Pipeline Command',
+  "pipeline-last' # @author PS Nested Pipeline Command Tail",
+  ')',
+  '$done=$r # @author PS Nested RHS Outer Tail',
+];
+const powerShellNestedCommandInRhsExpected = [
+  powerShellNestedCommandInRhsBody[0],
+  powerShellNestedCommandInRhsBody[1],
+  powerShellNestedCommandInRhsBody[2],
+  powerShellNestedCommandInRhsBody[3],
+  'comma-last"',
+  powerShellNestedCommandInRhsBody[5],
+  powerShellNestedCommandInRhsBody[7],
+  powerShellNestedCommandInRhsBody[8],
+  powerShellNestedCommandInRhsBody[9],
+  "pipeline-last'",
+  powerShellNestedCommandInRhsBody[11],
+  '$done=$r',
+];
+
+const powerShellNestedCommandInRhsTopLevel = powerShellNestedCommandInRhsBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedCommandInRhsTopLevel, 'ps1'),
+  powerShellNestedCommandInRhsExpected,
+  'PowerShell 顶层 `$r=(` 内 command comma 必须进入 command mode；nested assignment/pipeline 后不得丢失 outer paren nesting');
+assert.deepEqual(attributionSummary(powerShellNestedCommandInRhsTopLevel, 'src/nested-command-rhs-top.ps1'), [
+  ['author', 'PS Nested Comma Command Tail', 5],
+  ['author', 'PS Nested Assignment RHS', 7],
+  ['author', 'PS Nested Pipeline Command Tail', 11],
+  ['author', 'PS Nested RHS Outer Tail', 13],
+], 'PowerShell nested RHS command/assignment/pipeline 的真实署名必须定位，ordinary quote 内容伪署名不得误报');
+
+const powerShellNestedCommandInRhsInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellNestedCommandInRhsBody,
+  ') suffix" # @author PS Nested Command RHS Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellNestedCommandInRhsInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellNestedCommandInRhsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 `$r=(` 的 command/nested assignment/pipeline mode 必须分流并恢复两层 outer nesting');
+assert.deepEqual(attributionSummary(powerShellNestedCommandInRhsInExpandableString, 'src/nested-command-rhs-expandable.ps1'), [
+  ['author', 'PS Nested Comma Command Tail', 6],
+  ['author', 'PS Nested Assignment RHS', 8],
+  ['author', 'PS Nested Pipeline Command Tail', 12],
+  ['author', 'PS Nested RHS Outer Tail', 14],
+  ['author', 'PS Nested Command RHS Expandable Outer Tail', 15],
+], 'PowerShell expandable nested RHS 的真实 command/assignment/outer tails 必须定位，ordinary quote 伪署名不得误报');
+
 const powerShellNonGenericPrefixSubexpressionBody = [
   'Write-Output "x"$(1)post`',
   '# literal @author Fake NonGeneric Prefix Suffix',
