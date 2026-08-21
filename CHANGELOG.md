@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-08-21
+
+### Added
+
+- 扫描、清洗、筛选、排序并导出 Pascal / Object Pascal、PowerShell、Visual Basic / VBScript、R、HCL / Terraform、Groovy / Gradle 和 Windows Batch 源码
+- 新增语言在文件树与类型统计中使用统一标签与颜色，`.R` 等大小写变体会归并到同一后缀类型
+
 ## [0.4.4] - 2026-07-31
 
 ### Added

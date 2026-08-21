@@ -154,6 +154,9 @@ export const DEFAULT_EXTENSIONS = [
   'java', 'kt', 'kts', 'py', 'js', 'jsx', 'ts', 'tsx', 'go', 'rs',
   'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'swift', 'm', 'mm', 'php',
   'rb', 'vue', 'dart', 'lua', 'scala', 'sql', 'sh',
+  'pas', 'pp', 'lpr', 'dpr', 'dpk',
+  'ps1', 'psm1', 'psd1', 'vb', 'vbs', 'bas', 'r',
+  'hcl', 'tf', 'tfvars', 'groovy', 'gvy', 'gradle', 'bat', 'cmd',
   'html', 'htm', 'css', 'scss', 'less', 'xml',
 ];
 

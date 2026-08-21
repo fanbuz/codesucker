@@ -43,9 +43,9 @@ CodeSucker 把常见的软件著作权源程序材料规则整理成一套本地
 
 | 系统 | 架构 | 安装包 |
 |---|---|---|
-| macOS | Apple Silicon（M 系列芯片） | `CodeSucker-0.4.4-mac-arm64.dmg` |
-| macOS | Intel | `CodeSucker-0.4.4-mac-x64.dmg` |
-| Windows | x64 | `CodeSucker-0.4.4-win-x64.exe` |
+| macOS | Apple Silicon（M 系列芯片） | `CodeSucker-0.4.5-mac-arm64.dmg` |
+| macOS | Intel | `CodeSucker-0.4.5-mac-x64.dmg` |
+| Windows | x64 | `CodeSucker-0.4.5-win-x64.exe` |
 
 每个 Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件是否完整。
 
@@ -65,7 +65,7 @@ CodeSucker 把常见的软件著作权源程序材料规则整理成一套本地
 - 🗂 **目录级文件筛选** — 递归扫描项目并以真实目录树展示，支持目录三态选择、全选、清空和全局反选；设置页可维护所有项目共用的默认扫描排除规则，并与项目 `.gitignore` 独立叠加
 - 🔄 **安全重新扫描** — 源码在应用外部变化后可手动重扫；保留当前项目配置与未保存修改，同时使旧处理、分页、校验和导出结果立即失效
 - 📊 **文件类型构成与按后缀导出** — 按文件数/代码行查看完整与已纳入构成，可一键只保留 `.java` 等指定后缀参与清洗和导出
-- 🧹 **状态机代码清洗** — 逐字符识别注释与字符串边界（`"https://..."` 里的 `//` 不会被误删），支持 Java/Kotlin/Python/JS/TS/Go/Rust/C/C++/C#/Swift/PHP/Ruby/Vue/HTML/CSS/SQL 等 30+ 后缀；删空行、Tab 转空格、超长行按 78 列硬折断
+- 🧹 **状态机代码清洗** — 逐字符识别注释与字符串边界（`"https://..."` 里的 `//` 不会被误删），支持 Java/Kotlin/Python/JS/TS/Go/Rust/C/C++/C#/Swift/PHP/Ruby/Vue/HTML/CSS/SQL/Pascal/PowerShell/VB/R/HCL/Groovy/Batch 等 50+ 后缀；删空行、Tab 转空格、超长行按 78 列硬折断
 - 🔒 **敏感信息脱敏** — API 密钥、密码、内网 IP、手机号自动替换为占位符
 - 📄 **规范化截取分页** — 超 3000 行自动取前 1500 + 后 1500 行；第 1 页必为模块开头、第 60 页必为模块结尾；每 50 行显式分页符，不靠排版"凑页"
 - 📝 **一键导出** — docx（页眉=软件名+版本号、右上角自动页码、宋体 10.5pt 固定行距）+ txt 备查
@@ -74,6 +74,20 @@ CodeSucker 把常见的软件著作权源程序材料规则整理成一套本地
 - 🔐 **源码处理完全离线** — 扫描、清洗、排版、导出零网络请求，源代码永远不离开本机；版本检测只请求公开版本元数据
 - 📌 **最近项目管理** — 常用项目可置顶，失效或不再使用的记录可单项或批量移除；移除记录不会删除磁盘项目
 - 💾 **配置与窗口持久化** — 项目选择与导出配置存入 `.codesucker.json`；应用级规则、最近项目和窗口状态安全保存在本机配置目录
+
+### 常用源码扩展支持
+
+| 语言 / 用途 | 默认扫描后缀 |
+|---|---|
+| Pascal / Object Pascal | `.pas` `.pp` `.lpr` `.dpr` `.dpk` |
+| PowerShell | `.ps1` `.psm1` `.psd1` |
+| Visual Basic / VBScript | `.vb` `.vbs` `.bas` |
+| R | `.r` `.R`（统计中统一为 `.r`） |
+| HCL / Terraform | `.hcl` `.tf` `.tfvars` |
+| Groovy / Gradle | `.groovy` `.gvy` `.gradle` |
+| Windows Batch | `.bat` `.cmd` |
+
+`.m`、`.inc`、`.cls`、`.v` 等可能对应多种语言的后缀不因语言同源而自动猜测归类；其中已支持的 `.m` 仍按 Objective-C 处理。
 
 ## 内置整理规则对照
 
@@ -154,6 +168,7 @@ scripts/    图标生成等工具脚本
 - [x] **v0.4.2**：应用标题栏、窗口、README 与 Windows 安装器品牌图标统一
 - [x] **v0.4.3**：安装包第三方许可证归属清单 · 依赖许可证自动审计与发布门禁
 - [x] **v0.4.4**：Windows 字体与四档缩放质量 · macOS 原生交通灯与窗口行为 · 申报文档 Word 一致性验证
+- [x] **v0.4.5**：Pascal / PowerShell / VB / R / HCL / Groovy / Batch 扫描、清洗与导出支持
 - [ ] **后续版本**：多目录导入 · 成立日期输入 · 自定义脱敏规则 · 校验项一键修复 · Linux 安装包 · macOS 签名与公证 · 应用内下载/安装更新 · CLI 版本
 - [ ] **V3**：用户手册/设计说明书模板化生成 · 例外交存模式（黑斜线覆盖）· 多申报主体管理
 

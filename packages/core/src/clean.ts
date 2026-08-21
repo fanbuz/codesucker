@@ -1,36 +1,7 @@
 import type {
   AnnotatedLine, AttributionEvidence, AttributionKind, CleanOptions, CleanedFile, FileEntry,
 } from './types.ts';
-
-interface CommentSyntax {
-  line: string[];
-  block: Array<[string, string]>;
-  /** 字符串引号字符 */
-  quotes: string[];
-  /** 三引号（python docstring 按块注释处理，但仅在行首时删除） */
-  triple?: string[];
-}
-
-const C_LIKE: CommentSyntax = { line: ['//'], block: [['/*', '*/']], quotes: ['"', "'", '`'] };
-const SYNTAX_BY_EXT: Record<string, CommentSyntax> = {
-  java: C_LIKE, kt: C_LIKE, kts: C_LIKE, js: C_LIKE, jsx: C_LIKE, ts: C_LIKE,
-  tsx: C_LIKE, go: C_LIKE, rs: C_LIKE, c: C_LIKE, h: C_LIKE, cpp: C_LIKE,
-  hpp: C_LIKE, cc: C_LIKE, cs: C_LIKE, swift: C_LIKE, m: C_LIKE, mm: C_LIKE,
-  dart: C_LIKE, scala: C_LIKE,
-  py: { line: ['#'], block: [], quotes: ['"', "'"], triple: ['"""', "'''"] },
-  rb: { line: ['#'], block: [['=begin', '=end']], quotes: ['"', "'"] },
-  sh: { line: ['#'], block: [], quotes: ['"', "'"] },
-  php: { line: ['//', '#'], block: [['/*', '*/']], quotes: ['"', "'"] },
-  lua: { line: ['--'], block: [['--[[', ']]']], quotes: ['"', "'"] },
-  sql: { line: ['--'], block: [['/*', '*/']], quotes: ["'"] },
-  html: { line: [], block: [['<!--', '-->']], quotes: ['"', "'"] },
-  htm: { line: [], block: [['<!--', '-->']], quotes: ['"', "'"] },
-  xml: { line: [], block: [['<!--', '-->']], quotes: ['"', "'"] },
-  vue: { line: ['//'], block: [['<!--', '-->'], ['/*', '*/']], quotes: ['"', "'", '`'] },
-  css: { line: [], block: [['/*', '*/']], quotes: ['"', "'"] },
-  scss: { line: ['//'], block: [['/*', '*/']], quotes: ['"', "'"] },
-  less: { line: ['//'], block: [['/*', '*/']], quotes: ['"', "'"] },
-};
+import { scanSource } from './language-syntax.ts';
 
 const MASK_RULES: Array<{ re: RegExp; replace: (m: RegExpExecArray) => string }> = [
   {
@@ -71,7 +42,7 @@ function cleanAttributionSubject(value: string): string {
   return value
     .replace(/\s+@(?:since|version|see|param|return|throws?)\b.*$/i, '')
     .replace(/\ball\s+rights\s+reserved\.?\s*$/i, '')
-    .replace(/(?:-->|\*\/|\*|#|\/\/)+\s*$/g, '')
+    .replace(/(?:-->|#>|\*\/|\*\)|\}|\*|#|\/\/)+\s*$/g, '')
     .replace(/^[\s:：,，;；-]+|[\s:：,，;；-]+$/g, '')
     .trim();
 }
@@ -87,118 +58,11 @@ interface CommentFragment {
  * 测试数据里；直接扫描整行会把这些普通内容误判为源码署名。
  */
 function extractCommentFragments(rawText: string, ext: string): CommentFragment[] {
-  const syntax = SYNTAX_BY_EXT[ext.toLowerCase()] ?? C_LIKE;
-  const rawLines = rawText.split(/\r\n|\r|\n/);
-  const fragments: CommentFragment[] = [];
-  let blockClose: string | null = null;
-  let tripleClose: string | null = null;
-  let multilineStringClose: string | null = null;
-
-  rawLines.forEach((rawLine, lineIndex) => {
-    let index = 0;
-    let codeBefore = '';
-    let inString: string | null = multilineStringClose;
-
-    while (index < rawLine.length) {
-      if (blockClose) {
-        const closeIndex = rawLine.indexOf(blockClose, index);
-        const end = closeIndex === -1 ? rawLine.length : closeIndex + blockClose.length;
-        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
-        if (closeIndex === -1) return;
-        index = end;
-        blockClose = null;
-        continue;
-      }
-
-      if (tripleClose) {
-        const closeIndex = rawLine.indexOf(tripleClose, index);
-        const end = closeIndex === -1 ? rawLine.length : closeIndex + tripleClose.length;
-        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
-        if (closeIndex === -1) return;
-        index = end;
-        tripleClose = null;
-        continue;
-      }
-
-      const char = rawLine[index];
-      if (inString) {
-        if (inString.length > 1) {
-          if (rawLine.startsWith(inString, index)) {
-            index += inString.length;
-            inString = null;
-            multilineStringClose = null;
-          } else {
-            index++;
-          }
-          continue;
-        }
-        if (char === '\\') {
-          index += Math.min(2, rawLine.length - index);
-          continue;
-        }
-        if (char === inString) {
-          inString = null;
-          multilineStringClose = null;
-        }
-        index++;
-        continue;
-      }
-
-      if (syntax.triple) {
-        const triple = syntax.triple.find((token) => rawLine.startsWith(token, index));
-        if (triple) {
-          if (codeBefore.trim() === '') {
-            const closeIndex = rawLine.indexOf(triple, index + triple.length);
-            const end = closeIndex === -1 ? rawLine.length : closeIndex + triple.length;
-            fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
-            if (closeIndex === -1) {
-              tripleClose = triple;
-              return;
-            }
-            index = end;
-          } else {
-            inString = triple;
-            multilineStringClose = triple;
-            index += triple.length;
-          }
-          continue;
-        }
-      }
-
-      const block = syntax.block.find(([open]) => rawLine.startsWith(open, index));
-      if (block) {
-        const [open, close] = block;
-        const closeIndex = rawLine.indexOf(close, index + open.length);
-        const end = closeIndex === -1 ? rawLine.length : closeIndex + close.length;
-        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index, end), rawLine });
-        if (closeIndex === -1) {
-          blockClose = close;
-          return;
-        }
-        index = end;
-        continue;
-      }
-
-      const lineMarker = syntax.line.find((marker) => rawLine.startsWith(marker, index));
-      if (lineMarker) {
-        fragments.push({ line: lineIndex + 1, text: rawLine.slice(index), rawLine });
-        return;
-      }
-
-      if (syntax.quotes.includes(char)) {
-        inString = char;
-        if (char === '`') multilineStringClose = char;
-      }
-      codeBefore += char;
-      index++;
-    }
-
-    if (inString === '`' || (inString && syntax.triple?.includes(inString))) {
-      multilineStringClose = inString;
-    }
-  });
-
-  return fragments;
+  return scanSource(rawText, ext).flatMap((line, lineIndex) => line.comments.map((text) => ({
+    line: lineIndex + 1,
+    text,
+    rawLine: line.raw,
+  })));
 }
 
 /**
@@ -282,133 +146,27 @@ export function wrapLine(line: string, maxWidth: number): string[] {
  * 关键点：字符串字面量内的注释符号（如 "https://..."）不会被误删。
  */
 export function annotate(rawText: string, ext: string, opts: CleanOptions): AnnotatedLine[] {
-  const syntax = SYNTAX_BY_EXT[ext.toLowerCase()] ?? C_LIKE;
-  const rawLines = rawText.split(/\r\n|\r|\n/);
   const result: AnnotatedLine[] = [];
+  for (const scanned of scanSource(rawText, ext)) {
+    const expandedRaw = scanned.raw.replace(/\t/g, ' '.repeat(opts.tabWidth));
+    const expandedCode = scanned.code.replace(/\t/g, ' '.repeat(opts.tabWidth));
 
-  let blockClose: string | null = null; // 处于块注释中时的结束符
-  let tripleClose: string | null = null; // python 三引号 docstring
-  let multilineStringClose: string | null = null; // 模板字符串或作为值的 python 三引号字符串
-
-  for (const raw of rawLines) {
-    const expanded = raw.replace(/\t/g, ' '.repeat(opts.tabWidth));
-    let code = '';
-    let hadComment = false;
-    let i = 0;
-    const line = expanded;
-    let inString: string | null = multilineStringClose;
-    let hadStringContent = multilineStringClose !== null;
-
-    if (tripleClose) {
-      const idx = line.indexOf(tripleClose);
-      if (idx === -1) {
-        result.push({ text: raw, kind: 'comment', masked: false, out: [] });
-        continue;
-      }
-      i = idx + tripleClose.length;
-      tripleClose = null;
-      hadComment = true;
-    }
-
-    scan: while (i < line.length) {
-      if (blockClose) {
-        const idx = line.indexOf(blockClose, i);
-        hadComment = true;
-        if (idx === -1) { i = line.length; break; }
-        i = idx + blockClose.length;
-        blockClose = null;
-        continue;
-      }
-      const ch = line[i];
-      if (inString) {
-        hadStringContent = true;
-        if (inString.length > 1) {
-          if (line.startsWith(inString, i)) {
-            code += inString;
-            i += inString.length;
-            inString = null;
-            multilineStringClose = null;
-          } else {
-            code += ch;
-            i++;
-          }
-          continue;
-        }
-        code += ch;
-        if (ch === '\\') {
-          if (i + 1 < line.length) { code += line[i + 1]; i += 2; continue; }
-        } else if (ch === inString) {
-          inString = null;
-          multilineStringClose = null;
-        }
-        i++;
-        continue;
-      }
-      // 三引号开头（python）：行首空白后出现视为 docstring，否则视为字符串
-      if (syntax.triple) {
-        for (const t of syntax.triple) {
-          if (line.startsWith(t, i)) {
-            const isDocstring = code.trim() === '';
-            const closeIdx = line.indexOf(t, i + t.length);
-            if (isDocstring && opts.removeComments) {
-              hadComment = true;
-              if (closeIdx === -1) { tripleClose = t; i = line.length; } else { i = closeIdx + t.length; }
-            } else {
-              // 作为普通字符串保留，并把词法状态带到后续行。
-              code += t;
-              i += t.length;
-              inString = t;
-              multilineStringClose = t;
-              hadStringContent = true;
-            }
-            continue scan;
-          }
-        }
-      }
-      for (const [open, close] of syntax.block) {
-        if (line.startsWith(open, i)) {
-          hadComment = true;
-          const closeIdx = line.indexOf(close, i + open.length);
-          if (closeIdx === -1) { blockClose = close; i = line.length; } else { i = closeIdx + close.length; }
-          continue scan;
-        }
-      }
-      for (const lc of syntax.line) {
-        if (line.startsWith(lc, i)) {
-          hadComment = true;
-          i = line.length;
-          continue scan;
-        }
-      }
-      if (syntax.quotes.includes(ch)) {
-        inString = ch;
-        if (ch === '`') multilineStringClose = ch;
-        hadStringContent = true;
-      }
-      code += ch;
-      i++;
-    }
-
-    if (inString === '`' || (inString && syntax.triple?.includes(inString))) {
-      multilineStringClose = inString;
-    }
-
-    if (!opts.removeComments && hadComment) {
+    if (!opts.removeComments && scanned.hadComment) {
       // 不删注释：原样保留
-      const kept = expanded.trimEnd();
+      const kept = expandedRaw.trimEnd();
       const { text, masked } = opts.maskSensitive ? maskLine(kept) : { text: kept, masked: false };
       const outLines = opts.wrapLongLines ? wrapLine(text, opts.maxLineWidth) : [text];
-      result.push({ text: raw, kind: 'code', masked, out: outLines });
+      result.push({ text: scanned.raw, kind: 'code', masked, out: outLines });
       continue;
     }
 
-    const trimmed = code.trimEnd();
-    if (trimmed.trim() === '' && !hadStringContent) {
-      if (hadComment) {
-        result.push({ text: raw, kind: 'comment', masked: false, out: [] });
+    const trimmed = expandedCode.trimEnd();
+    if (trimmed.trim() === '' && !scanned.hadStringContent) {
+      if (scanned.hadComment) {
+        result.push({ text: scanned.raw, kind: 'comment', masked: false, out: [] });
       } else {
         result.push({
-          text: raw, kind: 'blank', masked: false,
+          text: scanned.raw, kind: 'blank', masked: false,
           out: opts.removeBlankLines ? [] : [''],
         });
       }
@@ -416,7 +174,7 @@ export function annotate(rawText: string, ext: string, opts: CleanOptions): Anno
     }
     const { text, masked } = opts.maskSensitive ? maskLine(trimmed) : { text: trimmed, masked: false };
     const outLines = opts.wrapLongLines ? wrapLine(text, opts.maxLineWidth) : [text];
-    result.push({ text: raw, kind: 'code', masked, out: outLines });
+    result.push({ text: scanned.raw, kind: 'code', masked, out: outLines });
   }
   return result;
 }
