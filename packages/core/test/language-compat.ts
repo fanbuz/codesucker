@@ -1743,6 +1743,162 @@ assert.deepEqual(attributionSummary(powerShellConservativeAtomicContinuationInOu
   ['author', 'PS Conservative Atomic Here Outer Tail', 17],
 ], 'PowerShell outer here conservative continuation 内容伪署名不得误报，terminator 与 outer tails 必须定位');
 
+const powerShellConfirmedAssignmentRhsBody = [
+  '$y = $x`',
+  '# @author PS Assignment Variable RHS',
+  '$z = [T]::M`',
+  '# @author PS Assignment Static RHS',
+  'Write-Output $x`',
+  '# literal @author Fake Unknown Command Variable RHS',
+  '$result = Write-Output $x`',
+  '# literal @author Fake Assignment Command Variable RHS',
+  '$table = @{',
+  'Value = $x`',
+  '# @author PS Hashtable Variable RHS',
+  'Static = [T]::M`',
+  '# @author PS Hashtable Static RHS',
+  '}',
+];
+const powerShellConfirmedAssignmentRhsExpected = [
+  powerShellConfirmedAssignmentRhsBody[0],
+  powerShellConfirmedAssignmentRhsBody[2],
+  ...powerShellConfirmedAssignmentRhsBody.slice(4, 10),
+  powerShellConfirmedAssignmentRhsBody[11],
+  powerShellConfirmedAssignmentRhsBody[13],
+];
+
+const powerShellConfirmedAssignmentRhsTopLevel = powerShellConfirmedAssignmentRhsBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedAssignmentRhsTopLevel, 'ps1'),
+  powerShellConfirmedAssignmentRhsExpected,
+  'PowerShell 顶层 confirmed assignment/hashtable RHS 的完整 variable/static member 后 terminal backtick 须保持 nonGeneric；unknown 与 assignment-command mode 保守 generic');
+assert.deepEqual(attributionSummary(powerShellConfirmedAssignmentRhsTopLevel, 'src/confirmed-assignment-rhs-top.ps1'), [
+  ['author', 'PS Assignment Variable RHS', 2],
+  ['author', 'PS Assignment Static RHS', 4],
+  ['author', 'PS Hashtable Variable RHS', 11],
+  ['author', 'PS Hashtable Static RHS', 13],
+], 'PowerShell 顶层 confirmed RHS 后真实署名必须定位，command-mode continuation 中伪署名不得误报');
+
+const powerShellConfirmedAssignmentRhsInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellConfirmedAssignmentRhsBody,
+  ') suffix" # @author PS Assignment RHS Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedAssignmentRhsInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellConfirmedAssignmentRhsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 confirmed assignment/hashtable RHS 与 command-mode variable 必须分流并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellConfirmedAssignmentRhsInExpandableString, 'src/confirmed-assignment-rhs-expandable.ps1'), [
+  ['author', 'PS Assignment Variable RHS', 3],
+  ['author', 'PS Assignment Static RHS', 5],
+  ['author', 'PS Hashtable Variable RHS', 12],
+  ['author', 'PS Hashtable Static RHS', 14],
+  ['author', 'PS Assignment RHS Expandable Outer Tail', 16],
+], 'PowerShell expandable confirmed RHS 后真实评论与 outer tail 必须定位，command continuation 中伪署名不得误报');
+
+const powerShellConfirmedAssignmentRhsInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellConfirmedAssignmentRhsBody,
+  ')',
+  '"@; # @author PS Assignment RHS Here Terminator Tail',
+  'Write-Output $outer # @author PS Assignment RHS Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedAssignmentRhsInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellConfirmedAssignmentRhsExpected,
+  ')',
+  '"@;',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 confirmed assignment/hashtable RHS 与 command-mode continuation 必须分流并恢复 here-string');
+assert.deepEqual(attributionSummary(powerShellConfirmedAssignmentRhsInOuterHereString, 'src/confirmed-assignment-rhs-outer-here.ps1'), [
+  ['author', 'PS Assignment Variable RHS', 4],
+  ['author', 'PS Assignment Static RHS', 6],
+  ['author', 'PS Hashtable Variable RHS', 13],
+  ['author', 'PS Hashtable Static RHS', 15],
+  ['author', 'PS Assignment RHS Here Terminator Tail', 18],
+  ['author', 'PS Assignment RHS Here Outer Tail', 19],
+], 'PowerShell outer here confirmed RHS 后真实评论、terminator 与 outer tails 必须定位，command continuation 伪署名不得误报');
+
+const powerShellAssignmentCommandModeBody = [
+  '$a=Write-Output $x`',
+  '# literal @author Fake Assignment Command Continuation',
+  '$a=& $cmd $x=@"',
+  '# literal <# literal #> @author Fake Call Assignment Command',
+  'call-last" # @author PS Call Assignment Command Tail',
+  "$a=1 | Write-Output $x=@'",
+  '# literal <# literal #> @author Fake Pipeline Assignment Command',
+  "pipeline-last' # @author PS Pipeline Assignment Command Tail",
+  '$a=$b=@"',
+  'chained " # <# literal #> @author Fake Chained Assignment Here',
+  '"@; # @author PS Chained Assignment Here Tail',
+];
+const powerShellAssignmentCommandModeExpected = [
+  powerShellAssignmentCommandModeBody[0],
+  powerShellAssignmentCommandModeBody[1],
+  powerShellAssignmentCommandModeBody[2],
+  powerShellAssignmentCommandModeBody[3],
+  'call-last"',
+  powerShellAssignmentCommandModeBody[5],
+  powerShellAssignmentCommandModeBody[6],
+  "pipeline-last'",
+  powerShellAssignmentCommandModeBody[8],
+  powerShellAssignmentCommandModeBody[9],
+  '"@;',
+];
+
+const powerShellAssignmentCommandModeTopLevel = powerShellAssignmentCommandModeBody.join('\n');
+assert.deepEqual(cleanedLines(powerShellAssignmentCommandModeTopLevel, 'ps1'),
+  powerShellAssignmentCommandModeExpected,
+  'PowerShell 顶层 assignment RHS 一旦进入 command/call/pipeline mode，后续 variable 与 $x=@quote 均须保守 generic；纯 chained assignment 仍开启 here-string');
+assert.deepEqual(attributionSummary(powerShellAssignmentCommandModeTopLevel, 'src/assignment-command-mode-top.ps1'), [
+  ['author', 'PS Call Assignment Command Tail', 5],
+  ['author', 'PS Pipeline Assignment Command Tail', 8],
+  ['author', 'PS Chained Assignment Here Tail', 11],
+], 'PowerShell assignment command-mode continuation 与 ordinary quote 内容伪署名不得误报，真实 quote/here tails 必须定位');
+
+const powerShellAssignmentCommandModeInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellAssignmentCommandModeBody,
+  ') suffix" # @author PS Assignment Command Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellAssignmentCommandModeInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellAssignmentCommandModeExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 assignment command/call/pipeline mode 不得误开 nested here-string，chained assignment 正例与 outer string 须恢复');
+assert.deepEqual(attributionSummary(powerShellAssignmentCommandModeInExpandableString, 'src/assignment-command-mode-expandable.ps1'), [
+  ['author', 'PS Call Assignment Command Tail', 6],
+  ['author', 'PS Pipeline Assignment Command Tail', 9],
+  ['author', 'PS Chained Assignment Here Tail', 12],
+  ['author', 'PS Assignment Command Expandable Outer Tail', 13],
+], 'PowerShell expandable assignment command-mode 内容伪署名不得误报，ordinary/here/outer tails 必须定位');
+
+const powerShellAssignmentCommandModeInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellAssignmentCommandModeBody,
+  ')',
+  '"@; # @author PS Assignment Command Here Terminator Tail',
+  'Write-Output $outer # @author PS Assignment Command Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellAssignmentCommandModeInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellAssignmentCommandModeExpected,
+  ')',
+  '"@;',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 assignment command-mode 与 chained assignment here-string 必须分流并恢复 outer here');
+assert.deepEqual(attributionSummary(powerShellAssignmentCommandModeInOuterHereString, 'src/assignment-command-mode-outer-here.ps1'), [
+  ['author', 'PS Call Assignment Command Tail', 7],
+  ['author', 'PS Pipeline Assignment Command Tail', 10],
+  ['author', 'PS Chained Assignment Here Tail', 13],
+  ['author', 'PS Assignment Command Here Terminator Tail', 15],
+  ['author', 'PS Assignment Command Here Outer Tail', 16],
+], 'PowerShell outer here assignment command-mode 内容伪署名不得误报，ordinary/here/terminator/outer tails 必须定位');
+
 const powerShellNonGenericPrefixSubexpressionBody = [
   'Write-Output "x"$(1)post`',
   '# literal @author Fake NonGeneric Prefix Suffix',
@@ -2688,6 +2844,195 @@ assert.deepEqual(cleanedLines([
   'multiline = "${jsonencode([for',
   'x in var.xs : x])}"',
 ], 'HCL 删除同行块注释时必须在相邻 token 间保留等价空白，跨行块注释必须保留换行边界');
+
+const hclAttributionSummary = (source: string, file: string, ext = 'tf') =>
+  extractAttributions(source, file, ext).map((item) => [item.kind, item.subject, item.line]);
+
+const hclPlainHeredocTemplates = [
+  'plain = <<EOT',
+  '# literal outer @author Fake Plain Hash',
+  '// literal outer @author Fake Plain Slash',
+  '/* literal outer */ @author Fake Plain Block',
+  '$${escaped # // /* @author Fake Dollar Escape }',
+  '%%{escaped # // /* @author Fake Percent Escape }',
+  '${jsonencode([for/* } " # @author HCL Plain Block Maintainer */x in var.xs : x])}',
+  '${jsonencode([for/* @author HCL Plain Multiline Block',
+  '} " # ignored */x in var.xs : x])}',
+  '${(',
+  '  var.enabled # } " @author HCL Plain Hash Maintainer',
+  '  ? "yes"',
+  '  : "no"',
+  ')}',
+  '%{ if/* } " @author HCL Plain Directive Block Maintainer */var.enabled }',
+  '%{ if var.enabled',
+  '  // } " @author HCL Plain Directive Line Maintainer',
+  '}',
+  'enabled',
+  '%{ endif }',
+  '  EOT',
+  'EOT ',
+  '# literal after pseudo terminator @author Fake Plain Pseudo',
+  'EOT',
+  'after = true # @author HCL Plain Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(hclPlainHeredocTemplates, 'tf'), [
+  'plain = <<EOT',
+  '# literal outer @author Fake Plain Hash',
+  '// literal outer @author Fake Plain Slash',
+  '/* literal outer */ @author Fake Plain Block',
+  '$${escaped # // /* @author Fake Dollar Escape }',
+  '%%{escaped # // /* @author Fake Percent Escape }',
+  '${jsonencode([for x in var.xs : x])}',
+  '${jsonencode([for',
+  'x in var.xs : x])}',
+  '${(',
+  '  var.enabled',
+  '  ? "yes"',
+  '  : "no"',
+  ')}',
+  '%{ if var.enabled }',
+  '%{ if var.enabled',
+  '}',
+  'enabled',
+  '%{ endif }',
+  '  EOT',
+  'EOT',
+  '# literal after pseudo terminator @author Fake Plain Pseudo',
+  'EOT',
+  'after = true',
+], 'HCL 普通 heredoc 外层 #、//、/* */ 保持字面，${}/%{} 内三类注释删除且不被评论中的 }/quote 提前闭合，$${/%%{ 不开启表达式');
+assert.deepEqual(hclAttributionSummary(hclPlainHeredocTemplates, 'infra/plain-template-heredoc.tf'), [
+  ['author', 'HCL Plain Block Maintainer', 7],
+  ['author', 'HCL Plain Multiline Block', 8],
+  ['author', 'HCL Plain Hash Maintainer', 11],
+  ['author', 'HCL Plain Directive Block Maintainer', 15],
+  ['author', 'HCL Plain Directive Line Maintainer', 17],
+  ['author', 'HCL Plain Outer Tail', 25],
+], 'HCL 普通 heredoc 仅提取 template expression 内真实评论与 heredoc 闭合后的 tail，外层 literal/escape 伪署名不得误报');
+
+const hclIndentedHeredocTemplates = [
+  'indented = <<-TAG',
+  '  # literal outer @author Fake Indented Hash',
+  '  // literal outer @author Fake Indented Slash',
+  '  /* literal outer */ @author Fake Indented Block',
+  '  $${escaped # // /* @author Fake Indented Dollar Escape }',
+  '  %%{escaped # // /* @author Fake Indented Percent Escape }',
+  '  ${join(["a",/* } " @author HCL Indented Block Maintainer */"b"])}',
+  '  ${(',
+  '    var.enabled // } " @author HCL Indented Slash Maintainer',
+  '    ? "yes"',
+  '    : "no"',
+  '  )}',
+  '  %{ if var.enabled',
+  '    # } " @author HCL Indented Directive Hash Maintainer',
+  '  }',
+  '  body',
+  '  %{ endif }',
+  '  TAG ',
+  '  # literal after pseudo terminator @author Fake Indented Pseudo',
+  '  TAG',
+  'after = true // @author HCL Indented Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(hclIndentedHeredocTemplates, 'hcl'), [
+  'indented = <<-TAG',
+  '  # literal outer @author Fake Indented Hash',
+  '  // literal outer @author Fake Indented Slash',
+  '  /* literal outer */ @author Fake Indented Block',
+  '  $${escaped # // /* @author Fake Indented Dollar Escape }',
+  '  %%{escaped # // /* @author Fake Indented Percent Escape }',
+  '  ${join(["a", "b"])}',
+  '  ${(',
+  '    var.enabled',
+  '    ? "yes"',
+  '    : "no"',
+  '  )}',
+  '  %{ if var.enabled',
+  '  }',
+  '  body',
+  '  %{ endif }',
+  '  TAG',
+  '  # literal after pseudo terminator @author Fake Indented Pseudo',
+  '  TAG',
+  'after = true',
+], 'HCL <<- heredoc 仅允许真实 terminator 前导缩进且不允许尾空白；outer literal/escape 保留，template expression 评论删除并保 token 空白');
+assert.deepEqual(hclAttributionSummary(hclIndentedHeredocTemplates, 'infra/indented-template-heredoc.hcl', 'hcl'), [
+  ['author', 'HCL Indented Block Maintainer', 7],
+  ['author', 'HCL Indented Slash Maintainer', 9],
+  ['author', 'HCL Indented Directive Hash Maintainer', 14],
+  ['author', 'HCL Indented Outer Tail', 21],
+], 'HCL <<- heredoc 仅提取 template expression 内真实评论与 real terminator 后 tail，外层 literal/escape/pseudo terminator 伪署名不得误报');
+
+const hclHeredocDelimiterContexts = [
+  'value = <<EOT',
+  '${(',
+  'EOT',
+  '/* @author HCL Heredoc Context Block',
+  'EOT',
+  '*/true',
+  ')}',
+  'EOT',
+  'after = true # @author HCL Heredoc Context Outer Tail',
+  'directive = <<-TAG',
+  '  %{ if var.enabled',
+  '  TAG',
+  '  // @author HCL Directive Context Comment',
+  '  }',
+  '  body',
+  '  %{ endif }',
+  '  TAG',
+  'after_directive = true // @author HCL Directive Context Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(hclHeredocDelimiterContexts, 'tf'), [
+  'value = <<EOT',
+  '${(',
+  'EOT',
+  'true',
+  ')}',
+  'EOT',
+  'after = true',
+  'directive = <<-TAG',
+  '  %{ if var.enabled',
+  '  TAG',
+  '  }',
+  '  body',
+  '  %{ endif }',
+  '  TAG',
+  'after_directive = true',
+], 'HCL heredoc 同名 delimiter 仅在 template contexts 回到 root 后终止；未闭合 ${}/%{} 与 block comment 内的 delimiter 行必须按表达式内容处理');
+assert.deepEqual(hclAttributionSummary(hclHeredocDelimiterContexts, 'infra/heredoc-delimiter-contexts.tf'), [
+  ['author', 'HCL Heredoc Context Block', 4],
+  ['author', 'HCL Heredoc Context Outer Tail', 9],
+  ['author', 'HCL Directive Context Comment', 13],
+  ['author', 'HCL Directive Context Outer Tail', 18],
+], 'HCL heredoc context 内真实评论及最终 outer tails 必须定位，comment/expression 中 delimiter 不得中断署名扫描');
+
+const hclInvalidOpenerAndBackslashInterpolation = [
+  'invalid = <<EOF trailing',
+  '# @author HCL Invalid Opener Comment',
+  'backslash = <<DOC',
+  '\\${value/* @author HCL Backslash Interpolation */+1}',
+  '%{ if var.enabled/* @author HCL Backslash Directive Block */ }',
+  'body',
+  '%{ endif }',
+  'DOC',
+  'after = true # @author HCL Backslash Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(hclInvalidOpenerAndBackslashInterpolation, 'hcl'), [
+  'invalid = <<EOF trailing',
+  'backslash = <<DOC',
+  '\\${value +1}',
+  '%{ if var.enabled }',
+  'body',
+  '%{ endif }',
+  'DOC',
+  'after = true',
+], 'HCL `<<EOF trailing` 非法 opener 不得进入 heredoc；反斜杠不转义 ${ interpolation，%{} directive 内评论仍须删除');
+assert.deepEqual(hclAttributionSummary(hclInvalidOpenerAndBackslashInterpolation, 'infra/invalid-opener-backslash.hcl', 'hcl'), [
+  ['author', 'HCL Invalid Opener Comment', 2],
+  ['author', 'HCL Backslash Interpolation', 4],
+  ['author', 'HCL Backslash Directive Block', 5],
+  ['author', 'HCL Backslash Outer Tail', 9],
+], 'HCL invalid opener 后普通评论、backslash interpolation/directive 评论与 real heredoc 后 tail 必须定位');
 
 assert.deepEqual(cleanedLines([
   'def url = "https://example.test/#fragment // literal" // remove',

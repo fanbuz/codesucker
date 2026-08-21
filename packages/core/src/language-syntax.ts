@@ -191,6 +191,8 @@ type PowerShellContext =
   | {
     kind: 'expression'; depth: number; braces: PowerShellBraceKind[];
     tokenKind: PowerShellTokenKind; continuedToken?: boolean;
+    /** 已确认 assignment/hashtable entry 的 RHS 尚未消费。 */
+    rhsStart?: boolean;
     /** nested $() 闭合后恢复外层 expression 的 token 语境。 */
     returnTokenKind?: PowerShellTokenKind;
   }
@@ -207,6 +209,8 @@ interface PowerShellSubexpression {
 interface ActiveHeredoc {
   delimiter: string;
   allowIndent: boolean;
+  /** heredoc 外层为字面 template，仅在 ${...}/%{...} 中进入 expression。 */
+  contexts: HclContext[];
 }
 
 interface ActiveVbXml {
@@ -338,6 +342,7 @@ function isPowerShellHashtableEntryAssignment(code: string, braces: PowerShellBr
 function powerShellAtomicExpression(
   line: string,
   index: number,
+  expressionBoundary = false,
 ): { length: number; bounded: boolean } | null {
   const source = line.slice(index);
   const variableOrStatic = POWERSHELL_VARIABLE_OR_STATIC_EXPRESSION.exec(source);
@@ -346,9 +351,11 @@ function powerShellAtomicExpression(
   const end = index + match[0].length;
   const next = line[end];
   // argument-mode 中字母、引号、/ : - 等均可继续组成 generic token。
-  // scanner 不完整判定 expression/argument mode，因此所有 atomic 都只接受
-  // EOF/ForceStart 这类确认边界。assignment/hashtable 的 = 由后续上下文单独重置。
-  const bounded = end === line.length || isPowerShellForceStartChar(next);
+  // unknown mode 仅接受 EOF/ForceStart；已确认 assignment/hashtable RHS 时
+  // 才补充 expression boundary。assignment/hashtable 的 = 仍由后续上下文重置。
+  const bounded = end === line.length || isPowerShellForceStartChar(next)
+    || (expressionBoundary && (next === '=' || next === ']'
+      || (next === '`' && end === line.length - 1)));
   return { length: match[0].length, bounded };
 }
 
@@ -365,6 +372,17 @@ function nextPowerShellTokenKind(
   // 变量/数字由 atomic matcher 整体消费；这里保护特殊变量与类型/数组开头。
   if (value === '$' || value === '[') return 'nonGeneric';
   return 'generic';
+}
+
+function isPowerShellRhsStart(
+  code: string,
+  braces: PowerShellBraceKind[],
+  carried = false,
+): boolean {
+  const trimmed = code.trimEnd();
+  if (carried && trimmed === '') return true;
+  return endsWithPowerShellAssignment(trimmed)
+    || isPowerShellHashtableEntryAssignment(trimmed, braces);
 }
 
 function powerShellHashtableOpenLength(
@@ -511,11 +529,15 @@ function consumePowerShellExpandable(
       code += line.slice(cursor, cursor + length);
       cursor += length;
       if (length === 1) context.continuedToken = context.tokenKind === 'generic';
-      else if (context.tokenKind === 'none') context.tokenKind = 'generic';
+      else {
+        if (context.tokenKind === 'none') context.tokenKind = 'generic';
+        context.rhsStart = false;
+      }
       continue;
     }
     if (line.startsWith('$(', cursor)) {
       code += '$(';
+      context.rhsStart = false;
       contexts.push({
         kind: 'expression', depth: 1, braces: [], tokenKind: 'none',
         returnTokenKind: context.tokenKind === 'generic' ? 'generic' : 'none',
@@ -523,13 +545,16 @@ function consumePowerShellExpandable(
       cursor += 2;
       continue;
     }
-    const atomic = powerShellAtomicExpression(line, cursor);
+    const atomic = powerShellAtomicExpression(
+      line, cursor, isPowerShellRhsStart(code, context.braces, context.rhsStart),
+    );
     if (atomic) {
       code += line.slice(cursor, cursor + atomic.length);
       cursor += atomic.length;
       if (context.tokenKind === 'none') {
         context.tokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
       }
+      context.rhsStart = false;
       continue;
     }
     const genericActive = context.tokenKind === 'generic';
@@ -541,6 +566,7 @@ function consumePowerShellExpandable(
     if (hereStringQuote) {
       code += `@${hereStringQuote}`;
       context.tokenKind = 'nonGeneric';
+      context.rhsStart = false;
       contexts.push({ kind: 'string', quote: hereStringQuote, hereString: true });
       cursor += 2;
       continue;
@@ -548,6 +574,7 @@ function consumePowerShellExpandable(
     if (line[cursor] === '"' || line[cursor] === "'") {
       code += line[cursor];
       if (context.tokenKind === 'none') context.tokenKind = 'nonGeneric';
+      context.rhsStart = false;
       contexts.push({ kind: 'string', quote: line[cursor] as '"' | "'" });
       cursor++;
       continue;
@@ -572,6 +599,7 @@ function consumePowerShellExpandable(
       code += line.slice(cursor, cursor + hashtableOpenLength);
       context.braces.push('hashtable');
       context.tokenKind = 'none';
+      context.rhsStart = false;
       cursor += hashtableOpenLength;
       continue;
     }
@@ -579,6 +607,7 @@ function consumePowerShellExpandable(
       code += '{';
       context.braces.push('ordinary');
       context.tokenKind = 'none';
+      context.rhsStart = false;
       cursor++;
       continue;
     }
@@ -586,6 +615,7 @@ function consumePowerShellExpandable(
       code += '}';
       context.braces.pop();
       context.tokenKind = 'none';
+      context.rhsStart = false;
       cursor++;
       continue;
     }
@@ -593,6 +623,7 @@ function consumePowerShellExpandable(
       code += '(';
       context.depth++;
       context.tokenKind = 'none';
+      context.rhsStart = false;
       cursor++;
       continue;
     }
@@ -620,6 +651,8 @@ function consumePowerShellExpandable(
     const value = line[cursor];
     const nextCode = code + value;
     context.tokenKind = nextPowerShellTokenKind(context.tokenKind, value, nextCode, context.braces);
+    if (value === '=' && isPowerShellRhsStart(nextCode, context.braces)) context.rhsStart = true;
+    else if (!/\p{White_Space}/u.test(value)) context.rhsStart = false;
     code = nextCode;
     cursor++;
   }
@@ -732,6 +765,7 @@ function consumeHclTemplate(
   line: string,
   index: number,
   contexts: NonNullable<ActiveString['hclContexts']>,
+  closeRootQuote = true,
 ): ConsumedSource {
   let cursor = index;
   let code = '';
@@ -748,7 +782,8 @@ function consumeHclTemplate(
       continue;
     }
     if (context.kind === 'template') {
-      if (line[cursor] === '\\') {
+      // heredoc 根 template 中的 backslash 是字面量；引号字符串仍使用 escape。
+      if (line[cursor] === '\\' && (closeRootQuote || contexts.length > 1)) {
         const length = Math.min(2, line.length - cursor);
         code += line.slice(cursor, cursor + length);
         cursor += length;
@@ -769,8 +804,11 @@ function consumeHclTemplate(
       if (line[cursor] === '"') {
         code += '"';
         cursor++;
-        if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
-        contexts.pop();
+        if (contexts.length === 1) {
+          if (closeRootQuote) return { end: cursor, closed: true, code, comments };
+        } else {
+          contexts.pop();
+        }
         continue;
       }
       code += line[cursor];
@@ -1026,12 +1064,18 @@ function dynamicRRawString(line: string, index: number, code: string): { open: s
 }
 
 function hclHeredoc(line: string, index: number): ActiveHeredoc | null {
-  const match = /^<<(-?)([A-Za-z_][A-Za-z0-9_-]*)/.exec(line.slice(index));
+  // delimiter 后必须立即换行；拒绝 trailing token/comment 的模糊 opener。
+  const match = /^<<(-?)([A-Za-z_][A-Za-z0-9_-]*)$/.exec(line.slice(index));
   if (!match) return null;
-  return { delimiter: match[2], allowIndent: match[1] === '-' };
+  return {
+    delimiter: match[2], allowIndent: match[1] === '-', contexts: [{ kind: 'template' }],
+  };
 }
 
 function isHeredocEnd(line: string, state: ActiveHeredoc): boolean {
+  // delimiter 仅在 heredoc 根 template 语境可终止；未闭合的 expression/comment
+  // 中的同名行仍是内容。
+  if (state.contexts.length !== 1 || state.contexts[0].kind !== 'template') return false;
   // <<- 只放宽前导缩进；两种 heredoc 的终止符都不允许尾随空白。
   const candidate = state.allowIndent ? line.replace(/^[\t ]+/, '') : line;
   return candidate === state.delimiter;
@@ -1092,6 +1136,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
   const powerShellBraces: PowerShellBraceKind[] = [];
   const powerShellSubexpressions: PowerShellSubexpression[] = [];
   let activePowerShellContinuedToken = false;
+  let activePowerShellRhsStart = false;
 
   for (const raw of rawLines) {
     let code = '';
@@ -1102,12 +1147,22 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     let powerShellTokenKind: PowerShellTokenKind = activePowerShellContinuedToken
       ? 'generic'
       : 'none';
+    let powerShellRhsStart = activePowerShellRhsStart;
     activePowerShellContinuedToken = false;
+    activePowerShellRhsStart = false;
 
     if (activeHeredoc) {
-      code = raw;
       hadStringContent = true;
-      if (isHeredocEnd(raw, activeHeredoc)) activeHeredoc = null;
+      if (isHeredocEnd(raw, activeHeredoc)) {
+        code = raw;
+        activeHeredoc = null;
+      } else {
+        const consumed = consumeHclTemplate(raw, 0, activeHeredoc.contexts, false);
+        code = consumed.code;
+        comments.push(...consumed.comments);
+        hadComment = consumed.comments.length > 0;
+      }
+      if (hadComment && code.trim() === '') hadStringContent = false;
       result.push({ raw, code, comments, hadComment, hadStringContent });
       continue;
     }
@@ -1123,7 +1178,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     }
 
     // #requires 是 PowerShell 的编译/加载指令，不是可删除的普通注释。
-    if (syntax.dialect === 'powershell' && !activeComment && !activeString && isPowerShellRequires(raw)) {
+    if (syntax.dialect === 'powershell' && !activeComment && !activeString
+      && powerShellTokenKind !== 'generic' && !powerShellRhsStart && isPowerShellRequires(raw)) {
       result.push({ raw, code: raw, comments, hadComment: false, hadStringContent: false });
       continue;
     }
@@ -1303,7 +1359,10 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += raw.slice(index, index + length);
           index += length;
           if (length === 1) activePowerShellContinuedToken = powerShellTokenKind === 'generic';
-          else if (powerShellTokenKind === 'none') powerShellTokenKind = 'generic';
+          else {
+            if (powerShellTokenKind === 'none') powerShellTokenKind = 'generic';
+            powerShellRhsStart = false;
+          }
           continue;
         }
         if (raw.startsWith('$(', index)) {
@@ -1313,16 +1372,20 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
             returnTokenKind: powerShellTokenKind === 'generic' ? 'generic' : 'none',
           });
           powerShellTokenKind = 'none';
+          powerShellRhsStart = false;
           index += 2;
           continue;
         }
-        const atomic = powerShellAtomicExpression(raw, index);
+        const atomic = powerShellAtomicExpression(
+          raw, index, isPowerShellRhsStart(code, powerShellBraces, powerShellRhsStart),
+        );
         if (atomic) {
           code += raw.slice(index, index + atomic.length);
           index += atomic.length;
           if (powerShellTokenKind === 'none') {
             powerShellTokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
           }
+          powerShellRhsStart = false;
           continue;
         }
         const genericActive = powerShellTokenKind === 'generic';
@@ -1333,6 +1396,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += raw.slice(index, index + hashtableOpenLength);
           powerShellBraces.push('hashtable');
           powerShellTokenKind = 'none';
+          powerShellRhsStart = false;
           index += hashtableOpenLength;
           continue;
         }
@@ -1340,6 +1404,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += '{';
           powerShellBraces.push('ordinary');
           powerShellTokenKind = 'none';
+          powerShellRhsStart = false;
           index++;
           continue;
         }
@@ -1347,6 +1412,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += '}';
           powerShellBraces.pop();
           powerShellTokenKind = 'none';
+          powerShellRhsStart = false;
           index++;
           continue;
         }
@@ -1355,6 +1421,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += '(';
           subexpression.depth++;
           powerShellTokenKind = 'none';
+          powerShellRhsStart = false;
           index++;
           continue;
         }
@@ -1365,6 +1432,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
             ? subexpression.returnTokenKind
             : 'none';
           if (subexpression.depth === 0) powerShellSubexpressions.pop();
+          powerShellRhsStart = false;
           index++;
           continue;
         }
@@ -1426,6 +1494,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         activeString = startString(string);
         if (syntax.dialect === 'powershell') {
           activeString.powerShellTokenPrefix = powerShellTokenKind;
+          powerShellRhsStart = false;
         }
         hadStringContent = true;
         continue scan;
@@ -1433,15 +1502,22 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
 
       if (syntax.dialect === 'powershell') {
         const value = raw[index];
+        const nextCode = code + value;
         powerShellTokenKind = nextPowerShellTokenKind(
-          powerShellTokenKind, value, code + value, powerShellBraces,
+          powerShellTokenKind, value, nextCode, powerShellBraces,
         );
+        if (value === '=' && isPowerShellRhsStart(nextCode, powerShellBraces)) {
+          powerShellRhsStart = true;
+        } else if (!/\p{White_Space}/u.test(value)) {
+          powerShellRhsStart = false;
+        }
       }
       code += raw[index];
       index++;
     }
 
     if (activeString && !activeString.rule.multiline) activeString = null;
+    if (syntax.dialect === 'powershell' && powerShellRhsStart) activePowerShellRhsStart = true;
     // 嵌入表达式中仅含真实注释的行应按注释行删除，而不是作为外层多行字符串的空内容保留。
     if (hadComment && code.trim() === '') hadStringContent = false;
     result.push({ raw, code, comments, hadComment, hadStringContent });
