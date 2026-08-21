@@ -3503,6 +3503,142 @@ assert.deepEqual(attributionSummary(powerShellTypeLiteralAdjacentInExpandable, '
   ['author', 'PS Type Literal Expandable Outer Tail', 19],
 ], 'PowerShell expandable $()内type literal真实评论与outer tail必须定位，command负例伪署名不得误报');
 
+const powerShellConfirmedCommaListAdjacentComments = [
+  '$numbers=1,2# @author PS Numeric Comma List Adjacent Hash',
+  '$numbersBlock=1,2<# @author PS Numeric Comma List Adjacent Block #>+1',
+  '$variables=$left,$right# @author PS Variable Comma List Adjacent Hash',
+  '$statics=[Type]::Member,[Other]::Value# @author PS Static Comma List Adjacent Hash',
+  '$types=[string],[int]<# @author PS Type Comma List Adjacent Block #>+1',
+  '$members=$left.Name,$right.Name# @author PS Member Comma List Adjacent Hash',
+  '$groups=(Get-Date).Day,($items[0]).Name<# @author PS Group Member Comma List Adjacent Block #>+1',
+  '$spaced=1 , $value# @author PS Spaced Comma List Adjacent Hash',
+  '$spacedBlock=1 , $value<# @author PS Spaced Comma List Adjacent Block #>+1',
+  '$quoted="a",$value# @author PS Quoted Comma List Adjacent Hash',
+  '$quotedBlock=\'a\',$value<# @author PS Quoted Comma List Adjacent Block #>+1',
+  '$bareGroup=(1),$value# @author PS Bare Group Comma List Adjacent Hash',
+  '$bareGroupBlock=(1),$value<# @author PS Bare Group Comma List Adjacent Block #>+1',
+  '$commandVariable=(Write-Output foo, $value#literal @author Fake Command Variable Comma Hash)',
+  '$commandStatic=(Write-Output foo, [Type]::Member<#literal @author Fake Command Static Comma Block#>tail)',
+  '$commandMember=(Write-Output foo, $value.Name#literal @author Fake Command Member Comma Hash)',
+  '$commandGroup=(Write-Output foo, (Get-Date).Day<#literal @author Fake Command Group Comma Block#>tail)',
+  '$commandSpaced=(Write-Output $first , $value#literal @author Fake Command Spaced Comma Hash)',
+  '$commandSpacedBlock=(Write-Output $first , $value<#literal @author Fake Command Spaced Comma Block#>tail)',
+].join('\n');
+const powerShellConfirmedCommaListAdjacentCommentsExpected = [
+  '$numbers=1,2',
+  '$numbersBlock=1,2 +1',
+  '$variables=$left,$right',
+  '$statics=[Type]::Member,[Other]::Value',
+  '$types=[string],[int] +1',
+  '$members=$left.Name,$right.Name',
+  '$groups=(Get-Date).Day,($items[0]).Name +1',
+  '$spaced=1 , $value',
+  '$spacedBlock=1 , $value +1',
+  '$quoted="a",$value',
+  '$quotedBlock=\'a\',$value +1',
+  '$bareGroup=(1),$value',
+  '$bareGroupBlock=(1),$value +1',
+  '$commandVariable=(Write-Output foo, $value#literal @author Fake Command Variable Comma Hash)',
+  '$commandStatic=(Write-Output foo, [Type]::Member<#literal @author Fake Command Static Comma Block#>tail)',
+  '$commandMember=(Write-Output foo, $value.Name#literal @author Fake Command Member Comma Hash)',
+  '$commandGroup=(Write-Output foo, (Get-Date).Day<#literal @author Fake Command Group Comma Block#>tail)',
+  '$commandSpaced=(Write-Output $first , $value#literal @author Fake Command Spaced Comma Hash)',
+  '$commandSpacedBlock=(Write-Output $first , $value<#literal @author Fake Command Spaced Comma Block#>tail)',
+];
+assert.deepEqual(
+  cleanedLines(powerShellConfirmedCommaListAdjacentComments, 'ps1'),
+  powerShellConfirmedCommaListAdjacentCommentsExpected,
+  'PowerShell confirmed assignment RHS comma-list中的numeric/variable/static/type/member/group member最后atomic后无空白#/<#必须开启评论；group command comma arguments必须保留',
+);
+assert.deepEqual(attributionSummary(powerShellConfirmedCommaListAdjacentComments, 'src/confirmed-comma-list-adjacent.ps1'), [
+  ['author', 'PS Numeric Comma List Adjacent Hash', 1],
+  ['author', 'PS Numeric Comma List Adjacent Block', 2],
+  ['author', 'PS Variable Comma List Adjacent Hash', 3],
+  ['author', 'PS Static Comma List Adjacent Hash', 4],
+  ['author', 'PS Type Comma List Adjacent Block', 5],
+  ['author', 'PS Member Comma List Adjacent Hash', 6],
+  ['author', 'PS Group Member Comma List Adjacent Block', 7],
+  ['author', 'PS Spaced Comma List Adjacent Hash', 8],
+  ['author', 'PS Spaced Comma List Adjacent Block', 9],
+  ['author', 'PS Quoted Comma List Adjacent Hash', 10],
+  ['author', 'PS Quoted Comma List Adjacent Block', 11],
+  ['author', 'PS Bare Group Comma List Adjacent Hash', 12],
+  ['author', 'PS Bare Group Comma List Adjacent Block', 13],
+], 'PowerShell confirmed comma-list真实邻接评论署名必须定位，group command comma argument伪署名不得误报');
+
+const powerShellConfirmedCommaListAdjacentInExpandable = [
+  '$message = "prefix $(',
+  ...powerShellConfirmedCommaListAdjacentComments.split('\n'),
+  ') suffix" # @author PS Comma List Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedCommaListAdjacentInExpandable, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellConfirmedCommaListAdjacentCommentsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $()内confirmed comma-list与group command负例必须复用top-level语义并恢复outer string');
+assert.deepEqual(attributionSummary(powerShellConfirmedCommaListAdjacentInExpandable, 'src/confirmed-comma-list-adjacent-expandable.ps1'), [
+  ['author', 'PS Numeric Comma List Adjacent Hash', 2],
+  ['author', 'PS Numeric Comma List Adjacent Block', 3],
+  ['author', 'PS Variable Comma List Adjacent Hash', 4],
+  ['author', 'PS Static Comma List Adjacent Hash', 5],
+  ['author', 'PS Type Comma List Adjacent Block', 6],
+  ['author', 'PS Member Comma List Adjacent Hash', 7],
+  ['author', 'PS Group Member Comma List Adjacent Block', 8],
+  ['author', 'PS Spaced Comma List Adjacent Hash', 9],
+  ['author', 'PS Spaced Comma List Adjacent Block', 10],
+  ['author', 'PS Quoted Comma List Adjacent Hash', 11],
+  ['author', 'PS Quoted Comma List Adjacent Block', 12],
+  ['author', 'PS Bare Group Comma List Adjacent Hash', 13],
+  ['author', 'PS Bare Group Comma List Adjacent Block', 14],
+  ['author', 'PS Comma List Expandable Outer Tail', 21],
+], 'PowerShell expandable $()内confirmed comma-list评论与outer tail必须定位，group command负例伪署名不得误报');
+
+const powerShellConfirmedCommaListAcrossLines = [
+  '$crossLine=1,',
+  '$value# @author PS Cross Line Comma List Adjacent Hash',
+  '$crossLineBlock=1,',
+  '$value<# @author PS Cross Line Comma List Adjacent Block #>+1',
+  '$commandCrossLine=(Write-Output $first ,',
+  '$value#literal @author Fake Command Cross Line Comma Hash)',
+  '$commandCrossLineBlock=(Write-Output $first ,',
+  '$value<#literal @author Fake Command Cross Line Comma Block#>tail)',
+].join('\n');
+const powerShellConfirmedCommaListAcrossLinesExpected = [
+  '$crossLine=1,',
+  '$value',
+  '$crossLineBlock=1,',
+  '$value +1',
+  '$commandCrossLine=(Write-Output $first ,',
+  '$value#literal @author Fake Command Cross Line Comma Hash)',
+  '$commandCrossLineBlock=(Write-Output $first ,',
+  '$value<#literal @author Fake Command Cross Line Comma Block#>tail)',
+];
+assert.deepEqual(
+  cleanedLines(powerShellConfirmedCommaListAcrossLines, 'ps1'),
+  powerShellConfirmedCommaListAcrossLinesExpected,
+  'PowerShell confirmed RHS comma-list跨物理行后必须保持可信atomic origin并识别真实#/<#评论；group command comma argument跨行仍须按generic保留',
+);
+assert.deepEqual(attributionSummary(powerShellConfirmedCommaListAcrossLines, 'src/confirmed-comma-list-across-lines.ps1'), [
+  ['author', 'PS Cross Line Comma List Adjacent Hash', 2],
+  ['author', 'PS Cross Line Comma List Adjacent Block', 4],
+], 'PowerShell confirmed comma-list跨物理行的真实评论署名必须定位，group command跨行伪署名不得误报');
+
+const powerShellConfirmedCommaListAcrossLinesInExpandable = [
+  '$message = "prefix $(',
+  ...powerShellConfirmedCommaListAcrossLines.split('\n'),
+  ') suffix" # @author PS Cross Line Comma List Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedCommaListAcrossLinesInExpandable, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellConfirmedCommaListAcrossLinesExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $()内confirmed comma-list与group command comma argument跨行必须复用top-level provenance并恢复outer string');
+assert.deepEqual(attributionSummary(powerShellConfirmedCommaListAcrossLinesInExpandable, 'src/confirmed-comma-list-across-lines-expandable.ps1'), [
+  ['author', 'PS Cross Line Comma List Adjacent Hash', 3],
+  ['author', 'PS Cross Line Comma List Adjacent Block', 5],
+  ['author', 'PS Cross Line Comma List Expandable Outer Tail', 10],
+], 'PowerShell expandable $()内跨行comma-list真实评论与outer tail必须定位，group command跨行伪署名不得误报');
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',

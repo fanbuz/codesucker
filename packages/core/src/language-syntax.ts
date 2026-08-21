@@ -185,6 +185,7 @@ interface ActiveString {
   powerShellTokenPrefix?: PowerShellTokenKind;
   powerShellRhsMode?: PowerShellRhsMode;
   powerShellRhsNesting?: PowerShellRhsNesting;
+  powerShellAtomOriginTrusted?: boolean;
 }
 
 type GroovyContext =
@@ -213,7 +214,10 @@ type HclContext =
   | { kind: 'comment' };
 
 type PowerShellContext =
-  | { kind: 'string'; quote: '"' | "'"; hereString?: boolean }
+  | {
+    kind: 'string'; quote: '"' | "'"; hereString?: boolean;
+    atomOriginTrusted?: boolean;
+  }
   | {
     kind: 'expression'; depth: number; braces: PowerShellBraceKind[];
     tokenKind: PowerShellTokenKind; continuedToken?: boolean;
@@ -223,6 +227,9 @@ type PowerShellContext =
     rhsContinuation?: PowerShellContinuationReason;
     rhsCommandCarried?: boolean;
     rhsNesting?: PowerShellRhsNesting;
+    completedTrustedAtom?: boolean;
+    listCommaTrusted?: boolean;
+    trustedGroupOrigins?: boolean[];
     /** nested $() 闭合后恢复外层 expression 的 token 语境。 */
     returnTokenKind?: PowerShellTokenKind;
   }
@@ -232,7 +239,8 @@ type PowerShellBraceKind = 'hashtable' | 'ordinary';
 type PowerShellTokenKind = 'none' | 'generic' | 'nonGeneric';
 type PowerShellRhsMode = 'statementStart' | 'expression' | 'command' | null;
 type PowerShellContinuationReason =
-  | 'explicit' | 'statementStart' | 'operator' | 'openGroup' | 'commandComma' | 'pipeline';
+  | 'explicit' | 'statementStart' | 'operator' | 'expressionComma'
+  | 'openGroup' | 'commandComma' | 'pipeline';
 
 interface PowerShellRhsNesting {
   paren: number;
@@ -349,11 +357,12 @@ function isPowerShellConfirmedAtomicStart(
   tokenKind: PowerShellTokenKind,
   rhsMode: PowerShellRhsMode,
   braces: PowerShellBraceKind[],
+  listCommaTrusted = false,
 ): boolean {
   if (tokenKind === 'generic'
     || (rhsMode !== 'statementStart' && rhsMode !== 'expression')) return false;
   const before = code.trimEnd();
-  if (before.endsWith(',')) return false;
+  if (before.endsWith(',')) return listCommaTrusted;
   return before === '' || endsWithPowerShellAssignment(before)
     || isPowerShellHashtableEntryAssignment(before, braces)
     || /[([{;]$/.test(before)
@@ -397,6 +406,7 @@ function powerShellMatchingGroupStart(code: string, closeIndex: number): number 
 function followsPowerShellCompletedMemberAccess(
   code: string,
   rhsMode: PowerShellRhsMode,
+  listCommaTrusted = false,
 ): boolean {
   if (rhsMode !== 'expression') return false;
   const completed = POWERSHELL_COMPLETED_GROUP_MEMBER.exec(code);
@@ -404,7 +414,7 @@ function followsPowerShellCompletedMemberAccess(
   const groupStart = powerShellMatchingGroupStart(code, completed.index);
   if (groupStart === null) return false;
   const before = code.slice(0, groupStart).trimEnd();
-  if (before.endsWith(',')) return false;
+  if (before.endsWith(',')) return listCommaTrusted;
   return before === '' || endsWithPowerShellAssignment(before)
     || POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT.test(before)
     || /[([{;]$/.test(before)
@@ -431,11 +441,12 @@ function isPowerShellLineComment(
   continuedToken = false,
   rhsMode: PowerShellRhsMode = null,
   atomicBoundary = false,
+  listCommaTrusted = false,
 ): boolean {
   if (line[index] !== '#') return false;
   return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
     || followsPowerShellExpressionOperator(code, rhsMode)
-    || followsPowerShellCompletedMemberAccess(code, rhsMode) || atomicBoundary;
+    || followsPowerShellCompletedMemberAccess(code, rhsMode, listCommaTrusted) || atomicBoundary;
 }
 
 function isPowerShellBlockComment(
@@ -446,11 +457,12 @@ function isPowerShellBlockComment(
   continuedToken = false,
   rhsMode: PowerShellRhsMode = null,
   atomicBoundary = false,
+  listCommaTrusted = false,
 ): boolean {
   if (!line.startsWith('<#', index)) return false;
   return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
     || followsPowerShellExpressionOperator(code, rhsMode)
-    || followsPowerShellCompletedMemberAccess(code, rhsMode) || atomicBoundary;
+    || followsPowerShellCompletedMemberAccess(code, rhsMode, listCommaTrusted) || atomicBoundary;
 }
 
 function powerShellHereStringHeader(
@@ -658,6 +670,7 @@ function powerShellContinuationReason(
   if (explicitContinuation) return 'explicit';
   if (mode === 'statementStart') return 'statementStart';
   if (mode === 'expression') {
+    if (/,[\p{White_Space}]*$/u.test(code)) return 'expressionComma';
     if (/(?:\.\.|[+\-*\/%!,?:?]|-(?:and|or|xor|not|band|bnot|bor|bxor|shl|shr|join|as|f|(?:c|i)?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin|replace|split)|is|isnot))\s*$/i.test(code)) {
       return 'operator';
     }
@@ -897,8 +910,11 @@ function consumePowerShellExpandable(
     initialContext.continuedToken = false;
     initialContext.rhsCommandCarried = initialContext.rhsMode === 'command'
       && initialContinuation !== null;
-    if (!initialContinuation) initialContext.rhsMode = null;
-    else if (initialContinuation === 'openGroup') initialContext.rhsMode = 'statementStart';
+    if (!initialContinuation) {
+      initialContext.rhsMode = null;
+      initialContext.completedTrustedAtom = false;
+      initialContext.listCommaTrusted = false;
+    } else if (initialContinuation === 'openGroup') initialContext.rhsMode = 'statementStart';
     initialContext.rhsContinuation = undefined;
     if (!initialContext.rhsNesting) initialContext.rhsNesting = newPowerShellRhsNesting();
     if (initialContext.rhsMode === null) initialContext.rhsNesting = newPowerShellRhsNesting();
@@ -919,12 +935,14 @@ function consumePowerShellExpandable(
     if (context.kind === 'string') {
       const hereStringClose = `${context.quote}@`;
       if (context.hereString && cursor === 0 && line.startsWith(hereStringClose, cursor)) {
+        const atomOriginTrusted = context.atomOriginTrusted === true;
         code += hereStringClose;
         cursor += 2;
         if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
         contexts.pop();
         const parent = contexts[contexts.length - 1];
         if (parent?.kind === 'expression') {
+          parent.completedTrustedAtom = atomOriginTrusted;
           parent.atomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
             line, cursor, parent.tokenKind, parent.rhsMode ?? null,
           );
@@ -949,12 +967,14 @@ function consumePowerShellExpandable(
         continue;
       }
       if (!context.hereString && line[cursor] === context.quote) {
+        const atomOriginTrusted = context.atomOriginTrusted === true;
         code += context.quote;
         cursor++;
         if (contexts.length === 1) return { end: cursor, closed: true, code, comments };
         contexts.pop();
         const parent = contexts[contexts.length - 1];
         if (parent?.kind === 'expression') {
+          parent.completedTrustedAtom = atomOriginTrusted;
           parent.atomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
             line, cursor, parent.tokenKind, parent.rhsMode ?? null,
           );
@@ -1004,11 +1024,11 @@ function consumePowerShellExpandable(
       cursor += 2;
       continue;
     }
-    const atomic = powerShellAtomicExpression(
-      line, cursor, isPowerShellConfirmedAtomicStart(
-        code, context.tokenKind, context.rhsMode ?? null, context.braces,
-      ),
+    const atomicStartTrusted = isPowerShellConfirmedAtomicStart(
+      code, context.tokenKind, context.rhsMode ?? null, context.braces,
+      context.listCommaTrusted === true,
     );
+    const atomic = powerShellAtomicExpression(line, cursor, atomicStartTrusted);
     if (atomic) {
       code += line.slice(cursor, cursor + atomic.length);
       cursor += atomic.length;
@@ -1016,6 +1036,7 @@ function consumePowerShellExpandable(
         context.tokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
       }
       context.atomicCommentBoundary = atomic.commentDelimited;
+      context.completedTrustedAtom = atomicStartTrusted;
       if (context.rhsMode === 'statementStart' || context.rhsMode === 'expression') {
         context.rhsMode = 'expression';
       } else if (context.rhsMode == null && /^(?:\?\?=|[+\-*\/%]=)/.test(line.slice(cursor))) {
@@ -1031,28 +1052,40 @@ function consumePowerShellExpandable(
       line, cursor, code, hashtableEntry, genericActive,
     );
     if (hereStringQuote) {
+      const atomOriginTrusted = isPowerShellConfirmedAtomicStart(
+        code, context.tokenKind, context.rhsMode ?? null, context.braces,
+        context.listCommaTrusted === true,
+      );
       code += `@${hereStringQuote}`;
       context.tokenKind = 'nonGeneric';
       if (context.rhsMode === 'statementStart' || context.rhsMode === 'expression') {
         context.rhsMode = 'expression';
       }
-      contexts.push({ kind: 'string', quote: hereStringQuote, hereString: true });
+      contexts.push({
+        kind: 'string', quote: hereStringQuote, hereString: true, atomOriginTrusted,
+      });
       cursor += 2;
       continue;
     }
     if (line[cursor] === '"' || line[cursor] === "'") {
+      const atomOriginTrusted = isPowerShellConfirmedAtomicStart(
+        code, context.tokenKind, context.rhsMode ?? null, context.braces,
+        context.listCommaTrusted === true,
+      );
       code += line[cursor];
       if (context.tokenKind === 'none') context.tokenKind = 'nonGeneric';
       if (context.rhsMode === 'statementStart' || context.rhsMode === 'expression') {
         context.rhsMode = 'expression';
       }
-      contexts.push({ kind: 'string', quote: line[cursor] as '"' | "'" });
+      contexts.push({
+        kind: 'string', quote: line[cursor] as '"' | "'", atomOriginTrusted,
+      });
       cursor++;
       continue;
     }
     if (isPowerShellBlockComment(
       line, cursor, code, hashtableEntry, genericActive, context.rhsMode ?? null,
-      context.atomicCommentBoundary === true,
+      context.atomicCommentBoundary === true, context.listCommaTrusted === true,
     )) {
       const commentStart = cursor;
       const closeIndex = line.indexOf('#>', cursor + 2);
@@ -1109,9 +1142,15 @@ function consumePowerShellExpandable(
       continue;
     }
     if (line[cursor] === '(') {
+      const groupOriginTrusted = isPowerShellConfirmedAtomicStart(
+        code, context.tokenKind, context.rhsMode ?? null, context.braces,
+        context.listCommaTrusted === true,
+      );
       code += '(';
       context.depth++;
       context.tokenKind = 'none';
+      (context.trustedGroupOrigins ??= []).push(groupOriginTrusted);
+      context.completedTrustedAtom = false;
       const previousMode = context.rhsMode ?? null;
       if (context.rhsMode === 'statementStart' || context.rhsMode === 'expression') {
         context.rhsMode = 'expression';
@@ -1122,6 +1161,7 @@ function consumePowerShellExpandable(
       continue;
     }
     if (line[cursor] === ')') {
+      const closesTrustedGroup = context.depth > 1;
       code += ')';
       context.depth--;
       cursor++;
@@ -1135,6 +1175,10 @@ function consumePowerShellExpandable(
       } else {
         // () 后的附加字符会开始新 argument；无附加字符时也不续 generic。
         context.tokenKind = 'none';
+        if (closesTrustedGroup) {
+          const originTrusted = context.trustedGroupOrigins?.pop() === true;
+          context.completedTrustedAtom = originTrusted && context.completedTrustedAtom === true;
+        }
       }
       context.rhsNesting ??= newPowerShellRhsNesting();
       updatePowerShellRhsNesting('expression', context.rhsMode ?? null, ')', context.rhsNesting);
@@ -1142,15 +1186,19 @@ function consumePowerShellExpandable(
     }
     if (isPowerShellLineComment(
       line, cursor, code, hashtableEntry, genericActive, context.rhsMode ?? null,
-      context.atomicCommentBoundary === true,
+      context.atomicCommentBoundary === true, context.listCommaTrusted === true,
     )) {
       comments.push(line.slice(cursor));
-      context.rhsContinuation = powerShellContinuationReason(
+      const continuation = powerShellContinuationReason(
         context.rhsMode ?? null, code, explicitModeContinuation,
         context.rhsNesting ?? newPowerShellRhsNesting(),
       ) ?? (code.trim() === ''
         ? powerShellCommandReasonSurvivesEmptyLine(initialContinuation)
         : undefined);
+      context.rhsContinuation = continuation;
+      if (continuation === 'expressionComma' && context.listCommaTrusted !== true) {
+        context.rhsMode = 'command';
+      }
       return { end: line.length, closed: false, code, comments };
     }
     const value = line[cursor];
@@ -1167,6 +1215,16 @@ function consumePowerShellExpandable(
       context.tokenKind = 'generic';
     }
     if (context.rhsMode !== 'command') context.rhsCommandCarried = false;
+    if (value === ',') {
+      context.listCommaTrusted = previousRhsMode === 'expression'
+        && (context.completedTrustedAtom === true
+          || followsPowerShellCompletedMemberAccess(
+            code, previousRhsMode, context.listCommaTrusted === true,
+          ));
+      context.completedTrustedAtom = false;
+    } else if (!/\p{White_Space}/u.test(value)) {
+      context.completedTrustedAtom = false;
+    }
     context.rhsNesting ??= newPowerShellRhsNesting();
     updatePowerShellRhsNesting(previousRhsMode, context.rhsMode, value, context.rhsNesting);
     if ((previousRhsMode === 'statementStart' || previousRhsMode === 'expression')
@@ -1178,12 +1236,16 @@ function consumePowerShellExpandable(
   }
   const finalContext = contexts[contexts.length - 1];
   if (finalContext?.kind === 'expression') {
-    finalContext.rhsContinuation = powerShellContinuationReason(
+    const continuation = powerShellContinuationReason(
       finalContext.rhsMode ?? null, code, explicitModeContinuation,
       finalContext.rhsNesting ?? newPowerShellRhsNesting(),
     ) ?? (code.trim() === ''
       ? powerShellCommandReasonSurvivesEmptyLine(initialContinuation)
       : undefined);
+    finalContext.rhsContinuation = continuation;
+    if (continuation === 'expressionComma' && finalContext.listCommaTrusted !== true) {
+      finalContext.rhsMode = 'command';
+    }
   }
   return { end: line.length, closed: false, code, comments };
 }
@@ -1949,6 +2011,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
   let activePowerShellRhsMode: PowerShellRhsMode = null;
   let activePowerShellRhsNesting = newPowerShellRhsNesting();
   let activePowerShellContinuation: PowerShellContinuationReason | null = null;
+  let activePowerShellCompletedTrustedAtom = false;
+  let activePowerShellListCommaTrusted = false;
+  let activePowerShellTrustedGroupOrigins: boolean[] = [];
   let activeBatchContinuation = false;
   const groovyExpression: GroovyExpressionState = {
     paren: 0, bracket: 0, canEndExpression: false, lineEscape: false,
@@ -1973,11 +2038,14 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     if (initialPowerShellContinuation === 'openGroup') powerShellRhsMode = 'statementStart';
     let powerShellCommandCarried = activePowerShellRhsMode === 'command'
       && initialPowerShellContinuation !== null;
-    let powerShellRhsNesting = activePowerShellRhsMode === null
+    let powerShellRhsNesting: PowerShellRhsNesting = activePowerShellRhsMode === null
       ? newPowerShellRhsNesting()
       : activePowerShellRhsNesting;
     let powerShellModeExplicitContinuation = false;
     let powerShellAtomicCommentBoundary = false;
+    let powerShellCompletedTrustedAtom: boolean = activePowerShellCompletedTrustedAtom;
+    let powerShellListCommaTrusted: boolean = activePowerShellListCommaTrusted;
+    let powerShellTrustedGroupOrigins = activePowerShellTrustedGroupOrigins;
     let groovyLineCode = '';
     const groovyCarried = groovyExpression.paren > 0
       || groovyExpression.bracket > 0
@@ -1989,6 +2057,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
     activePowerShellRhsMode = null;
     activePowerShellRhsNesting = newPowerShellRhsNesting();
     activePowerShellContinuation = null;
+    activePowerShellCompletedTrustedAtom = false;
+    activePowerShellListCommaTrusted = false;
+    activePowerShellTrustedGroupOrigins = [];
 
     if (activeHeredoc) {
       hadStringContent = true;
@@ -2067,6 +2138,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           if (consumed.comments.length > 0) hadComment = true;
           index = consumed.end;
           if (consumed.closed) {
+            powerShellCompletedTrustedAtom
+              = activeString.powerShellAtomOriginTrusted === true;
             powerShellAtomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
               raw, index, activeString.powerShellTokenPrefix ?? 'none',
               activeString.powerShellRhsMode ?? null,
@@ -2112,9 +2185,12 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         const atValidClose = raw.startsWith(rule.close, index)
           && (!rule.closeAtLineStart || index === 0);
         if (atValidClose) {
+          const powerShellAtomOriginTrusted
+            = activeString.powerShellAtomOriginTrusted === true;
           code += rule.close;
           index += rule.close.length;
           if (syntax.dialect === 'powershell') {
+            powerShellCompletedTrustedAtom = powerShellAtomOriginTrusted;
             powerShellAtomicCommentBoundary = isPowerShellQuotedAtomCommentBoundary(
               raw, index, activeString.powerShellTokenPrefix ?? 'none',
               activeString.powerShellRhsMode ?? null,
@@ -2287,11 +2363,11 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           index += 2;
           continue;
         }
-        const atomic = powerShellAtomicExpression(
-          raw, index, isPowerShellConfirmedAtomicStart(
-            code, powerShellTokenKind, powerShellRhsMode, powerShellBraces,
-          ),
+        const atomicStartTrusted = isPowerShellConfirmedAtomicStart(
+          code, powerShellTokenKind, powerShellRhsMode, powerShellBraces,
+          powerShellListCommaTrusted,
         );
+        const atomic = powerShellAtomicExpression(raw, index, atomicStartTrusted);
         if (atomic) {
           code += raw.slice(index, index + atomic.length);
           index += atomic.length;
@@ -2299,6 +2375,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
             powerShellTokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
           }
           powerShellAtomicCommentBoundary = atomic.commentDelimited;
+          powerShellCompletedTrustedAtom = atomicStartTrusted;
           if (powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression') {
             powerShellRhsMode = 'expression';
           } else if (powerShellRhsMode === null
@@ -2349,9 +2426,15 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         }
         const subexpression = powerShellSubexpressions[powerShellSubexpressions.length - 1];
         if (subexpression && raw[index] === '(') {
+          const groupOriginTrusted = isPowerShellConfirmedAtomicStart(
+            code, powerShellTokenKind, powerShellRhsMode, powerShellBraces,
+            powerShellListCommaTrusted,
+          );
           code += '(';
           subexpression.depth++;
           powerShellTokenKind = 'none';
+          powerShellTrustedGroupOrigins.push(groupOriginTrusted);
+          powerShellCompletedTrustedAtom = false;
           const previousMode = powerShellRhsMode;
           if (powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression') {
             powerShellRhsMode = 'expression';
@@ -2361,12 +2444,18 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           continue;
         }
         if (subexpression && raw[index] === ')') {
+          const closesTrustedGroup = subexpression.depth > 1;
           code += ')';
           subexpression.depth--;
           powerShellTokenKind = subexpression.depth === 0
             ? subexpression.returnTokenKind
             : 'none';
           if (subexpression.depth === 0) powerShellSubexpressions.pop();
+          else if (closesTrustedGroup) {
+            const originTrusted = powerShellTrustedGroupOrigins.pop() === true;
+            powerShellCompletedTrustedAtom
+              = originTrusted && powerShellCompletedTrustedAtom;
+          }
           if (powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression') {
             powerShellRhsMode = 'expression';
           }
@@ -2384,7 +2473,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         && !(syntax.dialect === 'powershell' && rule.open === '<#'
           && !isPowerShellBlockComment(
             raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
-            powerShellRhsMode, powerShellAtomicCommentBoundary,
+            powerShellRhsMode, powerShellAtomicCommentBoundary, powerShellListCommaTrusted,
           )));
       if (block) {
         if (syntax.dialect === 'pascal' && (block.open === '{' || block.open === '(*')) {
@@ -2449,7 +2538,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         && !(syntax.dialect === 'powershell' && token === '#'
           && !isPowerShellLineComment(
             raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
-            powerShellRhsMode, powerShellAtomicCommentBoundary,
+            powerShellRhsMode, powerShellAtomicCommentBoundary, powerShellListCommaTrusted,
           )));
       if (lineComment) {
         comments.push(raw.slice(index));
@@ -2467,6 +2556,11 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         );
       });
       if (string) {
+        const powerShellAtomOriginTrusted = syntax.dialect === 'powershell'
+          && isPowerShellConfirmedAtomicStart(
+            code, powerShellTokenKind, powerShellRhsMode, powerShellBraces,
+            powerShellListCommaTrusted,
+          );
         const sqlBackslashEscapes = string.escape === 'sql' && string.open === "'"
           && /(?:^|[^\p{L}\p{N}_$])E$/iu.test(code);
         code += string.open;
@@ -2480,6 +2574,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           groovyLineCode += 'x';
         }
         if (syntax.dialect === 'powershell') {
+          activeString.powerShellAtomOriginTrusted = powerShellAtomOriginTrusted;
           activeString.powerShellTokenPrefix = powerShellTokenKind;
           if (powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression') {
             powerShellRhsMode = 'expression';
@@ -2495,6 +2590,12 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         const value = raw[index];
         const nextCode = code + value;
         const previousRhsMode = powerShellRhsMode;
+        const groupOriginTrusted = value === '('
+          ? isPowerShellConfirmedAtomicStart(
+            code, powerShellTokenKind, powerShellRhsMode, powerShellBraces,
+            powerShellListCommaTrusted,
+          )
+          : false;
         powerShellTokenKind = nextPowerShellTokenKind(
           powerShellTokenKind, value, nextCode, powerShellBraces,
         );
@@ -2508,6 +2609,23 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           powerShellTokenKind = 'generic';
         }
         if (powerShellRhsMode !== 'command') powerShellCommandCarried = false;
+        if (value === '(') {
+          powerShellTrustedGroupOrigins.push(groupOriginTrusted);
+          powerShellCompletedTrustedAtom = false;
+        } else if (value === ')') {
+          const originTrusted = powerShellTrustedGroupOrigins.pop() === true;
+          powerShellCompletedTrustedAtom
+            = originTrusted && powerShellCompletedTrustedAtom;
+        } else if (value === ',') {
+          powerShellListCommaTrusted = previousRhsMode === 'expression'
+            && (powerShellCompletedTrustedAtom
+              || followsPowerShellCompletedMemberAccess(
+                code, previousRhsMode, powerShellListCommaTrusted,
+              ));
+          powerShellCompletedTrustedAtom = false;
+        } else if (!/\p{White_Space}/u.test(value)) {
+          powerShellCompletedTrustedAtom = false;
+        }
         updatePowerShellRhsNesting(
           previousRhsMode, powerShellRhsMode, value, powerShellRhsNesting,
         );
@@ -2544,9 +2662,15 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         : null)
       : null;
     if (syntax.dialect === 'powershell' && nextPowerShellContinuation) {
-      activePowerShellRhsMode = powerShellRhsMode;
+      activePowerShellRhsMode = nextPowerShellContinuation === 'expressionComma'
+        && !powerShellListCommaTrusted
+        ? 'command'
+        : powerShellRhsMode;
       activePowerShellRhsNesting = powerShellRhsNesting;
       activePowerShellContinuation = nextPowerShellContinuation;
+      activePowerShellCompletedTrustedAtom = powerShellCompletedTrustedAtom;
+      activePowerShellListCommaTrusted = powerShellListCommaTrusted;
+      activePowerShellTrustedGroupOrigins = powerShellTrustedGroupOrigins;
     }
     // 嵌入表达式中仅含真实注释的行应按注释行删除，而不是作为外层多行字符串的空内容保留。
     if (hadComment && code.trim() === '') hadStringContent = false;
