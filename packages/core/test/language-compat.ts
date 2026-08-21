@@ -4182,6 +4182,39 @@ assert.deepEqual(
   'Groovy GString expression 内 block/tail 署名与 outer tail 必须定位',
 );
 
+const groovyYieldSlashyContexts = [
+  String.raw`def yielded = switch(v){case 1: yield /don't \/\/ @author Fake Yield Slashy/} // @author Groovy Yield Slashy Tail`,
+  "def message = \"prefix ${switch(v){case 1: yield /don't \\/\\/ @author Fake Yield GString Slashy/}}\" // @author Groovy Yield GString Tail",
+  'obj.yield / divisor // @author Groovy Yield Property Division Tail',
+  'def x = yield / divisor // @author Groovy Yield Identifier Division Tail',
+  String.raw`return /don't \/\/ @author Fake Return Slashy/ // @author Groovy Return Slashy Contrast Tail`,
+  String.raw`def assigned = /don't \/\/ @author Fake Assignment Slashy/ // @author Groovy Assignment Slashy Contrast Tail`,
+  'def divided = total / value // @author Groovy Division Contrast Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(groovyYieldSlashyContexts, 'groovy'), [
+  String.raw`def yielded = switch(v){case 1: yield /don't \/\/ @author Fake Yield Slashy/}`,
+  "def message = \"prefix ${switch(v){case 1: yield /don't \\/\\/ @author Fake Yield GString Slashy/}}\"",
+  'obj.yield / divisor',
+  'def x = yield / divisor',
+  String.raw`return /don't \/\/ @author Fake Return Slashy/`,
+  String.raw`def assigned = /don't \/\/ @author Fake Assignment Slashy/`,
+  'def divided = total / value',
+], 'Groovy top-level 与 GString switch expression 的 yield 后 slash 必须开启 slashy；property/bare identifier yield 后 slash 必须为 division，return/assignment slashy 与普通 division 对照不得回归');
+assert.deepEqual(
+  extractAttributions(groovyYieldSlashyContexts, 'src/yield-slashy-contexts.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Yield Slashy Tail', 1],
+    ['author', 'Groovy Yield GString Tail', 2],
+    ['author', 'Groovy Yield Property Division Tail', 3],
+    ['author', 'Groovy Yield Identifier Division Tail', 4],
+    ['author', 'Groovy Return Slashy Contrast Tail', 5],
+    ['author', 'Groovy Assignment Slashy Contrast Tail', 6],
+    ['author', 'Groovy Division Contrast Tail', 7],
+  ],
+  'Groovy switch-yield/return/assignment slashy 内伪署名不得误报，yield identifier 与普通 division 的真实 tail 必须定位',
+);
+
 const sqlEscapedQuotedLiterals = [
   "SELECT 'single\\'quoted -- # /* @author Fake SQL Single */ and ''doubled''' AS value; -- @author SQL Single Tail",
   'SELECT "double\\"quoted -- # /* @author Fake SQL Double */ and ""doubled""" AS value; /* @author SQL Double Tail */',
@@ -4222,6 +4255,36 @@ assert.deepEqual(
     ['author', 'SQL Triple Backslash Escape', 4],
   ],
   'SQL backslash parity 字符串内伪评论不得截断扫描，闭合后的真实 tail 署名必须定位',
+);
+
+const sqlEscapedQuoteBeforeBoundaries = [
+  String.raw`SELECT '\' AS x, 'foo -- literal'; -- @author SQL Standard Boundary Tail`,
+  String.raw`SELECT 'prefix\' -- # /* @author Fake SQL Escaped Space */ suffix' AS x; -- @author SQL Escaped Space Tail`,
+  String.raw`SELECT 'prefix\',-- # /* @author Fake SQL Escaped Comma */ suffix' AS x; -- @author SQL Escaped Comma Tail`,
+  String.raw`SELECT 'prefix\') -- # /* @author Fake SQL Escaped Paren */ suffix' AS x; -- @author SQL Escaped Paren Tail`,
+  String.raw`SELECT 'prefix\\' AS x, 'even -- literal'; -- @author SQL Even Boundary Contrast Tail`,
+  String.raw`SELECT E'\' -- # /* @author Fake SQL E Escaped Boundary */ suffix' AS x; -- @author SQL E Escaped Boundary Tail`,
+].join('\n');
+assert.deepEqual(cleanedLines(sqlEscapedQuoteBeforeBoundaries, 'sql'), [
+  String.raw`SELECT '\' AS x, 'foo -- literal';`,
+  String.raw`SELECT 'prefix\' -- # /* @author Fake SQL Escaped Space */ suffix' AS x;`,
+  String.raw`SELECT 'prefix\',-- # /* @author Fake SQL Escaped Comma */ suffix' AS x;`,
+  String.raw`SELECT 'prefix\') -- # /* @author Fake SQL Escaped Paren */ suffix' AS x;`,
+  String.raw`SELECT 'prefix\\' AS x, 'even -- literal';`,
+  String.raw`SELECT E'\' -- # /* @author Fake SQL E Escaped Boundary */ suffix' AS x;`,
+], 'SQL non-empty plain string 的 backslash-escaped quote 后即使为空白、逗号或右括号仍须保护内部 --/#/*；标准单-backslash boundary、奇偶 parity 与 E-string 对照不得回归');
+assert.deepEqual(
+  extractAttributions(sqlEscapedQuoteBeforeBoundaries, 'db/escaped-quote-boundaries.sql', 'sql')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'SQL Standard Boundary Tail', 1],
+    ['author', 'SQL Escaped Space Tail', 2],
+    ['author', 'SQL Escaped Comma Tail', 3],
+    ['author', 'SQL Escaped Paren Tail', 4],
+    ['author', 'SQL Even Boundary Contrast Tail', 5],
+    ['author', 'SQL E Escaped Boundary Tail', 6],
+  ],
+  'SQL escaped quote 后边界字符内的伪署名不得误报，标准/plain parity/E-string 闭合后的真实 tail 必须定位',
 );
 
 assert.deepEqual(cleanedLines([

@@ -666,6 +666,7 @@ function canStartGroovySlashy(code: string): boolean {
   const before = code.trimEnd();
   if (before === '') return true;
   if (/[=([{,:;!?&|~+\-*%^<>]$/.test(before)) return true;
+  if (/(?:^|[;{}:])\s*yield$/.test(before)) return true;
   return /(?:\b(?:as|assert|case|else|in|instanceof|return|throw)|->)$/.test(before);
 }
 
@@ -1081,7 +1082,8 @@ function finalizeGroovyExpressionState(state: GroovyExpressionState, code: strin
   state.pendingSignHadOperand = undefined;
   state.lineEscape = groovyHasLineEscape(code);
   const withoutEscape = state.lineEscape ? code.replace(/\\\s*$/, '').trimEnd() : code.trimEnd();
-  if (/\b(?:as|assert|case|else|in|instanceof|return|throw)$/.test(withoutEscape)) {
+  if (/\b(?:as|assert|case|else|in|instanceof|return|throw)$/.test(withoutEscape)
+    || /(?:^|[;{}:])\s*yield$/.test(withoutEscape)) {
     state.canEndExpression = false;
   }
   if (state.paren === 0 && state.bracket === 0 && !state.lineEscape) {
@@ -1673,9 +1675,17 @@ function escapedLength(
     if (count % 2 === 1 && line.startsWith(rule.close, end)) {
       const previous = line[index - 1] ?? '';
       const next = line[end + rule.close.length] ?? '';
-      // MySQL 常见 bare string 仅在词内保守识别 \'；E'...' 则按明确语义处理。
-      if (sqlBackslashEscapes || (/^[\p{L}\p{N}_$]$/u.test(previous)
-        && /^[\p{L}\p{N}_$]$/u.test(next))) return count + rule.close.length;
+      const wordBefore = /^[\p{L}\p{N}_$]$/u.test(previous);
+      const wordAfter = /^[\p{L}\p{N}_$]$/u.test(next);
+      const afterCandidate = line.slice(end + rule.close.length);
+      const commentShapedTail = /^[\s,)]*(?:--|\/\*)/.test(afterCandidate);
+      const laterClose = line.indexOf(rule.close, end + rule.close.length) !== -1;
+      // Generic .sql 同时服务标准 SQL 与 MySQL：词内 quote 明确按 escape；若 quote 后
+      // 仅经空白/有限边界标点即呈现评论标记，且本行仍有后续 close，也保守选择 MySQL 路径。
+      // 开头的 '\\' 没有 wordBefore，仍按标准 SQL boundary quote 闭合。
+      if (sqlBackslashEscapes || (wordBefore && (wordAfter || (commentShapedTail && laterClose)))) {
+        return count + rule.close.length;
+      }
     }
     return count;
   }
