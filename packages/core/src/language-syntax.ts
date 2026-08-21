@@ -217,6 +217,7 @@ type PowerShellContext =
   | {
     kind: 'expression'; depth: number; braces: PowerShellBraceKind[];
     tokenKind: PowerShellTokenKind; continuedToken?: boolean;
+    atomicCommentBoundary?: boolean;
     /** 已确认 RHS 的最小解析模式。 */
     rhsMode?: PowerShellRhsMode;
     rhsContinuation?: PowerShellContinuationReason;
@@ -310,6 +311,18 @@ function appendCommentGap(code: string, line: string, nextIndex: number): string
   return code;
 }
 
+function groovyCommentGap(
+  code: string,
+  line: string,
+  nextIndex: number,
+): { code: string; added: boolean; trimmed: boolean } {
+  if (/\s$/.test(code) && nextIndex < line.length && /\s/.test(line[nextIndex])) {
+    return { code: code.trimEnd(), added: false, trimmed: true };
+  }
+  const nextCode = appendCommentGap(code, line, nextIndex);
+  return { code: nextCode, added: nextCode !== code, trimmed: false };
+}
+
 function isPowerShellRequires(line: string): boolean {
   return /^\s*#requires\b/i.test(line);
 }
@@ -326,10 +339,11 @@ function isPowerShellLineComment(
   hashtableEntry = false,
   continuedToken = false,
   rhsMode: PowerShellRhsMode = null,
+  atomicBoundary = false,
 ): boolean {
   if (line[index] !== '#') return false;
   return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
-    || followsPowerShellExpressionOperator(code, rhsMode);
+    || followsPowerShellExpressionOperator(code, rhsMode) || atomicBoundary;
 }
 
 function isPowerShellBlockComment(
@@ -339,10 +353,11 @@ function isPowerShellBlockComment(
   hashtableEntry = false,
   continuedToken = false,
   rhsMode: PowerShellRhsMode = null,
+  atomicBoundary = false,
 ): boolean {
   if (!line.startsWith('<#', index)) return false;
   return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
-    || followsPowerShellExpressionOperator(code, rhsMode);
+    || followsPowerShellExpressionOperator(code, rhsMode) || atomicBoundary;
 }
 
 function powerShellHereStringHeader(
@@ -390,20 +405,22 @@ function powerShellAtomicExpression(
   line: string,
   index: number,
   expressionBoundary = false,
-): { length: number; bounded: boolean } | null {
+): { length: number; bounded: boolean; commentDelimited: boolean } | null {
   const source = line.slice(index);
   const variableOrStatic = POWERSHELL_VARIABLE_OR_STATIC_EXPRESSION.exec(source);
   const match = variableOrStatic ?? POWERSHELL_NUMERIC_EXPRESSION.exec(source);
   if (!match) return null;
   const end = index + match[0].length;
   const next = line[end];
+  const commentDelimited = expressionBoundary
+    && (next === '#' || line.startsWith('<#', end));
   // argument-mode 中字母、引号、/ : - 等均可继续组成 generic token。
   // unknown mode 仅接受 EOF/ForceStart；已确认 assignment/hashtable RHS 时
   // 才补充 expression boundary。assignment/hashtable 的 = 仍由后续上下文重置。
-  const bounded = end === line.length || isPowerShellForceStartChar(next)
+  const bounded = end === line.length || isPowerShellForceStartChar(next) || commentDelimited
     || (expressionBoundary && (/[+\-*\/%!?~]/.test(next) || next === '=' || next === ']'
       || (next === '`' && end === line.length - 1)));
-  return { length: match[0].length, bounded };
+  return { length: match[0].length, bounded, commentDelimited };
 }
 
 function nextPowerShellTokenKind(
@@ -733,6 +750,8 @@ function consumePowerShellExpandable(
       continue;
     }
 
+    if (context.atomicCommentBoundary && line[cursor] !== '#'
+      && !line.startsWith('<#', cursor)) context.atomicCommentBoundary = false;
     if (line[cursor] === '`') {
       const length = powerShellEscapeLength(line, cursor);
       code += line.slice(cursor, cursor + length);
@@ -778,6 +797,7 @@ function consumePowerShellExpandable(
       if (context.tokenKind === 'none') {
         context.tokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
       }
+      context.atomicCommentBoundary = atomic.commentDelimited;
       if (context.rhsMode === 'statementStart' || context.rhsMode === 'expression') {
         context.rhsMode = 'expression';
       } else if (context.rhsMode == null && /^(?:\?\?=|[+\-*\/%]=)/.test(line.slice(cursor))) {
@@ -814,6 +834,7 @@ function consumePowerShellExpandable(
     }
     if (isPowerShellBlockComment(
       line, cursor, code, hashtableEntry, genericActive, context.rhsMode ?? null,
+      context.atomicCommentBoundary === true,
     )) {
       const commentStart = cursor;
       const closeIndex = line.indexOf('#>', cursor + 2);
@@ -903,6 +924,7 @@ function consumePowerShellExpandable(
     }
     if (isPowerShellLineComment(
       line, cursor, code, hashtableEntry, genericActive, context.rhsMode ?? null,
+      context.atomicCommentBoundary === true,
     )) {
       comments.push(line.slice(cursor));
       context.rhsContinuation = powerShellContinuationReason(
@@ -1121,8 +1143,15 @@ function consumeGroovyGString(
         contexts.push({ kind: 'comment', close: '*/' });
         return finish({ end: line.length, closed: false, code, comments });
       }
-      code = appendCommentGap(code, line, cursor);
-      appendGroovyCode(context, ' ');
+      const gap = groovyCommentGap(code, line, cursor);
+      code = gap.code;
+      if (gap.trimmed) {
+        context.code = context.code.trimEnd();
+        context.lineCode = context.lineCode.trimEnd();
+      } else if (gap.added) {
+        appendGroovyCode(context, ' ');
+        updateGroovyExpressionState(context, ' ');
+      }
       continue;
     }
     if (line[cursor] === '{') {
@@ -1656,6 +1685,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       ? newPowerShellRhsNesting()
       : activePowerShellRhsNesting;
     let powerShellModeExplicitContinuation = false;
+    let powerShellAtomicCommentBoundary = false;
     let groovyLineCode = '';
     const groovyCarried = groovyExpression.paren > 0
       || groovyExpression.bracket > 0
@@ -1907,6 +1937,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       }
 
       if (syntax.dialect === 'powershell') {
+        if (powerShellAtomicCommentBoundary && raw[index] !== '#'
+          && !raw.startsWith('<#', index)) powerShellAtomicCommentBoundary = false;
         if (raw[index] === '`') {
           const length = powerShellEscapeLength(raw, index);
           code += raw.slice(index, index + length);
@@ -1951,6 +1983,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           if (powerShellTokenKind === 'none') {
             powerShellTokenKind = atomic.bounded ? 'nonGeneric' : 'generic';
           }
+          powerShellAtomicCommentBoundary = atomic.commentDelimited;
           if (powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression') {
             powerShellRhsMode = 'expression';
           } else if (powerShellRhsMode === null
@@ -2036,7 +2069,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         && !(syntax.dialect === 'powershell' && rule.open === '<#'
           && !isPowerShellBlockComment(
             raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
-            powerShellRhsMode,
+            powerShellRhsMode, powerShellAtomicCommentBoundary,
           )));
       if (block) {
         if (syntax.dialect === 'pascal' && (block.open === '{' || block.open === '(*')) {
@@ -2070,6 +2103,16 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         index = end;
         if (closeIndex === -1) activeComment = { close: block.close, depth: 1 };
         else if (syntax.dialect === 'powershell') code = appendCommentGap(code, raw, index);
+        else if (syntax.dialect === 'groovy') {
+          const gap = groovyCommentGap(code, raw, index);
+          code = gap.code;
+          if (gap.trimmed) {
+            groovyLineCode = groovyLineCode.trimEnd();
+          } else if (gap.added) {
+            groovyLineCode += ' ';
+            updateGroovyExpressionState(groovyExpression, ' ');
+          }
+        }
         if (syntax.dialect === 'powershell') powerShellTokenKind = 'none';
         continue;
       }
@@ -2084,7 +2127,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         && !(syntax.dialect === 'powershell' && token === '#'
           && !isPowerShellLineComment(
             raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
-            powerShellRhsMode,
+            powerShellRhsMode, powerShellAtomicCommentBoundary,
           )));
       if (lineComment) {
         comments.push(raw.slice(index));

@@ -3005,6 +3005,58 @@ assert.deepEqual(attributionSummary(powerShellAdjacentOperatorCommentsInExpandab
   ['author', 'PS Expression Operator Expandable Outer Tail', 7],
 ], 'PowerShell expandable expression 内真实 operator 评论与 outer tail 必须定位，command token 伪署名不得误报');
 
+const powerShellConfirmedAtomicAdjacentComments = [
+  '$variable=$value# @author PS Variable Adjacent Hash',
+  '$number=123# @author PS Numeric Adjacent Hash',
+  '$static=[Type]::Member# @author PS Static Adjacent Hash',
+  '$member=$object.Property# @author PS Member Adjacent Hash',
+  '$block=$value<# @author PS Variable Adjacent Block #>+1',
+  'Write-Output https://example.test/#fragment @author Fake URL Hash',
+  'Write-Output foo#bar @author Fake Command Hash',
+  'Write-Output foo<#bar @author Fake Command Block#>baz',
+].join('\n');
+const powerShellConfirmedAtomicAdjacentCommentsExpected = [
+  '$variable=$value',
+  '$number=123',
+  '$static=[Type]::Member',
+  '$member=$object.Property',
+  '$block=$value +1',
+  'Write-Output https://example.test/#fragment @author Fake URL Hash',
+  'Write-Output foo#bar @author Fake Command Hash',
+  'Write-Output foo<#bar @author Fake Command Block#>baz',
+];
+assert.deepEqual(
+  cleanedLines(powerShellConfirmedAtomicAdjacentComments, 'ps1'),
+  powerShellConfirmedAtomicAdjacentCommentsExpected,
+  'PowerShell confirmed RHS 的 variable/numeric/static/member atomic token 后无空白 #/<# 必须开启评论，command URL/bareword token 内标记必须保留',
+);
+assert.deepEqual(attributionSummary(powerShellConfirmedAtomicAdjacentComments, 'src/atomic-adjacent-comments.ps1'), [
+  ['author', 'PS Variable Adjacent Hash', 1],
+  ['author', 'PS Numeric Adjacent Hash', 2],
+  ['author', 'PS Static Adjacent Hash', 3],
+  ['author', 'PS Member Adjacent Hash', 4],
+  ['author', 'PS Variable Adjacent Block', 5],
+], 'PowerShell confirmed atomic 后真实邻接评论署名必须定位，command token 中伪署名不得误报');
+
+const powerShellConfirmedAtomicAdjacentInExpandable = [
+  '$message = "prefix $(',
+  ...powerShellConfirmedAtomicAdjacentComments.split('\n'),
+  ') suffix" # @author PS Atomic Adjacent Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellConfirmedAtomicAdjacentInExpandable, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellConfirmedAtomicAdjacentCommentsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 confirmed atomic 邻接评论与 command token 负例必须按相同语义扫描并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellConfirmedAtomicAdjacentInExpandable, 'src/atomic-adjacent-expandable.ps1'), [
+  ['author', 'PS Variable Adjacent Hash', 2],
+  ['author', 'PS Numeric Adjacent Hash', 3],
+  ['author', 'PS Static Adjacent Hash', 4],
+  ['author', 'PS Member Adjacent Hash', 5],
+  ['author', 'PS Variable Adjacent Block', 6],
+  ['author', 'PS Atomic Adjacent Expandable Outer Tail', 10],
+], 'PowerShell expandable expression 内 atomic 邻接评论与 outer tail 署名必须定位，command token 伪署名不得误报');
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',
@@ -3875,6 +3927,56 @@ assert.deepEqual(
     ['author', 'Groovy Four Minus Division', 4],
   ],
   'Groovy 同号 run 后 slashy 内容伪署名不得误报，真实 slashy/division 尾评论署名必须定位',
+);
+
+const groovyBlockCommentWhitespace = [
+  'def/*c*/x=1 // @author Groovy Adjacent Block Tail',
+  'foo /*c*/ bar // @author Groovy Spaced Block Tail',
+  'def multi = foo/* @author Groovy Multiline Block Maintainer',
+  'still comment */bar',
+].join('\n');
+const groovyBlockCommentWhitespaceExpected = [
+  'def x=1',
+  'foo bar',
+  'def multi = foo',
+  'bar',
+];
+assert.deepEqual(
+  cleanedLines(groovyBlockCommentWhitespace, 'groovy'),
+  groovyBlockCommentWhitespaceExpected,
+  'Groovy 同行 block comment 只补一个必要 token gap，已有两侧空白不得变双空格；跨行 block 由物理换行分隔且不得额外补空格',
+);
+assert.deepEqual(
+  extractAttributions(groovyBlockCommentWhitespace, 'src/block-comment-whitespace.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Adjacent Block Tail', 1],
+    ['author', 'Groovy Spaced Block Tail', 2],
+    ['author', 'Groovy Multiline Block Maintainer', 3],
+  ],
+  'Groovy block comment whitespace 清洗后，同行 tail 与跨行 block 内真实署名必须定位',
+);
+
+const groovyBlockCommentWhitespaceInGString = [
+  'def message = "prefix ${',
+  ...groovyBlockCommentWhitespace.split('\n'),
+  '} suffix" // @author Groovy Block Gap GString Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(groovyBlockCommentWhitespaceInGString, 'groovy'), [
+  'def message = "prefix ${',
+  ...groovyBlockCommentWhitespaceExpected,
+  '} suffix"',
+], 'Groovy GString expression 内 block comment 必须复用 top-level token gap 规则并在结束后恢复 outer string');
+assert.deepEqual(
+  extractAttributions(groovyBlockCommentWhitespaceInGString, 'src/block-comment-whitespace-gstring.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Adjacent Block Tail', 2],
+    ['author', 'Groovy Spaced Block Tail', 3],
+    ['author', 'Groovy Multiline Block Maintainer', 4],
+    ['author', 'Groovy Block Gap GString Outer Tail', 6],
+  ],
+  'Groovy GString expression 内 block/tail 署名与 outer tail 必须定位',
 );
 
 const sqlEscapedQuotedLiterals = [
