@@ -856,6 +856,8 @@ function isVbRem(line: string, index: number): boolean {
 function canStartGroovySlashy(code: string): boolean {
   const before = code.trimEnd();
   if (before === '') return true;
+  // 与 GroovyLexer.isRegexAllowed 保持一致：Identifier/Property 后的 `/` 是 DIV，
+  // whitespace 不会重置 last significant token；命令参数需在 comma/colon 等边界后开启。
   if (/[=([{,:;!?&|~+\-*%^<>]$/.test(before)) return true;
   if (/(?:^|[;{}:])\s*yield$/.test(before)) return true;
   return /(?:\b(?:as|assert|case|else|in|instanceof|return|throw)|->)$/.test(before);

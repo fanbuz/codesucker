@@ -4717,6 +4717,77 @@ assert.deepEqual(
   'Groovy switch-yield/return/assignment slashy 内伪署名不得误报，yield identifier 与普通 division 的真实 tail 必须定位',
 );
 
+const groovyParenthesisFreeCommandSlashy = [
+  String.raw`consume 'label', /don't \/\/ @author Fake Multi Argument Command Slashy/ // @author Groovy Multi Argument Command Slashy Tail`,
+  String.raw`consume pattern: /don't \/\/ @author Fake Named Argument Command Slashy/ // @author Groovy Named Argument Command Slashy Tail`,
+  'def divided = total / count // @author Groovy Command Contrast Division Tail',
+  'obj.method / divisor // @author Groovy Method Division Contrast Tail',
+  'println / divisor // @author Groovy Println Identifier Division Tail',
+  'logger.info / divisor // @author Groovy Method Identifier Division Tail',
+  'def x = yield / divisor // @author Groovy Yield Division Contrast Tail',
+  String.raw`return /don't \/\/ @author Fake Command Return Slashy/ // @author Groovy Command Return Slashy Tail`,
+  String.raw`def assigned = /don't \/\/ @author Fake Command Assignment Slashy/ // @author Groovy Command Assignment Slashy Tail`,
+].join('\n');
+const groovyParenthesisFreeCommandSlashyExpected = [
+  String.raw`consume 'label', /don't \/\/ @author Fake Multi Argument Command Slashy/`,
+  String.raw`consume pattern: /don't \/\/ @author Fake Named Argument Command Slashy/`,
+  'def divided = total / count',
+  'obj.method / divisor',
+  'println / divisor',
+  'logger.info / divisor',
+  'def x = yield / divisor',
+  String.raw`return /don't \/\/ @author Fake Command Return Slashy/`,
+  String.raw`def assigned = /don't \/\/ @author Fake Command Assignment Slashy/`,
+];
+assert.deepEqual(
+  cleanedLines(groovyParenthesisFreeCommandSlashy, 'groovy'),
+  groovyParenthesisFreeCommandSlashyExpected,
+  'Groovy comma/named-argument colon后slash必须开启slashy；identifier/property/yield后slash必须保持division，return/assignment slashy对照不得回归',
+);
+assert.deepEqual(
+  extractAttributions(groovyParenthesisFreeCommandSlashy, 'src/parenthesis-free-command-slashy.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Multi Argument Command Slashy Tail', 1],
+    ['author', 'Groovy Named Argument Command Slashy Tail', 2],
+    ['author', 'Groovy Command Contrast Division Tail', 3],
+    ['author', 'Groovy Method Division Contrast Tail', 4],
+    ['author', 'Groovy Println Identifier Division Tail', 5],
+    ['author', 'Groovy Method Identifier Division Tail', 6],
+    ['author', 'Groovy Yield Division Contrast Tail', 7],
+    ['author', 'Groovy Command Return Slashy Tail', 8],
+    ['author', 'Groovy Command Assignment Slashy Tail', 9],
+  ],
+  'Groovy comma/named-argument slashy 内apostrophe、//与伪署名必须保留，闭合slash后的真实tail和identifier division对照署名必须定位',
+);
+
+const groovyParenthesisFreeCommandSlashyInGString = [
+  'def message = "prefix ${',
+  String.raw`  consume 'label', /don't \/\/ @author Fake GString Multi Argument Slashy/ // @author Groovy GString Multi Argument Slashy Tail`,
+  '} suffix" # literal hash inside Groovy code',
+  'def methodMessage = "prefix ${',
+  String.raw`  consume pattern: /don't \/\/ @author Fake GString Named Argument Slashy/ // @author Groovy GString Named Argument Slashy Tail`,
+  '} suffix" // @author Groovy Command Argument GString Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(groovyParenthesisFreeCommandSlashyInGString, 'groovy'), [
+  'def message = "prefix ${',
+  String.raw`  consume 'label', /don't \/\/ @author Fake GString Multi Argument Slashy/`,
+  '} suffix" # literal hash inside Groovy code',
+  'def methodMessage = "prefix ${',
+  String.raw`  consume pattern: /don't \/\/ @author Fake GString Named Argument Slashy/`,
+  '} suffix"',
+], 'Groovy GString expression内comma/named-argument slashy必须复用top-level判定，关闭slash后删除真实tail并恢复outer string');
+assert.deepEqual(
+  extractAttributions(groovyParenthesisFreeCommandSlashyInGString, 'src/parenthesis-free-command-slashy-gstring.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy GString Multi Argument Slashy Tail', 2],
+    ['author', 'Groovy GString Named Argument Slashy Tail', 5],
+    ['author', 'Groovy Command Argument GString Outer Tail', 6],
+  ],
+  'Groovy GString comma/named-argument slashy 内伪署名不得误报，expression tail与outer tail必须定位',
+);
+
 const sqlEscapedQuotedLiterals = [
   "SELECT 'single\\'quoted -- # /* @author Fake SQL Single */ and ''doubled''' AS value; -- @author SQL Single Tail",
   'SELECT "double\\"quoted -- # /* @author Fake SQL Double */ and ""doubled""" AS value; /* @author SQL Double Tail */',
