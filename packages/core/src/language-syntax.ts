@@ -186,8 +186,10 @@ type HclContext =
 
 type PowerShellContext =
   | { kind: 'string'; quote: '"' | "'"; hereString?: boolean }
-  | { kind: 'expression'; depth: number }
+  | { kind: 'expression'; depth: number; braces: PowerShellBraceKind[] }
   | { kind: 'comment' };
+
+type PowerShellBraceKind = 'hashtable' | 'ordinary';
 
 interface ActiveHeredoc {
   delimiter: string;
@@ -215,6 +217,22 @@ interface ConsumedSource {
   comments: string[];
 }
 
+const POWERSHELL_IDENTIFIER = '[\\p{L}_][\\p{L}\\p{N}_]*';
+const POWERSHELL_VARIABLE = '(?:\\$\\{[^{}\\r\\n]+\\}|\\$[\\p{L}_][\\p{L}\\p{N}_:]*)';
+const POWERSHELL_TYPE_LITERAL = '\\[[\\p{L}_][^\\]\\r\\n]*\\]';
+const POWERSHELL_MEMBER = `(?:(?:::|\\.)(?:${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE})|\\[[^\\]\\r\\n]+\\])`;
+const POWERSHELL_ASSIGNMENT_TARGET = `(?:${POWERSHELL_TYPE_LITERAL}\\p{White_Space}*${POWERSHELL_VARIABLE}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE}(?:${POWERSHELL_MEMBER})*)`;
+const POWERSHELL_ASSIGNMENT_TARGETS = `${POWERSHELL_ASSIGNMENT_TARGET}(?:\\p{White_Space}*,\\p{White_Space}*${POWERSHELL_ASSIGNMENT_TARGET})*`;
+const POWERSHELL_ASSIGNMENT_END = new RegExp(
+  `(?:^|[&(),;{}|])\\p{White_Space}*(?:${POWERSHELL_ASSIGNMENT_TARGETS}\\p{White_Space}*=\\p{White_Space}*)*${POWERSHELL_ASSIGNMENT_TARGETS}\\p{White_Space}*(?:\\?\\?=|[+\\-*\\/%]?=)$`,
+  'u',
+);
+const POWERSHELL_HASHTABLE_KEY = `(?:${POWERSHELL_IDENTIFIER}(?:[.-]${POWERSHELL_IDENTIFIER})*|"(?:\`.|""|[^"])*"|'(?:''|[^'])*')`;
+const POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT = new RegExp(
+  `(?:^|[;{])\\p{White_Space}*${POWERSHELL_HASHTABLE_KEY}\\p{White_Space}*=$`,
+  'u',
+);
+
 /** 块注释在表达式中等价于空白；仅在没有现成空白时补位，避免相邻 token 粘连。 */
 function appendCommentGap(code: string, line: string, nextIndex: number): string {
   if (code !== '' && !/\s$/.test(code) && nextIndex < line.length && !/\s/.test(line[nextIndex])) {
@@ -227,19 +245,34 @@ function isPowerShellRequires(line: string): boolean {
   return /^\s*#requires\b/i.test(line);
 }
 
-function isPowerShellLineComment(line: string, index: number, code: string): boolean {
+function isPowerShellLineComment(
+  line: string,
+  index: number,
+  code: string,
+  hashtableEntry = false,
+): boolean {
   if (line[index] !== '#') return false;
-  return isPowerShellTokenStart(code);
+  return isPowerShellTokenStart(code) || hashtableEntry;
 }
 
-function isPowerShellBlockComment(line: string, index: number, code: string): boolean {
+function isPowerShellBlockComment(
+  line: string,
+  index: number,
+  code: string,
+  hashtableEntry = false,
+): boolean {
   if (!line.startsWith('<#', index)) return false;
-  return isPowerShellTokenStart(code);
+  return isPowerShellTokenStart(code) || hashtableEntry;
 }
 
-function powerShellHereStringHeader(line: string, index: number, code: string): '"' | "'" | null {
+function powerShellHereStringHeader(
+  line: string,
+  index: number,
+  code: string,
+  hashtableEntry = false,
+): '"' | "'" | null {
   const quote = line.startsWith('@"', index) ? '"' : line.startsWith("@'", index) ? "'" : null;
-  if (!quote || !isPowerShellTokenStart(code)
+  if (!quote || (!isPowerShellTokenStart(code) && !hashtableEntry)
     || line.slice(index + 2).trim() !== '') return null;
   return quote;
 }
@@ -247,7 +280,29 @@ function powerShellHereStringHeader(line: string, index: number, code: string): 
 function isPowerShellTokenStart(code: string): boolean {
   if (code === '') return true;
   // 官方 ForceStartNewToken 集合：argument mode 中 =、[]、/、-、: 等仍可属于 generic token。
-  return /[\p{White_Space}&(),;{}|]$/u.test(code);
+  if (/[\p{White_Space}&(),;{}|]$/u.test(code)) return true;
+  return endsWithPowerShellAssignment(code);
+}
+
+function endsWithPowerShellAssignment(code: string): boolean {
+  // 从明确的表达式起点匹配受限 LHS grammar，避免把 command argument 的 $x=/name= 当成赋值。
+  return POWERSHELL_ASSIGNMENT_END.test(code);
+}
+
+function isPowerShellHashtableEntryAssignment(code: string, braces: PowerShellBraceKind[]): boolean {
+  return braces[braces.length - 1] === 'hashtable' && POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT.test(code);
+}
+
+function powerShellHashtableOpenLength(
+  line: string,
+  index: number,
+  code: string,
+  braces: PowerShellBraceKind[] = [],
+): number {
+  if (!isPowerShellTokenStart(code) && !isPowerShellHashtableEntryAssignment(code, braces)) return 0;
+  if (line.startsWith('@{', index)) return 2;
+  const ordered = /^\[ordered\]@\{/i.exec(line.slice(index));
+  return ordered?.[0].length ?? 0;
 }
 
 function batchCommentStart(line: string): number | null {
@@ -280,11 +335,17 @@ function canStartGroovySlashy(code: string): boolean {
   return /(?:\b(?:as|assert|case|else|in|instanceof|return|throw)|->)$/.test(before);
 }
 
-function canOpenString(rule: StringRule, line: string, index: number, code: string): boolean {
+function canOpenString(
+  rule: StringRule,
+  line: string,
+  index: number,
+  code: string,
+  powerShellHashtableEntry = false,
+): boolean {
   if (!line.startsWith(rule.open, index)) return false;
   if (rule.openAtLineEnd && line.slice(index + rule.open.length).trim() !== '') return false;
   if (rule.openAtLineEnd && rule.closeAtLineStart
-    && !isPowerShellTokenStart(code)) return false;
+    && !isPowerShellTokenStart(code) && !powerShellHashtableEntry) return false;
   if (rule.contextual === 'groovy-slashy' && !canStartGroovySlashy(code)) return false;
   return true;
 }
@@ -346,7 +407,7 @@ function consumePowerShellExpandable(
       }
       if (context.quote === '"' && line.startsWith('$(', cursor)) {
         code += '$(';
-        contexts.push({ kind: 'expression', depth: 1 });
+        contexts.push({ kind: 'expression', depth: 1, braces: [] });
         cursor += 2;
         continue;
       }
@@ -362,7 +423,8 @@ function consumePowerShellExpandable(
       continue;
     }
 
-    const hereStringQuote = powerShellHereStringHeader(line, cursor, code);
+    const hashtableEntry = isPowerShellHashtableEntryAssignment(code, context.braces);
+    const hereStringQuote = powerShellHereStringHeader(line, cursor, code, hashtableEntry);
     if (hereStringQuote) {
       code += `@${hereStringQuote}`;
       contexts.push({ kind: 'string', quote: hereStringQuote, hereString: true });
@@ -375,7 +437,7 @@ function consumePowerShellExpandable(
       cursor++;
       continue;
     }
-    if (isPowerShellBlockComment(line, cursor, code)) {
+    if (isPowerShellBlockComment(line, cursor, code, hashtableEntry)) {
       const commentStart = cursor;
       const closeIndex = line.indexOf('#>', cursor + 2);
       cursor = closeIndex === -1 ? line.length : closeIndex + 2;
@@ -385,6 +447,25 @@ function consumePowerShellExpandable(
         return { end: line.length, closed: false, code, comments };
       }
       code = appendCommentGap(code, line, cursor);
+      continue;
+    }
+    const hashtableOpenLength = powerShellHashtableOpenLength(line, cursor, code, context.braces);
+    if (hashtableOpenLength > 0) {
+      code += line.slice(cursor, cursor + hashtableOpenLength);
+      context.braces.push('hashtable');
+      cursor += hashtableOpenLength;
+      continue;
+    }
+    if (line[cursor] === '{') {
+      code += '{';
+      context.braces.push('ordinary');
+      cursor++;
+      continue;
+    }
+    if (line[cursor] === '}') {
+      code += '}';
+      context.braces.pop();
+      cursor++;
       continue;
     }
     if (line[cursor] === '(') {
@@ -400,7 +481,7 @@ function consumePowerShellExpandable(
       if (context.depth === 0) contexts.pop();
       continue;
     }
-    if (isPowerShellLineComment(line, cursor, code)) {
+    if (isPowerShellLineComment(line, cursor, code, hashtableEntry)) {
       comments.push(line.slice(cursor));
       return { end: line.length, closed: false, code, comments };
     }
@@ -873,6 +954,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
   let activeString: ActiveString | null = null;
   let activeHeredoc: ActiveHeredoc | null = null;
   let activeVbXml: ActiveVbXml | null = null;
+  const powerShellBraces: PowerShellBraceKind[] = [];
 
   for (const raw of rawLines) {
     let code = '';
@@ -1064,9 +1146,33 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         }
       }
 
+      if (syntax.dialect === 'powershell') {
+        const hashtableOpenLength = powerShellHashtableOpenLength(raw, index, code, powerShellBraces);
+        if (hashtableOpenLength > 0) {
+          code += raw.slice(index, index + hashtableOpenLength);
+          powerShellBraces.push('hashtable');
+          index += hashtableOpenLength;
+          continue;
+        }
+        if (raw[index] === '{') {
+          code += '{';
+          powerShellBraces.push('ordinary');
+          index++;
+          continue;
+        }
+        if (raw[index] === '}') {
+          code += '}';
+          powerShellBraces.pop();
+          index++;
+          continue;
+        }
+      }
+
+      const powerShellHashtableEntry = syntax.dialect === 'powershell'
+        && isPowerShellHashtableEntryAssignment(code, powerShellBraces);
       const block = syntax.blockComments.find((rule) => raw.startsWith(rule.open, index)
         && !(syntax.dialect === 'powershell' && rule.open === '<#'
-          && !isPowerShellBlockComment(raw, index, code)));
+          && !isPowerShellBlockComment(raw, index, code, powerShellHashtableEntry)));
       if (block) {
         if (block.nested) {
           const commentStart = index;
@@ -1096,14 +1202,16 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
 
       const lineComment = syntax.lineComments.find((token) => raw.startsWith(token, index)
         && !(syntax.dialect === 'powershell' && token === '#'
-          && !isPowerShellLineComment(raw, index, code)));
+          && !isPowerShellLineComment(raw, index, code, powerShellHashtableEntry)));
       if (lineComment) {
         comments.push(raw.slice(index));
         hadComment = true;
         break;
       }
 
-      const string = syntax.strings.find((rule) => canOpenString(rule, raw, index, code));
+      const string = syntax.strings.find((rule) => canOpenString(
+        rule, raw, index, code, powerShellHashtableEntry,
+      ));
       if (string) {
         code += string.open;
         index += string.open.length;
