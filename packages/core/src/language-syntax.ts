@@ -346,11 +346,9 @@ function powerShellAtomicExpression(
   const end = index + match[0].length;
   const next = line[end];
   // argument-mode 中字母、引号、/ : - 等均可继续组成 generic token。
-  // numeric 在 argument mode 中只有 EOF/ForceStart 可确认终止；= ] 与行末 backtick
-  // 仍可属于 generic token。变量/static member 则有明确语法终点。
-  const bounded = end === line.length || isPowerShellForceStartChar(next)
-    || (variableOrStatic !== null && (next === '=' || next === ']'
-      || (next === '`' && end === line.length - 1)));
+  // scanner 不完整判定 expression/argument mode，因此所有 atomic 都只接受
+  // EOF/ForceStart 这类确认边界。assignment/hashtable 的 = 由后续上下文单独重置。
+  const bounded = end === line.length || isPowerShellForceStartChar(next);
   return { length: match[0].length, bounded };
 }
 
@@ -520,7 +518,7 @@ function consumePowerShellExpandable(
       code += '$(';
       contexts.push({
         kind: 'expression', depth: 1, braces: [], tokenKind: 'none',
-        returnTokenKind: context.tokenKind === 'generic' ? 'generic' : 'nonGeneric',
+        returnTokenKind: context.tokenKind === 'generic' ? 'generic' : 'none',
       });
       cursor += 2;
       continue;
@@ -1312,7 +1310,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           code += '$(';
           powerShellSubexpressions.push({
             depth: 1,
-            returnTokenKind: powerShellTokenKind === 'generic' ? 'generic' : 'nonGeneric',
+            returnTokenKind: powerShellTokenKind === 'generic' ? 'generic' : 'none',
           });
           powerShellTokenKind = 'none';
           index += 2;
