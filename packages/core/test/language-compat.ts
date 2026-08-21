@@ -1291,6 +1291,378 @@ assert.deepEqual(attributionSummary(powerShellHashtableHereInExpandableString, '
   ['author', 'PS Hashtable Expandable Outer Tail', 12],
 ], 'PowerShell expandable $() hashtable 内容伪署名不得误报，value terminator 与 outer tail 真实署名必须定位');
 
+const powerShellCommandCommaAssignmentBody = [
+  'Write-Output first,$x=@"',
+  '# literal <# literal #> @author Fake Command Comma Double',
+  'double-last" # @author PS Command Comma Double Tail',
+  "Write-Output first,$x=@'",
+  '# literal <# literal #> @author Fake Command Comma Single',
+  "single-last' # @author PS Command Comma Single Tail",
+  '$a,$b=@"',
+  'multi " quote # <# literal #> @author Fake Real Multi Assignment',
+  '"@; # @author PS Real Multi Assignment Tail',
+];
+const powerShellCommandCommaAssignmentExpected = [
+  'Write-Output first,$x=@"',
+  '# literal <# literal #> @author Fake Command Comma Double',
+  'double-last"',
+  "Write-Output first,$x=@'",
+  '# literal <# literal #> @author Fake Command Comma Single',
+  "single-last'",
+  '$a,$b=@"',
+  'multi " quote # <# literal #> @author Fake Real Multi Assignment',
+  '"@;',
+];
+
+const powerShellCommandCommaAssignmentTopLevel = powerShellCommandCommaAssignmentBody.join('\n');
+assert.deepEqual(
+  cleanedLines(powerShellCommandCommaAssignmentTopLevel, 'ps1'),
+  powerShellCommandCommaAssignmentExpected,
+  'PowerShell 顶层 command argument 逗号后的 $x=@quote 必须 ordinary，真正多目标 $a,$b=@quote 仍须开启 here-string',
+);
+assert.deepEqual(attributionSummary(powerShellCommandCommaAssignmentTopLevel, 'src/command-comma-top.ps1'), [
+  ['author', 'PS Command Comma Double Tail', 3],
+  ['author', 'PS Command Comma Single Tail', 6],
+  ['author', 'PS Real Multi Assignment Tail', 9],
+], 'PowerShell 顶层 command comma token 与真实 multi-assignment 内容伪署名不得误报，闭合后真实署名必须定位');
+
+const powerShellCommandCommaAssignmentInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellCommandCommaAssignmentBody,
+  ') suffix" # @author PS Command Comma Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellCommandCommaAssignmentInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellCommandCommaAssignmentExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 command first,$x= 必须 ordinary，真实 $a,$b= 仍须 nested here-string');
+assert.deepEqual(attributionSummary(powerShellCommandCommaAssignmentInExpandableString, 'src/command-comma-expandable.ps1'), [
+  ['author', 'PS Command Comma Double Tail', 4],
+  ['author', 'PS Command Comma Single Tail', 7],
+  ['author', 'PS Real Multi Assignment Tail', 10],
+  ['author', 'PS Command Comma Expandable Outer Tail', 11],
+], 'PowerShell expandable $() command comma token 与真实 multi-assignment 的内部及 outer tail 署名必须定位');
+
+const powerShellCommandCommaAssignmentInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellCommandCommaAssignmentBody,
+  ')',
+  '"@',
+  'Write-Output $outer # @author PS Command Comma Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellCommandCommaAssignmentInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellCommandCommaAssignmentExpected,
+  ')',
+  '"@',
+  'Write-Output $outer',
+], 'PowerShell outer expandable here $() 内 command first,$x= 必须 ordinary，真实 $a,$b= 仍须 nested here-string');
+assert.deepEqual(attributionSummary(powerShellCommandCommaAssignmentInOuterHereString, 'src/command-comma-outer-here.ps1'), [
+  ['author', 'PS Command Comma Double Tail', 5],
+  ['author', 'PS Command Comma Single Tail', 8],
+  ['author', 'PS Real Multi Assignment Tail', 11],
+  ['author', 'PS Command Comma Here Outer Tail', 14],
+], 'PowerShell outer here $() command comma token 与真实 multi-assignment 的内部及 outer tail 署名必须定位');
+
+const powerShellAdvancedCommandAssignmentBody = [
+  'Write-Output first,${x}=@"',
+  '# literal <# literal #> @author Fake Braced Comma Command',
+  'braced-last" # @author PS Braced Comma Command Tail',
+  "Write-Output first,$obj.Prop=@'",
+  '# literal <# literal #> @author Fake Property Comma Command',
+  "property-last' # @author PS Property Comma Command Tail",
+  'Get-X | $cmd=@"',
+  '# literal <# literal #> @author Fake Pipeline Command',
+  'pipeline-last" # @author PS Pipeline Command Tail',
+  "&$cmd=@'",
+  '# literal <# literal #> @author Fake Call Operator Command',
+  "call-last' # @author PS Call Operator Command Tail",
+  '$a,$b=@"',
+  'multi " quote # <# literal #> @author Fake Multi Assignment Control',
+  '"@; # @author PS Multi Assignment Control Tail',
+  "($a,$b)=@'",
+  "paren multi ' quote # <# literal #> @author Fake Paren Multi Assignment",
+  "'@; # @author PS Paren Multi Assignment Tail",
+];
+const powerShellAdvancedCommandAssignmentExpected = [
+  'Write-Output first,${x}=@"',
+  '# literal <# literal #> @author Fake Braced Comma Command',
+  'braced-last"',
+  "Write-Output first,$obj.Prop=@'",
+  '# literal <# literal #> @author Fake Property Comma Command',
+  "property-last'",
+  'Get-X | $cmd=@"',
+  '# literal <# literal #> @author Fake Pipeline Command',
+  'pipeline-last"',
+  "&$cmd=@'",
+  '# literal <# literal #> @author Fake Call Operator Command',
+  "call-last'",
+  '$a,$b=@"',
+  'multi " quote # <# literal #> @author Fake Multi Assignment Control',
+  '"@;',
+  "($a,$b)=@'",
+  "paren multi ' quote # <# literal #> @author Fake Paren Multi Assignment",
+  "'@;",
+];
+
+const powerShellAdvancedCommandAssignmentTopLevel = powerShellAdvancedCommandAssignmentBody.join('\n');
+assert.deepEqual(
+  cleanedLines(powerShellAdvancedCommandAssignmentTopLevel, 'ps1'),
+  powerShellAdvancedCommandAssignmentExpected,
+  'PowerShell 顶层 command braced/property comma、pipeline/call-operator assignment token 必须 ordinary，multi/paren-multi LHS 仍须 here-string',
+);
+assert.deepEqual(attributionSummary(powerShellAdvancedCommandAssignmentTopLevel, 'src/advanced-command-top.ps1'), [
+  ['author', 'PS Braced Comma Command Tail', 3],
+  ['author', 'PS Property Comma Command Tail', 6],
+  ['author', 'PS Pipeline Command Tail', 9],
+  ['author', 'PS Call Operator Command Tail', 12],
+  ['author', 'PS Multi Assignment Control Tail', 15],
+  ['author', 'PS Paren Multi Assignment Tail', 18],
+], 'PowerShell 顶层 advanced command token 与 multi-assignment 内容伪署名不得误报，闭合后真实署名必须定位');
+
+const powerShellAdvancedCommandAssignmentInExpandableString = [
+  '$message = "prefix $(',
+  ...powerShellAdvancedCommandAssignmentBody,
+  ') suffix" # @author PS Advanced Command Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellAdvancedCommandAssignmentInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellAdvancedCommandAssignmentExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 advanced command assignment token 必须 ordinary，multi/paren-multi 仍须 nested here-string');
+assert.deepEqual(attributionSummary(powerShellAdvancedCommandAssignmentInExpandableString, 'src/advanced-command-expandable.ps1'), [
+  ['author', 'PS Braced Comma Command Tail', 4],
+  ['author', 'PS Property Comma Command Tail', 7],
+  ['author', 'PS Pipeline Command Tail', 10],
+  ['author', 'PS Call Operator Command Tail', 13],
+  ['author', 'PS Multi Assignment Control Tail', 16],
+  ['author', 'PS Paren Multi Assignment Tail', 19],
+  ['author', 'PS Advanced Command Expandable Outer Tail', 20],
+], 'PowerShell expandable $() advanced command/multi-assignment 的真实 terminator 与 outer tail 署名必须定位');
+
+const powerShellAdvancedCommandAssignmentInOuterHereString = [
+  '$outer = @"',
+  '$(',
+  ...powerShellAdvancedCommandAssignmentBody,
+  ')',
+  '"@',
+  'Write-Output $outer # @author PS Advanced Command Here Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellAdvancedCommandAssignmentInOuterHereString, 'ps1'), [
+  '$outer = @"',
+  '$(',
+  ...powerShellAdvancedCommandAssignmentExpected,
+  ')',
+  '"@',
+  'Write-Output $outer',
+], 'PowerShell outer here $() 内 advanced command assignment token 必须 ordinary，multi/paren-multi 仍须 nested here-string');
+assert.deepEqual(attributionSummary(powerShellAdvancedCommandAssignmentInOuterHereString, 'src/advanced-command-outer-here.ps1'), [
+  ['author', 'PS Braced Comma Command Tail', 5],
+  ['author', 'PS Property Comma Command Tail', 8],
+  ['author', 'PS Pipeline Command Tail', 11],
+  ['author', 'PS Call Operator Command Tail', 14],
+  ['author', 'PS Multi Assignment Control Tail', 17],
+  ['author', 'PS Paren Multi Assignment Tail', 20],
+  ['author', 'PS Advanced Command Here Outer Tail', 23],
+], 'PowerShell outer here $() advanced command/multi-assignment 的真实 terminator 与 outer tail 署名必须定位');
+
+const powerShellBacktickContinuationTopLevel = [
+  'Write-Output foo`',
+  '@"',
+  '# literal <# literal #> @author Fake Continued Double',
+  'double-last" # @author PS Continued Double Tail',
+  'Write-Output bar``',
+  '@"',
+  'even " quote # <# literal #> @author Fake Even Here',
+  '"@; # @author PS Even Backtick Here Tail',
+  'Write-Output baz```',
+  "@'",
+  '# literal <# literal #> @author Fake Continued Single',
+  "single-last' # @author PS Continued Single Tail",
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellBacktickContinuationTopLevel, 'ps1'), [
+  'Write-Output foo`',
+  '@"',
+  '# literal <# literal #> @author Fake Continued Double',
+  'double-last"',
+  'Write-Output bar``',
+  '@"',
+  'even " quote # <# literal #> @author Fake Even Here',
+  '"@;',
+  'Write-Output baz```',
+  "@'",
+  '# literal <# literal #> @author Fake Continued Single',
+  "single-last'",
+], 'PowerShell 顶层行末 1/3 个 backtick 续行后下一行 @quote 必须 ordinary，2 个 backtick 不续行并允许合法 here-string');
+assert.deepEqual(attributionSummary(powerShellBacktickContinuationTopLevel, 'src/backtick-continuation-top.ps1'), [
+  ['author', 'PS Continued Double Tail', 4],
+  ['author', 'PS Even Backtick Here Tail', 8],
+  ['author', 'PS Continued Single Tail', 12],
+], 'PowerShell backtick 续行 ordinary string 与偶数对照 here-string 的内容伪署名不得误报，真实 tail 必须定位');
+
+const powerShellBacktickContinuationInExpandableString = [
+  '$message = "prefix $(',
+  'Write-Output foo`',
+  '@"',
+  '# literal <# literal #> @author Fake Nested Continued Double',
+  'double-last" # @author PS Nested Continued Double Tail',
+  'Write-Output bar``',
+  "@'",
+  "even ' quote # <# literal #> @author Fake Nested Even Here",
+  "'@; # @author PS Nested Even Backtick Here Tail",
+  'Write-Output baz```',
+  "@'",
+  '# literal <# literal #> @author Fake Nested Continued Single',
+  "single-last' # @author PS Nested Continued Single Tail",
+  ') suffix" # @author PS Backtick Continuation Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellBacktickContinuationInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  'Write-Output foo`',
+  '@"',
+  '# literal <# literal #> @author Fake Nested Continued Double',
+  'double-last"',
+  'Write-Output bar``',
+  "@'",
+  "even ' quote # <# literal #> @author Fake Nested Even Here",
+  "'@;",
+  'Write-Output baz```',
+  "@'",
+  '# literal <# literal #> @author Fake Nested Continued Single',
+  "single-last'",
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内行末奇数 backtick 必须延续 token，偶数 backtick 后下一行首 @quote 可开启 nested here-string');
+assert.deepEqual(attributionSummary(powerShellBacktickContinuationInExpandableString, 'src/backtick-continuation-expandable.ps1'), [
+  ['author', 'PS Nested Continued Double Tail', 5],
+  ['author', 'PS Nested Even Backtick Here Tail', 9],
+  ['author', 'PS Nested Continued Single Tail', 13],
+  ['author', 'PS Backtick Continuation Outer Tail', 14],
+], 'PowerShell expandable $() backtick 续行/偶数对照内容伪署名不得误报，内部及 outer tail 真实署名必须定位');
+
+const powerShellHashtableEscapedBracesTopLevel = [
+  '@{',
+  'Token=foo`{literal`}tail',
+  'Body=@"',
+  'body " quote # <# literal #> @author Fake Escaped Brace Hashtable',
+  '"@; # @author PS Escaped Brace Hashtable Tail',
+  '}',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellHashtableEscapedBracesTopLevel, 'psd1'), [
+  '@{',
+  'Token=foo`{literal`}tail',
+  'Body=@"',
+  'body " quote # <# literal #> @author Fake Escaped Brace Hashtable',
+  '"@;',
+  '}',
+], 'PowerShell .psd1 hashtable unquoted generic token 的 backtick-escaped { } 不得改变 brace stack，后续 Body here-string 必须正常');
+assert.deepEqual(attributionSummary(powerShellHashtableEscapedBracesTopLevel, 'config/escaped-braces.psd1'), [
+  ['author', 'PS Escaped Brace Hashtable Tail', 5],
+], 'PowerShell escaped brace generic token 与 Body here-string 内容伪署名不得误报，terminator 后真实署名必须定位');
+
+const powerShellHashtableEscapedBracesInExpandableString = [
+  '$message = "prefix $(',
+  '$table = @{',
+  'Token=foo`{literal`}tail',
+  "Body=@'",
+  "body ' quote # <# literal #> @author Fake Expandable Escaped Brace",
+  "'@; # @author PS Expandable Escaped Brace Tail",
+  '}',
+  'Write-Output $table',
+  ') suffix" # @author PS Escaped Brace Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellHashtableEscapedBracesInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  '$table = @{',
+  'Token=foo`{literal`}tail',
+  "Body=@'",
+  "body ' quote # <# literal #> @author Fake Expandable Escaped Brace",
+  "'@;",
+  '}',
+  'Write-Output $table',
+  ') suffix"',
+], 'PowerShell expandable $() hashtable generic token 的 escaped braces 不得破坏持久栈，Body here-string 后须恢复 expression 与 outer string');
+assert.deepEqual(attributionSummary(powerShellHashtableEscapedBracesInExpandableString, 'src/escaped-braces-expandable.ps1'), [
+  ['author', 'PS Expandable Escaped Brace Tail', 6],
+  ['author', 'PS Escaped Brace Expandable Outer Tail', 9],
+], 'PowerShell expandable hashtable escaped brace token 与 Body 内容伪署名不得误报，value 与 outer tail 署名必须定位');
+
+const powerShellEscapedGenericHashtableEntries = [
+  'OddParen=foo`(odd`)tail',
+  'TripleParen=foo```(triple```)tail',
+  'EvenParen=foo``(active)',
+  'OddBrace=foo`{odd`}tail',
+  'TripleBrace=foo```{triple```}tail',
+  'EvenBrace=foo``{active}',
+  'OddQuote=foo`"quoted`"tail',
+  'TripleQuote=foo```"quoted```"tail',
+  'EvenQuote=foo``"quoted # <# literal #> @author Fake Even Quote"',
+  'EvenHash=foo``#literal-@author-Fake-Even-Hash',
+  'EvenBlock=foo``<#literal-@author-Fake-Even-Block#>tail',
+  'EvenWhitespaceHash=foo`` # @author PS Even Whitespace Hash Comment',
+  'EvenWhitespaceBlock=foo`` <# @author PS Even Whitespace Block Comment #>',
+  'Emoji=`u{1F600}',
+  'EscapedVariable=${name`}}',
+];
+const powerShellEscapedGenericHashtableExpected = [
+  ...powerShellEscapedGenericHashtableEntries.slice(0, 11),
+  'EvenWhitespaceHash=foo``',
+  'EvenWhitespaceBlock=foo``',
+  ...powerShellEscapedGenericHashtableEntries.slice(13),
+];
+
+const powerShellEscapedGenericHashtableTopLevel = [
+  '@{',
+  ...powerShellEscapedGenericHashtableEntries,
+  'Body=@"',
+  'body " quote # <# literal #> @author Fake Escaped Generic Body',
+  '"@; # @author PS Escaped Generic Body Tail',
+  '}',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellEscapedGenericHashtableTopLevel, 'psd1'), [
+  '@{',
+  ...powerShellEscapedGenericHashtableExpected,
+  'Body=@"',
+  'body " quote # <# literal #> @author Fake Escaped Generic Body',
+  '"@;',
+  '}',
+], 'PowerShell .psd1 generic token 的 1/3 backtick 必须转义 delimiter，2 backtick 后结构 delimiter 生效，#/<# token 仍保持字面量，Unicode escape braces 不得污染 hashtable 栈');
+assert.deepEqual(attributionSummary(powerShellEscapedGenericHashtableTopLevel, 'config/escaped-generic.psd1'), [
+  ['author', 'PS Even Whitespace Hash Comment', 13],
+  ['author', 'PS Even Whitespace Block Comment', 14],
+  ['author', 'PS Escaped Generic Body Tail', 19],
+], 'PowerShell .psd1 escaped generic token 内伪署名不得误报，双 backtick 后空白边界的真实评论与后续 Body terminator 署名必须定位');
+
+const powerShellEscapedGenericHashtableInExpandableString = [
+  '$message = "prefix $(',
+  '$table = @{',
+  ...powerShellEscapedGenericHashtableEntries,
+  "Body=@'",
+  "body ' quote # <# literal #> @author Fake Expandable Escaped Generic Body",
+  "'@; # @author PS Expandable Escaped Generic Body Tail",
+  '}',
+  'Write-Output $table',
+  ') suffix" # @author PS Escaped Generic Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellEscapedGenericHashtableInExpandableString, 'ps1'), [
+  '$message = "prefix $(',
+  '$table = @{',
+  ...powerShellEscapedGenericHashtableExpected,
+  "Body=@'",
+  "body ' quote # <# literal #> @author Fake Expandable Escaped Generic Body",
+  "'@;",
+  '}',
+  'Write-Output $table',
+  ') suffix"',
+], 'PowerShell expandable $() hashtable 内 escaped (), {}, quote, #/<# 与 Unicode escape 必须保持结构，Body 后恢复 expression 与 outer string');
+assert.deepEqual(attributionSummary(powerShellEscapedGenericHashtableInExpandableString, 'src/escaped-generic-expandable.ps1'), [
+  ['author', 'PS Even Whitespace Hash Comment', 14],
+  ['author', 'PS Even Whitespace Block Comment', 15],
+  ['author', 'PS Expandable Escaped Generic Body Tail', 20],
+  ['author', 'PS Escaped Generic Outer Tail', 23],
+], 'PowerShell expandable hashtable escaped generic token 内伪署名不得误报，真实内部评论、Body tail 与 outer tail 必须定位');
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',
