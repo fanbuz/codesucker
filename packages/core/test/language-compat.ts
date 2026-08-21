@@ -2935,6 +2935,46 @@ assert.deepEqual(attributionSummary(powerShellInvalidNumericHashtableInExpandabl
   ['author', 'PS Invalid Numeric Expandable Outer Tail', 17],
 ], 'PowerShell expandable invalid numeric key ordinary string 内容伪署名不得误报，内部 tails 与 outer tail 必须定位');
 
+const powerShellAdjacentOperatorComments = [
+  '$x=1 +# @author PS Expression Operator Hash',
+  '2',
+  '$y=1 +<# @author PS Expression Operator Block #>2',
+  'Write-Output foo+#literal @author Fake Command Plus Hash',
+  'Write-Output foo+<#literal @author Fake Command Plus Block#>bar',
+].join('\n');
+const powerShellAdjacentOperatorCommentsExpected = [
+  '$x=1 +',
+  '2',
+  '$y=1 + 2',
+  'Write-Output foo+#literal @author Fake Command Plus Hash',
+  'Write-Output foo+<#literal @author Fake Command Plus Block#>bar',
+];
+assert.deepEqual(
+  cleanedLines(powerShellAdjacentOperatorComments, 'ps1'),
+  powerShellAdjacentOperatorCommentsExpected,
+  'PowerShell confirmed expression 中 operator 紧邻 #/<# 必须开启真实评论，command generic token 内的相同标记必须保持字面量',
+);
+assert.deepEqual(attributionSummary(powerShellAdjacentOperatorComments, 'src/operator-adjacent-comments.ps1'), [
+  ['author', 'PS Expression Operator Hash', 1],
+  ['author', 'PS Expression Operator Block', 3],
+], 'PowerShell operator 后真实评论署名必须定位，command token 内伪署名不得误报');
+
+const powerShellAdjacentOperatorCommentsInExpandable = [
+  '$message = "prefix $(',
+  ...powerShellAdjacentOperatorComments.split('\n'),
+  ') suffix" # @author PS Expression Operator Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellAdjacentOperatorCommentsInExpandable, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellAdjacentOperatorCommentsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 operator 紧邻评论与 command generic token 必须按相同语义扫描，并正确恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellAdjacentOperatorCommentsInExpandable, 'src/operator-adjacent-expandable.ps1'), [
+  ['author', 'PS Expression Operator Hash', 2],
+  ['author', 'PS Expression Operator Block', 4],
+  ['author', 'PS Expression Operator Expandable Outer Tail', 7],
+], 'PowerShell expandable expression 内真实 operator 评论与 outer tail 必须定位，command token 伪署名不得误报');
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',
@@ -3718,6 +3758,57 @@ assert.deepEqual(
   'Groovy brace/GString slashy 内容伪署名不得误报，division 与 slashy 闭合后的真实 tails 必须定位',
 );
 
+const groovyPostfixDivisionAndSlashy = [
+  'def increment = x++ / 2 // @author Groovy Postfix Increment Division',
+  'def decrement = x-- / 2 // @author Groovy Postfix Decrement Division',
+  'def prefix = ++x / 2 // @author Groovy Prefix Division',
+  'def infix = x + 1 / 2 // @author Groovy Infix Division',
+  String.raw`def slashy = /literal \/* @author Fake Postfix Slashy *\// // @author Groovy True Slashy Tail`,
+].join('\n');
+assert.deepEqual(cleanedLines(groovyPostfixDivisionAndSlashy, 'groovy'), [
+  'def increment = x++ / 2',
+  'def decrement = x-- / 2',
+  'def prefix = ++x / 2',
+  'def infix = x + 1 / 2',
+  String.raw`def slashy = /literal \/* @author Fake Postfix Slashy *\//`,
+], 'Groovy postfix ++/-- 后 slash 必须作为 division；prefix/infix division 与 assignment slashy 对照语义必须保持');
+assert.deepEqual(
+  extractAttributions(groovyPostfixDivisionAndSlashy, 'src/postfix-division-slashy.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Postfix Increment Division', 1],
+    ['author', 'Groovy Postfix Decrement Division', 2],
+    ['author', 'Groovy Prefix Division', 3],
+    ['author', 'Groovy Infix Division', 4],
+    ['author', 'Groovy True Slashy Tail', 5],
+  ],
+  'Groovy postfix/prefix/infix division 与 slashy 闭合后的真实署名必须定位，slashy 内容伪署名不得误报',
+);
+
+const groovySameSignRuns = [
+  String.raw`def plusSlashy = x+++ /re\/\/ @author Fake Three Plus Slashy/ // @author Groovy Three Plus Slashy Tail`,
+  String.raw`def minusSlashy = x--- /re\/\/ @author Fake Three Minus Slashy/ // @author Groovy Three Minus Slashy Tail`,
+  'def plusDivision = x++++ / 2 // @author Groovy Four Plus Division',
+  'def minusDivision = x---- / 2 // @author Groovy Four Minus Division',
+].join('\n');
+assert.deepEqual(cleanedLines(groovySameSignRuns, 'groovy'), [
+  String.raw`def plusSlashy = x+++ /re\/\/ @author Fake Three Plus Slashy/`,
+  String.raw`def minusSlashy = x--- /re\/\/ @author Fake Three Minus Slashy/`,
+  'def plusDivision = x++++ / 2',
+  'def minusDivision = x---- / 2',
+], 'Groovy 三连同号后必须允许真实 slashy 并保护内部 //；四连同号后 slash 必须作为 division');
+assert.deepEqual(
+  extractAttributions(groovySameSignRuns, 'src/same-sign-runs.groovy', 'groovy')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Groovy Three Plus Slashy Tail', 1],
+    ['author', 'Groovy Three Minus Slashy Tail', 2],
+    ['author', 'Groovy Four Plus Division', 3],
+    ['author', 'Groovy Four Minus Division', 4],
+  ],
+  'Groovy 同号 run 后 slashy 内容伪署名不得误报，真实 slashy/division 尾评论署名必须定位',
+);
+
 const sqlEscapedQuotedLiterals = [
   "SELECT 'single\\'quoted -- # /* @author Fake SQL Single */ and ''doubled''' AS value; -- @author SQL Single Tail",
   'SELECT "double\\"quoted -- # /* @author Fake SQL Double */ and ""doubled""" AS value; /* @author SQL Double Tail */',
@@ -3859,6 +3950,27 @@ assert.deepEqual(
   extractAttributions(batchConservativeParenRem, 'scripts/conservative-paren-rem.bat', 'bat'),
   [],
   'Batch 无法证明为可安全删除 block-opening REM 的三类负例均不得产生伪署名',
+);
+
+const batchCaretQuoteParity = [
+  'echo ^"foo & REM @author Batch One Caret Tail',
+  'echo ^^"foo & REM @author Fake Even Caret" & REM @author Batch Two Caret Tail',
+  'echo ^^^"foo & REM @author Batch Three Caret Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(batchCaretQuoteParity, 'bat'), [
+  'echo ^"foo',
+  'echo ^^"foo & REM @author Fake Even Caret"',
+  'echo ^^^"foo',
+], 'Batch 1/3 caret 后 quote 必须视为 literal quote 并识别后续 & REM；双 caret 后 quote 必须开启 quoted segment 并保护其中 & REM');
+assert.deepEqual(
+  extractAttributions(batchCaretQuoteParity, 'scripts/caret-quote-parity.bat', 'bat')
+    .map((item) => [item.kind, item.subject, item.line]),
+  [
+    ['author', 'Batch One Caret Tail', 1],
+    ['author', 'Batch Two Caret Tail', 2],
+    ['author', 'Batch Three Caret Tail', 3],
+  ],
+  'Batch caret quote parity 后真实 REM 署名必须定位，双 caret 后 quoted segment 内伪署名不得误报',
 );
 
 const keepCases = [

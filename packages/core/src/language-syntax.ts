@@ -191,6 +191,7 @@ type GroovyContext =
     kind: 'expression'; depth: number; code: string; lineCode: string;
     paren: number; bracket: number; canEndExpression: boolean;
     lineEscape: boolean; continuedDivision: boolean;
+    pendingSign?: '+' | '-'; pendingSignHadOperand?: boolean;
   }
   | { kind: 'comment'; close: '*/' };
 
@@ -199,6 +200,8 @@ interface GroovyExpressionState {
   bracket: number;
   canEndExpression: boolean;
   lineEscape: boolean;
+  pendingSign?: '+' | '-';
+  pendingSignHadOperand?: boolean;
 }
 
 type HclContext =
@@ -309,15 +312,22 @@ function isPowerShellRequires(line: string): boolean {
   return /^\s*#requires\b/i.test(line);
 }
 
+function followsPowerShellExpressionOperator(code: string, rhsMode: PowerShellRhsMode): boolean {
+  return rhsMode === 'expression'
+    && powerShellContinuationReason('expression', code, false) === 'operator';
+}
+
 function isPowerShellLineComment(
   line: string,
   index: number,
   code: string,
   hashtableEntry = false,
   continuedToken = false,
+  rhsMode: PowerShellRhsMode = null,
 ): boolean {
   if (line[index] !== '#') return false;
-  return isPowerShellTokenStart(code, continuedToken) || hashtableEntry;
+  return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
+    || followsPowerShellExpressionOperator(code, rhsMode);
 }
 
 function isPowerShellBlockComment(
@@ -326,9 +336,11 @@ function isPowerShellBlockComment(
   code: string,
   hashtableEntry = false,
   continuedToken = false,
+  rhsMode: PowerShellRhsMode = null,
 ): boolean {
   if (!line.startsWith('<#', index)) return false;
-  return isPowerShellTokenStart(code, continuedToken) || hashtableEntry;
+  return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
+    || followsPowerShellExpressionOperator(code, rhsMode);
 }
 
 function powerShellHereStringHeader(
@@ -782,7 +794,9 @@ function consumePowerShellExpandable(
       cursor++;
       continue;
     }
-    if (isPowerShellBlockComment(line, cursor, code, hashtableEntry, genericActive)) {
+    if (isPowerShellBlockComment(
+      line, cursor, code, hashtableEntry, genericActive, context.rhsMode ?? null,
+    )) {
       const commentStart = cursor;
       const closeIndex = line.indexOf('#>', cursor + 2);
       cursor = closeIndex === -1 ? line.length : closeIndex + 2;
@@ -869,7 +883,9 @@ function consumePowerShellExpandable(
       updatePowerShellRhsNesting('expression', context.rhsMode ?? null, ')', context.rhsNesting);
       continue;
     }
-    if (isPowerShellLineComment(line, cursor, code, hashtableEntry, genericActive)) {
+    if (isPowerShellLineComment(
+      line, cursor, code, hashtableEntry, genericActive, context.rhsMode ?? null,
+    )) {
       comments.push(line.slice(cursor));
       context.rhsContinuation = powerShellContinuationReason(
         context.rhsMode ?? null, code, explicitModeContinuation,
@@ -922,7 +938,25 @@ function newGroovyExpression(depth = 1): Extract<GroovyContext, { kind: 'express
 }
 
 function updateGroovyExpressionState(state: GroovyExpressionState, value: string): void {
-  if (/\s/.test(value)) return;
+  if (/\s/.test(value)) {
+    state.pendingSign = undefined;
+    state.pendingSignHadOperand = undefined;
+    return;
+  }
+  if (value === '+' || value === '-') {
+    if (state.pendingSign === value) {
+      state.canEndExpression = state.pendingSignHadOperand === true;
+      state.pendingSign = undefined;
+      state.pendingSignHadOperand = undefined;
+    } else {
+      state.pendingSign = value;
+      state.pendingSignHadOperand = state.canEndExpression;
+      state.canEndExpression = false;
+    }
+    return;
+  }
+  state.pendingSign = undefined;
+  state.pendingSignHadOperand = undefined;
   if (value === '(') {
     state.paren++;
     state.canEndExpression = false;
@@ -955,7 +989,19 @@ function groovyHasLineEscape(code: string): boolean {
   return slashes % 2 !== 0;
 }
 
+function groovyEndsWithIncDecOperator(code: string): boolean {
+  const trimmed = code.trimEnd();
+  const sign = trimmed[trimmed.length - 1];
+  if (sign !== '+' && sign !== '-') return false;
+  let run = 0;
+  for (let cursor = trimmed.length - 1; cursor >= 0 && trimmed[cursor] === sign; cursor--) run++;
+  // Groovy 按最长 token 解析同号 run：奇数个的末 token 是单 +/-，偶数个才是 ++/--。
+  return run % 2 === 0;
+}
+
 function finalizeGroovyExpressionState(state: GroovyExpressionState, code: string): void {
+  state.pendingSign = undefined;
+  state.pendingSignHadOperand = undefined;
   state.lineEscape = groovyHasLineEscape(code);
   const withoutEscape = state.lineEscape ? code.replace(/\\\s*$/, '').trimEnd() : code.trimEnd();
   if (/\b(?:as|assert|case|else|in|instanceof|return|throw)$/.test(withoutEscape)) {
@@ -1084,6 +1130,8 @@ function consumeGroovyGString(
     const nestedString = GROOVY.strings.find((rule) => {
       if (rule.contextual === 'groovy-slashy' && context.continuedDivision
         && context.lineCode.trim() === '') return false;
+      if (rule.contextual === 'groovy-slashy'
+        && groovyEndsWithIncDecOperator(context.lineCode)) return false;
       return canOpenString(rule, line, cursor, context.code);
     });
     if (nestedString) {
@@ -1091,6 +1139,8 @@ function consumeGroovyGString(
       contexts.push({ kind: 'string', rule: nestedString });
       appendGroovyCode(context, 'x');
       context.canEndExpression = true;
+      context.pendingSign = undefined;
+      context.pendingSignHadOperand = undefined;
       cursor += nestedString.open.length;
       continue;
     }
@@ -1788,6 +1838,19 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           hadComment = true;
           break;
         }
+        if (raw[index] === '^') {
+          let end = index;
+          while (raw[end] === '^') end++;
+          if (raw[end] === '"') {
+            const carets = end - index;
+            // 奇数 caret 转义 quote 本身；偶数 caret 只消费成对 escape，
+            // 下一轮仍让 quote 进入正常字符串 opener 判定。
+            const consumedEnd = carets % 2 === 1 ? end + 1 : end;
+            code += raw.slice(index, consumedEnd);
+            index = consumedEnd;
+            continue;
+          }
+        }
       }
 
       if (syntax.dialect === 'powershell') {
@@ -1920,6 +1983,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         && !(syntax.dialect === 'powershell' && rule.open === '<#'
           && !isPowerShellBlockComment(
             raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
+            powerShellRhsMode,
           )));
       if (block) {
         if (block.nested) {
@@ -1953,6 +2017,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         && !(syntax.dialect === 'powershell' && token === '#'
           && !isPowerShellLineComment(
             raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
+            powerShellRhsMode,
           )));
       if (lineComment) {
         comments.push(raw.slice(index));
@@ -1963,6 +2028,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
       const string = syntax.strings.find((rule) => {
         if (syntax.dialect === 'groovy' && rule.contextual === 'groovy-slashy'
           && groovyContinuedDivision && groovyLineCode.trim() === '') return false;
+        if (syntax.dialect === 'groovy' && rule.contextual === 'groovy-slashy'
+          && groovyEndsWithIncDecOperator(groovyLineCode)) return false;
         return canOpenString(
           rule, raw, index, code, powerShellHashtableEntry, powerShellTokenKind === 'generic',
         );
@@ -1976,6 +2043,8 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
         if (sqlBackslashEscapes) activeString.sqlBackslashEscapes = true;
         if (syntax.dialect === 'groovy') {
           groovyExpression.canEndExpression = true;
+          groovyExpression.pendingSign = undefined;
+          groovyExpression.pendingSignHadOperand = undefined;
           groovyLineCode += 'x';
         }
         if (syntax.dialect === 'powershell') {
