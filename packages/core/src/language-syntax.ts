@@ -494,6 +494,50 @@ function isPowerShellHashtableEntryAssignment(code: string, braces: PowerShellBr
   return braces[braces.length - 1] === 'hashtable' && POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT.test(code);
 }
 
+function powerShellTypeSpecEnd(source: string, start: number): number {
+  const nameStart = /[\p{L}_]/u;
+  const namePart = /[\p{L}\p{N}_]/u;
+  let cursor = start;
+  if (!nameStart.test(source[cursor] ?? '')) return 0;
+  while (namePart.test(source[cursor] ?? '')) cursor++;
+  while (source[cursor] === '.') {
+    cursor++;
+    if (!nameStart.test(source[cursor] ?? '')) return 0;
+    while (namePart.test(source[cursor] ?? '')) cursor++;
+  }
+
+  while (source[cursor] === '[') {
+    cursor++;
+    if (source[cursor] === ']') {
+      cursor++;
+      continue;
+    }
+    if (source[cursor] === ',') {
+      while (source[cursor] === ',') cursor++;
+      if (source[cursor] !== ']') return 0;
+      cursor++;
+      continue;
+    }
+    const firstArgumentEnd = powerShellTypeSpecEnd(source, cursor);
+    if (firstArgumentEnd === 0) return 0;
+    cursor = firstArgumentEnd;
+    while (source[cursor] === ',') {
+      const argumentEnd = powerShellTypeSpecEnd(source, cursor + 1);
+      if (argumentEnd === 0) return 0;
+      cursor = argumentEnd;
+    }
+    if (source[cursor] !== ']') return 0;
+    cursor++;
+  }
+  return cursor;
+}
+
+function powerShellStandaloneTypeLength(source: string): number {
+  if (source[0] !== '[') return 0;
+  const end = powerShellTypeSpecEnd(source, 1);
+  return end > 1 && source[end] === ']' ? end + 1 : 0;
+}
+
 function powerShellAtomicExpression(
   line: string,
   index: number,
@@ -502,8 +546,12 @@ function powerShellAtomicExpression(
   const source = line.slice(index);
   const variableOrStatic = POWERSHELL_VARIABLE_OR_STATIC_EXPRESSION.exec(source);
   const match = variableOrStatic ?? POWERSHELL_NUMERIC_EXPRESSION.exec(source);
-  if (!match) return null;
-  const end = index + match[0].length;
+  const standaloneTypeLength = match || !expressionBoundary
+    ? 0
+    : powerShellStandaloneTypeLength(source);
+  const length = match?.[0].length ?? standaloneTypeLength;
+  if (length === 0) return null;
+  const end = index + length;
   const next = line[end];
   const commentDelimited = expressionBoundary
     && (next === '#' || line.startsWith('<#', end));
@@ -513,7 +561,8 @@ function powerShellAtomicExpression(
   const bounded = end === line.length || isPowerShellForceStartChar(next) || commentDelimited
     || (expressionBoundary && (/[+\-*\/%!?~]/.test(next) || next === '=' || next === ']'
       || (next === '`' && end === line.length - 1)));
-  return { length: match[0].length, bounded, commentDelimited };
+  if (standaloneTypeLength > 0 && !bounded) return null;
+  return { length, bounded, commentDelimited };
 }
 
 function nextPowerShellTokenKind(
@@ -716,6 +765,17 @@ function isBatchRedirectionOnly(command: string): boolean {
   return new RegExp(String.raw`^@?(?:${redirection})(?:\s+${redirection})*$`).test(command);
 }
 
+function isBatchProvenIfCondition(command: string): boolean {
+  const escaped = String.raw`\^.`;
+  const operand = String.raw`(?:"[^"]*"|(?:${escaped}|[^\s&|()<>^"=])+)`;
+  const path = String.raw`(?:"[^"]*"|(?:${escaped}|[^\s&|()<>^"])+)`;
+  const basic = String.raw`(?:not\s+)?(?:errorlevel\s+\d+|exist\s+${path})`;
+  const extension = String.raw`(?:not\s+)?(?:cmdextversion\s+\d+|defined\s+${path})`;
+  const comparison = String.raw`(?:\/i\s+)?(?:not\s+)?(?:${operand}==${operand}|${operand}\s+(?:equ|neq|lss|leq|gtr|geq)\s+${operand})`;
+  return new RegExp(String.raw`^@?if\s+(?:${basic}|${extension}|${comparison})$`, 'i')
+    .test(command);
+}
+
 function batchInlineRemBoundary(
   line: string,
   index: number,
@@ -730,6 +790,8 @@ function batchInlineRemBoundary(
     const commandSegment = batchLastCommandSegment(directCode, firstCharEscaped);
     if ((!firstCharEscaped || commandSegment.separatorStart > 0)
       && isBatchRedirectionOnly(commandSegment.text)) return commandSegment.separatorStart;
+    if ((!firstCharEscaped || commandSegment.separatorStart > 0)
+      && isBatchProvenIfCondition(commandSegment.text)) return commandSegment.separatorStart;
     const elseCount = commandSegment.text.match(/\belse\b/ig)?.length ?? 0;
     const doCount = commandSegment.text.match(/\bdo\b/ig)?.length ?? 0;
     const provenElse = elseCount === 1
@@ -753,8 +815,7 @@ function batchInlineRemBoundary(
     if (/(?:^|[^|])\|$/.test(beforeGroup)) return null;
     const commandSegment = batchLastCommandSegment(beforeGroup).text;
     // 只接受可证明的分组 opener：命令段首、IF/ELSE 分支、FOR ... DO。
-    const ifGroup = /^@?if\b(?:(?:\s+\/i)?\s+(?:not\s+)?(?:exist\s+.+|defined\s+\S+|errorlevel\s+\d+|cmdextversion\s+\d+|.+==.+))$/i
-      .test(commandSegment);
+    const ifGroup = isBatchProvenIfCondition(commandSegment);
     const provenGroup = commandSegment === ''
       || ifGroup
       || /(?:^|\s)else$/i.test(commandSegment)
