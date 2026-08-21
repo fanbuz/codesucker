@@ -3233,6 +3233,92 @@ assert.deepEqual(attributionSummary(powerShellSpecialVariableAdjacentInExpandabl
   ['author', 'PS Special Variable Expandable Outer Tail', 22],
 ], 'PowerShell expandable $() 内 special variable 邻接评论与 outer tail 必须定位，generic prefix 伪署名不得误报');
 
+const powerShellParenthesizedMemberAdjacentComments = [
+  '$day=(Get-Date).Day# @author PS Parenthesized Member Adjacent Hash',
+  '$dayBlock=(Get-Date).Day<# @author PS Parenthesized Member Adjacent Block #>+1',
+  '$name=($items[0]).Name# @author PS Grouped Index Member Adjacent Hash',
+  '$nameBlock=($items[0]).Name<# @author PS Grouped Index Member Adjacent Block #>+1',
+  '$first=(Get-Date).Day[0]# @author PS Parenthesized Member Index Adjacent Hash',
+  '$static=[Type]::Member.Property# @author PS Static Member Chain Adjacent Hash',
+  '$staticIndex=[Type]::Member[0]<# @author PS Static Member Index Adjacent Block #>+1',
+  'Write-Output pre(Get-Date).Day#literal @author Fake Parenthesized Generic Hash',
+  'Write-Output pre($items[0]).Name<#literal @author Fake Grouped Generic Block#>tail',
+  '$groupCommand=(Write-Output pre(Get-Date).Day#literal @author Fake Group Command Hash)',
+  '$groupCommandBlock=(Write-Output pre(Get-Date).Day<#literal @author Fake Group Command Block#>tail)',
+  'Write-Output pre[Type]::Member.Property#literal @author Fake Static Generic Hash',
+  '$staticGroupCommand=(Write-Output pre[Type]::Member[0]<#literal @author Fake Static Group Command Block#>tail)',
+  '$staticArgument=(Write-Output [Type]::Member.Property#literal @author Fake Static Command Argument Hash)',
+  '$staticIndexArgument=(Write-Output [Type]::Member[0]<#literal @author Fake Static Command Argument Block#>tail)',
+  '$variableArgument=(Write-Output $value#literal @author Fake Variable Command Argument Hash)',
+  '$memberArgument=(Write-Output $value.Property<#literal @author Fake Member Command Argument Block#>tail)',
+  '$commaVariableArgument=(Write-Output foo, $value#literal @author Fake Comma Variable Argument Hash)',
+  '$commaVariableBlock=(Write-Output foo, $value<#literal @author Fake Comma Variable Argument Block#>tail)',
+  '$commaStaticArgument=(Write-Output foo, [Type]::Member#literal @author Fake Comma Static Argument Hash)',
+  '$commaStaticBlock=(Write-Output foo, [Type]::Member<#literal @author Fake Comma Static Argument Block#>tail)',
+  '$commaGroupArgument=(Write-Output foo, (Get-Date).Day#literal @author Fake Comma Group Argument Hash)',
+  '$commaGroupBlock=(Write-Output foo, (Get-Date).Day<#literal @author Fake Comma Group Argument Block#>tail)',
+].join('\n');
+const powerShellParenthesizedMemberAdjacentCommentsExpected = [
+  '$day=(Get-Date).Day',
+  '$dayBlock=(Get-Date).Day +1',
+  '$name=($items[0]).Name',
+  '$nameBlock=($items[0]).Name +1',
+  '$first=(Get-Date).Day[0]',
+  '$static=[Type]::Member.Property',
+  '$staticIndex=[Type]::Member[0] +1',
+  'Write-Output pre(Get-Date).Day#literal @author Fake Parenthesized Generic Hash',
+  'Write-Output pre($items[0]).Name<#literal @author Fake Grouped Generic Block#>tail',
+  '$groupCommand=(Write-Output pre(Get-Date).Day#literal @author Fake Group Command Hash)',
+  '$groupCommandBlock=(Write-Output pre(Get-Date).Day<#literal @author Fake Group Command Block#>tail)',
+  'Write-Output pre[Type]::Member.Property#literal @author Fake Static Generic Hash',
+  '$staticGroupCommand=(Write-Output pre[Type]::Member[0]<#literal @author Fake Static Group Command Block#>tail)',
+  '$staticArgument=(Write-Output [Type]::Member.Property#literal @author Fake Static Command Argument Hash)',
+  '$staticIndexArgument=(Write-Output [Type]::Member[0]<#literal @author Fake Static Command Argument Block#>tail)',
+  '$variableArgument=(Write-Output $value#literal @author Fake Variable Command Argument Hash)',
+  '$memberArgument=(Write-Output $value.Property<#literal @author Fake Member Command Argument Block#>tail)',
+  '$commaVariableArgument=(Write-Output foo, $value#literal @author Fake Comma Variable Argument Hash)',
+  '$commaVariableBlock=(Write-Output foo, $value<#literal @author Fake Comma Variable Argument Block#>tail)',
+  '$commaStaticArgument=(Write-Output foo, [Type]::Member#literal @author Fake Comma Static Argument Hash)',
+  '$commaStaticBlock=(Write-Output foo, [Type]::Member<#literal @author Fake Comma Static Argument Block#>tail)',
+  '$commaGroupArgument=(Write-Output foo, (Get-Date).Day#literal @author Fake Comma Group Argument Hash)',
+  '$commaGroupBlock=(Write-Output foo, (Get-Date).Day<#literal @author Fake Comma Group Argument Block#>tail)',
+];
+assert.deepEqual(
+  cleanedLines(powerShellParenthesizedMemberAdjacentComments, 'ps1'),
+  powerShellParenthesizedMemberAdjacentCommentsExpected,
+  'PowerShell confirmed RHS 的 parenthesized/static member/index chain 后无空白 #/<# 必须开启评论；top-level及group内command generic prefix同形标记必须保留',
+);
+assert.deepEqual(attributionSummary(powerShellParenthesizedMemberAdjacentComments, 'src/parenthesized-member-adjacent.ps1'), [
+  ['author', 'PS Parenthesized Member Adjacent Hash', 1],
+  ['author', 'PS Parenthesized Member Adjacent Block', 2],
+  ['author', 'PS Grouped Index Member Adjacent Hash', 3],
+  ['author', 'PS Grouped Index Member Adjacent Block', 4],
+  ['author', 'PS Parenthesized Member Index Adjacent Hash', 5],
+  ['author', 'PS Static Member Chain Adjacent Hash', 6],
+  ['author', 'PS Static Member Index Adjacent Block', 7],
+], 'PowerShell confirmed parenthesized/static member/index chain 后真实邻接评论署名必须定位，top/group command generic prefix 中伪署名不得误报');
+
+const powerShellParenthesizedMemberAdjacentInExpandable = [
+  '$message = "prefix $(',
+  ...powerShellParenthesizedMemberAdjacentComments.split('\n'),
+  ') suffix" # @author PS Parenthesized Member Expandable Outer Tail',
+].join('\n');
+assert.deepEqual(cleanedLines(powerShellParenthesizedMemberAdjacentInExpandable, 'ps1'), [
+  '$message = "prefix $(',
+  ...powerShellParenthesizedMemberAdjacentCommentsExpected,
+  ') suffix"',
+], 'PowerShell ordinary expandable $() 内 parenthesized/member chain 邻接评论与 generic prefix 负例必须复用 top-level 语义并恢复 outer string');
+assert.deepEqual(attributionSummary(powerShellParenthesizedMemberAdjacentInExpandable, 'src/parenthesized-member-adjacent-expandable.ps1'), [
+  ['author', 'PS Parenthesized Member Adjacent Hash', 2],
+  ['author', 'PS Parenthesized Member Adjacent Block', 3],
+  ['author', 'PS Grouped Index Member Adjacent Hash', 4],
+  ['author', 'PS Grouped Index Member Adjacent Block', 5],
+  ['author', 'PS Parenthesized Member Index Adjacent Hash', 6],
+  ['author', 'PS Static Member Chain Adjacent Hash', 7],
+  ['author', 'PS Static Member Index Adjacent Block', 8],
+  ['author', 'PS Parenthesized Member Expandable Outer Tail', 25],
+], 'PowerShell expandable $() 内 parenthesized/member chain 邻接评论与 outer tail 必须定位，generic prefix 伪署名不得误报');
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',

@@ -290,7 +290,7 @@ const POWERSHELL_SAFE_MEMBER_INDEX = `(?:[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY}
 const POWERSHELL_MEMBER = `(?:(?:::|\\.)(?:${POWERSHELL_IDENTIFIER}|${POWERSHELL_VARIABLE})|\\[\\p{White_Space}*${POWERSHELL_SAFE_MEMBER_INDEX}\\p{White_Space}*\\])`;
 const POWERSHELL_VARIABLE_EXPRESSION = `${POWERSHELL_VARIABLE}(?:${POWERSHELL_MEMBER})*`;
 const POWERSHELL_VARIABLE_OR_STATIC_EXPRESSION = new RegExp(
-  `^(?:${POWERSHELL_VARIABLE_EXPRESSION}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER})`,
+  `^(?:${POWERSHELL_VARIABLE_EXPRESSION}|${POWERSHELL_TYPE_LITERAL}::${POWERSHELL_IDENTIFIER}(?:${POWERSHELL_MEMBER})*)`,
   'u',
 );
 const POWERSHELL_NUMERIC_EXPRESSION = new RegExp(`^[+-]?${POWERSHELL_UNSIGNED_NUMERIC_KEY}`, 'u');
@@ -308,6 +308,7 @@ const POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT = new RegExp(
   `(?:^|[;{])\\p{White_Space}*${POWERSHELL_HASHTABLE_KEY}\\p{White_Space}*=$`,
   'u',
 );
+const POWERSHELL_COMPLETED_GROUP_MEMBER = new RegExp(`\\)(?:${POWERSHELL_MEMBER})+$`, 'u');
 
 /** 块注释在表达式中等价于空白；仅在没有现成空白时补位，避免相邻 token 粘连。 */
 function appendCommentGap(code: string, line: string, nextIndex: number): string {
@@ -338,6 +339,74 @@ function followsPowerShellExpressionOperator(code: string, rhsMode: PowerShellRh
     && powerShellContinuationReason('expression', code, false) === 'operator';
 }
 
+function isPowerShellConfirmedAtomicStart(
+  code: string,
+  tokenKind: PowerShellTokenKind,
+  rhsMode: PowerShellRhsMode,
+  braces: PowerShellBraceKind[],
+): boolean {
+  if (tokenKind === 'generic'
+    || (rhsMode !== 'statementStart' && rhsMode !== 'expression')) return false;
+  const before = code.trimEnd();
+  if (before.endsWith(',')) return false;
+  return before === '' || endsWithPowerShellAssignment(before)
+    || isPowerShellHashtableEntryAssignment(before, braces)
+    || /[([{;]$/.test(before)
+    || before.endsWith('&&') || before.endsWith('||')
+    || followsPowerShellExpressionOperator(before, 'expression');
+}
+
+function powerShellMatchingGroupStart(code: string, closeIndex: number): number | null {
+  const stack: number[] = [];
+  let quote: '"' | "'" | null = null;
+  for (let cursor = 0; cursor <= closeIndex; cursor++) {
+    if (quote) {
+      if (quote === '"' && code[cursor] === '`') {
+        cursor++;
+        continue;
+      }
+      if (quote === "'" && code.startsWith("''", cursor)) {
+        cursor++;
+        continue;
+      }
+      if (code[cursor] === quote) quote = null;
+      continue;
+    }
+    if (code[cursor] === '`') {
+      cursor++;
+      continue;
+    }
+    if (code[cursor] === '"' || code[cursor] === "'") {
+      quote = code[cursor] as '"' | "'";
+      continue;
+    }
+    if (code[cursor] === '(') stack.push(cursor);
+    else if (code[cursor] === ')') {
+      const start = stack.pop();
+      if (cursor === closeIndex) return start ?? null;
+    }
+  }
+  return null;
+}
+
+function followsPowerShellCompletedMemberAccess(
+  code: string,
+  rhsMode: PowerShellRhsMode,
+): boolean {
+  if (rhsMode !== 'expression') return false;
+  const completed = POWERSHELL_COMPLETED_GROUP_MEMBER.exec(code);
+  if (!completed) return false;
+  const groupStart = powerShellMatchingGroupStart(code, completed.index);
+  if (groupStart === null) return false;
+  const before = code.slice(0, groupStart).trimEnd();
+  if (before.endsWith(',')) return false;
+  return before === '' || endsWithPowerShellAssignment(before)
+    || POWERSHELL_HASHTABLE_ENTRY_ASSIGNMENT.test(before)
+    || /[([{;]$/.test(before)
+    || before.endsWith('&&') || before.endsWith('||')
+    || followsPowerShellExpressionOperator(before, 'expression');
+}
+
 function isPowerShellQuotedAtomCommentBoundary(
   line: string,
   index: number,
@@ -360,7 +429,8 @@ function isPowerShellLineComment(
 ): boolean {
   if (line[index] !== '#') return false;
   return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
-    || followsPowerShellExpressionOperator(code, rhsMode) || atomicBoundary;
+    || followsPowerShellExpressionOperator(code, rhsMode)
+    || followsPowerShellCompletedMemberAccess(code, rhsMode) || atomicBoundary;
 }
 
 function isPowerShellBlockComment(
@@ -374,7 +444,8 @@ function isPowerShellBlockComment(
 ): boolean {
   if (!line.startsWith('<#', index)) return false;
   return isPowerShellTokenStart(code, continuedToken) || hashtableEntry
-    || followsPowerShellExpressionOperator(code, rhsMode) || atomicBoundary;
+    || followsPowerShellExpressionOperator(code, rhsMode)
+    || followsPowerShellCompletedMemberAccess(code, rhsMode) || atomicBoundary;
 }
 
 function powerShellHereStringHeader(
@@ -868,7 +939,9 @@ function consumePowerShellExpandable(
       continue;
     }
     const atomic = powerShellAtomicExpression(
-      line, cursor, context.rhsMode === 'statementStart' || context.rhsMode === 'expression',
+      line, cursor, isPowerShellConfirmedAtomicStart(
+        code, context.tokenKind, context.rhsMode ?? null, context.braces,
+      ),
     );
     if (atomic) {
       code += line.slice(cursor, cursor + atomic.length);
@@ -2144,7 +2217,9 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
           continue;
         }
         const atomic = powerShellAtomicExpression(
-          raw, index, powerShellRhsMode === 'statementStart' || powerShellRhsMode === 'expression',
+          raw, index, isPowerShellConfirmedAtomicStart(
+            code, powerShellTokenKind, powerShellRhsMode, powerShellBraces,
+          ),
         );
         if (atomic) {
           code += raw.slice(index, index + atomic.length);
