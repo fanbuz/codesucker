@@ -1,6 +1,8 @@
 interface BlockCommentRule {
   open: string;
   close: string;
+  /** 仅在语言明确允许同类块注释嵌套时启用。 */
+  nested?: boolean;
 }
 
 type EscapeMode = 'backslash' | 'backtick' | 'caret' | 'double' | 'dollar' | 'none';
@@ -83,7 +85,7 @@ const PASCAL: LanguageSyntax = {
 
 const POWERSHELL: LanguageSyntax = {
   lineComments: ['#'],
-  blockComments: [{ open: '<#', close: '#>' }],
+  blockComments: [{ open: '<#', close: '#>', nested: true }],
   strings: [
     quote("@'", 'double', { close: "'@", multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
     quote('@"', 'backtick', { close: '"@', multiline: true, closeAtLineStart: true, openAtLineEnd: true }),
@@ -150,7 +152,10 @@ const SYNTAX_BY_EXT: Record<string, LanguageSyntax> = {
 };
 
 interface ActiveComment {
+  /** 可嵌套注释的开始符；普通块注释与 Python docstring 不设置。 */
+  open?: string;
   close: string;
+  depth: number;
 }
 
 interface ActiveString {
@@ -226,6 +231,34 @@ function escapedLength(rule: StringRule, line: string, index: number): number {
   return 0;
 }
 
+function consumeActiveComment(line: string, index: number, state: ActiveComment): { end: number; closed: boolean } {
+  if (!state.open) {
+    const closeIndex = line.indexOf(state.close, index);
+    if (closeIndex === -1) return { end: line.length, closed: false };
+    state.depth = 0;
+    return { end: closeIndex + state.close.length, closed: true };
+  }
+
+  let cursor = index;
+  while (cursor < line.length) {
+    const openIndex = line.indexOf(state.open, cursor);
+    const closeIndex = line.indexOf(state.close, cursor);
+    if (openIndex !== -1 && (closeIndex === -1 || openIndex < closeIndex)) {
+      state.depth++;
+      cursor = openIndex + state.open.length;
+      continue;
+    }
+    if (closeIndex !== -1) {
+      state.depth--;
+      cursor = closeIndex + state.close.length;
+      if (state.depth === 0) return { end: cursor, closed: true };
+      continue;
+    }
+    break;
+  }
+  return { end: line.length, closed: false };
+}
+
 /**
  * 对源码只做一次语言感知扫描，清洗和署名提取都使用这里产出的边界。
  * 这不是完整语法解析器；目标是保守识别注释，遇到字符串边界时宁可多保留代码，
@@ -273,12 +306,11 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
 
     scan: while (index < raw.length) {
       if (activeComment) {
-        const closeIndex = raw.indexOf(activeComment.close, index);
-        const end = closeIndex === -1 ? raw.length : closeIndex + activeComment.close.length;
-        comments.push(raw.slice(index, end));
+        const consumed = consumeActiveComment(raw, index, activeComment);
+        comments.push(raw.slice(index, consumed.end));
         hadComment = true;
-        index = end;
-        if (closeIndex === -1) break;
+        index = consumed.end;
+        if (!consumed.closed) break;
         activeComment = null;
         continue;
       }
@@ -320,7 +352,7 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
             comments.push(raw.slice(index, end));
             hadComment = true;
             index = end;
-            if (closeIndex === -1) activeComment = { close: token };
+            if (closeIndex === -1) activeComment = { close: token, depth: 1 };
           } else {
             code += token;
             index += token.length;
@@ -370,12 +402,22 @@ export function scanSource(rawText: string, ext: string): ScannedLine[] {
 
       const block = syntax.blockComments.find((rule) => raw.startsWith(rule.open, index));
       if (block) {
+        if (block.nested) {
+          const commentStart = index;
+          const state: ActiveComment = { open: block.open, close: block.close, depth: 1 };
+          const consumed = consumeActiveComment(raw, index + block.open.length, state);
+          comments.push(raw.slice(commentStart, consumed.end));
+          hadComment = true;
+          index = consumed.end;
+          if (!consumed.closed) activeComment = state;
+          continue;
+        }
         const closeIndex = raw.indexOf(block.close, index + block.open.length);
         const end = closeIndex === -1 ? raw.length : closeIndex + block.close.length;
         comments.push(raw.slice(index, end));
         hadComment = true;
         index = end;
-        if (closeIndex === -1) activeComment = { close: block.close };
+        if (closeIndex === -1) activeComment = { close: block.close, depth: 1 };
         continue;
       }
 

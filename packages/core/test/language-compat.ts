@@ -221,6 +221,33 @@ assert.deepEqual(cleanedLines([
   'Write-Output $here',
 ], 'PowerShell 引号、here-string 与 #requires 必须保留，真实注释必须删除');
 
+const nestedPowerShellComment = [
+  '$before = 1',
+  '<# outer comment starts',
+  'outer prefix',
+  '<# nested comment #>',
+  '# @author Nested Comment Maintainer',
+  'outer suffix after nested close',
+  '#> $after = 2',
+  'Write-Output $before',
+].join('\n');
+assert.deepEqual(cleanedLines(nestedPowerShellComment, 'ps1'), [
+  '$before = 1',
+  ' $after = 2',
+  'Write-Output $before',
+], 'PowerShell 内层 #> 不得提前结束外层块注释，最外层 #> 后的代码必须保留');
+assert.deepEqual(
+  extractAttributions(nestedPowerShellComment, 'src/nested.ps1', 'ps1'),
+  [{
+    kind: 'author',
+    subject: 'Nested Comment Maintainer',
+    file: 'src/nested.ps1',
+    line: 5,
+    text: '# @author Nested Comment Maintainer',
+  }],
+  'PowerShell 内层注释闭合后的外层余段仍应作为注释提取署名证据',
+);
+
 assert.deepEqual(cleanedLines([
   'Dim text = "REM and \' are literal" \' remove',
   'Dim quote = "He said ""REM is text"""',
