@@ -88,6 +88,14 @@ try {
   await fs.writeFile(path.join(root, 'pom.xml'), `
     <project>
       <groupId>com.acme</groupId><artifactId>self-java</artifactId>
+      <properties>
+        <cdata.open><![CDATA[<dependencyManagement>]]></cdata.open>
+        <cdata.comment><![CDATA[<!--]]></cdata.comment>
+        <cdata.declarations><![CDATA[<!DOCTYPE sample><!ENTITY fake "value">]]></cdata.declarations>
+        <cdata.dependency><![CDATA[
+          <dependency><groupId>org.fake</groupId><artifactId>cdata-fake</artifactId></dependency>
+        ]]></cdata.dependency>
+      </properties>
       <modules>
         <module>vendor/common</module>
         <module>vendor/profile-common</module>
@@ -99,7 +107,14 @@ try {
         <dependency><groupId>com.acme</groupId><artifactId>profile-common</artifactId></dependency>
         <dependency><groupId>com.acme</groupId><artifactId>empty-profile</artifactId></dependency>
         <dependency><groupId>\${dynamic.group}</groupId><artifactId>dynamic-lib</artifactId></dependency>
+        <dependency><groupId>org.real</groupId><artifactId>real-lib</artifactId></dependency>
       </dependencies>
+      <!-- normal comment closes independently of the CDATA text above -->
+      <dependencyManagement>
+        <dependencies>
+          <dependency><groupId>org.managed</groupId><artifactId>managed-only</artifactId></dependency>
+        </dependencies>
+      </dependencyManagement>
     </project>
   `);
   await fs.mkdir(path.join(root, 'vendor/common'), { recursive: true });
@@ -314,9 +329,9 @@ try {
     version = 3
 
     [[package]]
-    name = "lock-external"
+    "name" = "lock-external"
     version = "1.0.0"
-    source = "registry+https://github.com/rust-lang/crates.io-index"
+    "source" = "registry+https://github.com/rust-lang/crates.io-index"
 
     [[package]]
     name = "lock-owned-only"
@@ -719,6 +734,9 @@ other''']
     write('vendor/sibling/node-nested-owned/index.js', 'module.exports = true;'),
     write('external/commons-lang3/StringUtils.java', 'class StringUtils {}'),
     write('external/dynamic-lib/Dynamic.java', 'class Dynamic {}'),
+    write('external/real-lib/Real.java', 'class Real {}'),
+    write('vendor/managed-only/Managed.java', 'class Managed {}'),
+    write('vendor/cdata-fake/Fake.java', 'class Fake {}'),
     write('external/old-lib/Old.java', 'class Old {}'),
     write('vendor/common/src/Common.java', 'class Common {}'),
     write('vendor/profile-common/src/ProfileCommon.java', 'class ProfileCommon {}'),
@@ -1022,6 +1040,7 @@ other''']
     'vendor/@scope/real/index.js', 'vendor/real-plain/index.js',
     'vendor/sibling/node-nested-owned/index.js',
     'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
+    'external/real-lib/Real.java',
     'third_party/github.com/acme/tool/tool.go', 'vendor/example/example.go', 'vendor/blockdep/blockdep.go',
     'go-workspace/app/vendor/work-external/external.go',
     'go-outsider/vendor/work-owned/external.go',
@@ -1078,6 +1097,10 @@ other''']
   assert.ok(!dependencyFiles.has('services/other/vendor/service-only/api.py'),
     '子项目 requirements include 的依赖作用域不能泄漏到兄弟项目');
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/managed-only/Managed.java'),
+    'Maven dependencyManagement 中仅管理版本的坐标不能当作实际依赖');
+  assert.ok(!dependencyFiles.has('vendor/cdata-fake/Fake.java'),
+    'Maven CDATA 中的伪 dependency 标签不能形成依赖证据');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
   for (const relPath of [
     'third_party/example.local/win-drive-owned/owned.go',

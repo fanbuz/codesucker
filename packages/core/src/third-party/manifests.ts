@@ -457,7 +457,9 @@ function xmlValue(block: string, tag: string): string | undefined {
 }
 
 function stripXmlComments(text: string): string {
-  return text.replace(/<!--[\s\S]*?-->/g, (comment) => comment.replace(/[^\r\n]/g, ' '));
+  return text.replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/g, (block) => (
+    block.startsWith('<![CDATA[') ? block : block.replace(/[^\r\n]/g, ' ')
+  ));
 }
 
 interface MavenContext {
@@ -608,9 +610,21 @@ function mavenModuleManifests(doc: ManifestDocument): string[] {
   return [...out].sort();
 }
 
+function mavenStructuralSource(source: string): string {
+  const structural = source.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (block) => block.replace(/[^\r\n]/g, ' '));
+  return stripXmlComments(structural);
+}
+
+function mavenActiveDependencySource(source: string): string {
+  return mavenStructuralSource(source).replace(/<dependencyManagement\b[^>]*>[\s\S]*?<\/dependencyManagement>/gi,
+    (block) => block.replace(/[^\r\n]/g, ' '));
+}
+
 function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
   const source = stripXmlComments(doc.text);
-  if (/<!DOCTYPE|<!ENTITY/i.test(source)) throw new Error('包含不允许的 XML 实体或 DOCTYPE');
+  if (/<!DOCTYPE|<!ENTITY/i.test(mavenStructuralSource(doc.text))) {
+    throw new Error('包含不允许的 XML 实体或 DOCTYPE');
+  }
   const out: DependencyIdentity[] = [];
   const project = mavenContext(source);
   if (project.artifact) {
@@ -621,7 +635,8 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
       if (coordinate) out.push(coordinate);
     }
   }
-  for (const match of source.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
+  const activeSource = mavenActiveDependencySource(doc.text);
+  for (const match of activeSource.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
     const group = project.resolve(xmlValue(match[1], 'groupId'));
     const artifact = project.resolve(xmlValue(match[1], 'artifactId'));
     if (!artifact) continue;
@@ -636,7 +651,8 @@ function hasUnresolvedMavenCoordinates(doc: ManifestDocument): boolean {
   const source = stripXmlComments(doc.text);
   const project = mavenContext(source);
   if (project.unresolved) return true;
-  for (const match of source.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
+  const activeSource = mavenActiveDependencySource(doc.text);
+  for (const match of activeSource.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
     const group = xmlValue(match[1], 'groupId');
     const artifact = xmlValue(match[1], 'artifactId');
     if (artifact && !project.resolve(artifact) || group && !project.resolve(group)) return true;
@@ -1362,23 +1378,49 @@ function hasIncompleteCargoOverrides(doc: ManifestDocument): boolean {
   });
 }
 
+function cargoLockPackages(doc: ManifestDocument): {
+  incomplete: boolean;
+  packages: Array<{ name: string; source?: string }>;
+} {
+  const packages: Array<{ name: string; source?: string }> = [];
+  let incomplete = false;
+  for (const section of tomlSections(doc.text).filter((item) => tomlSectionHasExactPath(item, 'package'))) {
+    const parsed = parseTomlAssignments(section.body);
+    if (!parsed.complete) incomplete = true;
+    const fields = new Map<string, string>();
+    for (const assignment of parsed.assignments) {
+      if (assignment.keyPath.length !== 1) continue;
+      const key = assignment.keyPath[0];
+      if (key !== 'name' && key !== 'source') continue;
+      if (fields.has(key)) incomplete = true;
+      fields.set(key, assignment.value);
+    }
+    const name = fields.has('name') ? tomlStringValue(fields.get('name') ?? '') : null;
+    const source = fields.has('source') ? tomlStringValue(fields.get('source') ?? '') : undefined;
+    if (!name || source === null) {
+      incomplete = true;
+      continue;
+    }
+    packages.push({ name, ...(source ? { source } : {}) });
+  }
+  return { incomplete, packages };
+}
+
+function hasIncompleteCargoLock(doc: ManifestDocument): boolean {
+  return doc.basename === 'Cargo.lock' && cargoLockPackages(doc).incomplete;
+}
+
 function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (doc.basename === 'Cargo.lock') {
     const externalSource = (source: string | undefined): boolean => /^(?:registry|sparse|git)\+/.test(source ?? '');
-    const packages = tomlSections(doc.text).filter((section) => section.name === 'package').map((section) => {
-      const body = stripTomlComments(section.body);
-      return {
-        name: /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(body)?.[1],
-        source: /^\s*source\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(body)?.[1],
-      };
-    });
+    const packages = cargoLockPackages(doc).packages;
     const externalNames = new Set(packages.filter((item) => externalSource(item.source))
-      .map((item) => normalizePackageName(item.name ?? '', 'rust')));
+      .map((item) => normalizePackageName(item.name, 'rust')));
     for (const entry of packages) {
       const local = !externalSource(entry.source);
-      if (local && externalNames.has(normalizePackageName(entry.name ?? '', 'rust'))) continue;
-      const item = identity('rust', entry.name ?? '', doc.relPath, 'lockfile', local);
+      if (local && externalNames.has(normalizePackageName(entry.name, 'rust'))) continue;
+      const item = identity('rust', entry.name, doc.relPath, 'lockfile', local);
       if (item) out.push(item);
     }
     return out;
@@ -2203,6 +2245,7 @@ export async function collectDependencyInventory(
         || hasUnresolvedMavenCoordinates(document)
         || hasInvalidGoDirectives(document)
         || hasIncompleteCargoOverrides(document)
+        || hasIncompleteCargoLock(document)
         || hasIncompletePythonRequirements(document)
         || hasDynamicPep621Dependencies(document)) {
         diagnostics.push(diagnostic(
