@@ -101,13 +101,13 @@ function sourcePatterns(extensions: string[]): string[] {
 /** 读取文件并按探测到的编码解码为 UTF-8 文本 */
 export function readSource(filePath: string): { text: string; encoding: string } {
   const buf = fs.readFileSync(filePath);
-  return decodeSource(buf);
+  return decodeSource(buf, path.extname(filePath));
 }
 
 /** 异步读取并按探测到的编码解码为 UTF-8 文本。 */
 export async function readSourceAsync(filePath: string, signal?: AbortSignal): Promise<{ text: string; encoding: string }> {
   const buf = await fs.promises.readFile(filePath, signal ? { signal } : undefined);
-  return decodeSource(buf);
+  return decodeSource(buf, path.extname(filePath));
 }
 
 function hasPrefix(buf: Buffer, bytes: readonly number[]): boolean {
@@ -132,8 +132,10 @@ interface HtmlOpeningTag {
 
 function htmlOpeningTags(text: string): HtmlOpeningTag[] {
   const out: HtmlOpeningTag[] = [];
+  let occupiedUntil = 0;
   for (const match of text.matchAll(/<([A-Za-z][A-Za-z0-9:-]*)\b/g)) {
     const index = match.index ?? 0;
+    if (index < occupiedUntil) continue;
     let quote: "'" | '"' | undefined;
     let end = -1;
     for (let cursor = index + match[0].length; cursor < text.length; cursor++) {
@@ -146,7 +148,10 @@ function htmlOpeningTags(text: string): HtmlOpeningTag[] {
         break;
       }
     }
-    if (end > index) out.push({ index, end, name: match[1].toLocaleLowerCase(), raw: text.slice(index, end) });
+    if (end > index) {
+      occupiedUntil = end;
+      out.push({ index, end, name: match[1].toLocaleLowerCase(), raw: text.slice(index, end) });
+    }
   }
   return out;
 }
@@ -194,31 +199,53 @@ function blankMarkup(value: string): string {
   return value.replace(/[^\r\n]/g, ' ');
 }
 
-function declaredEncoding(buf: Buffer): string | null {
-  const header = buf.subarray(0, SOURCE_ENCODING_HEADER_BYTES).toString('latin1');
-  const lines = header.split(/\r\n|\r|\n/).slice(0, 2);
-  for (const line of lines) {
-    const comment = /^\s*(?:#|\/\/|\/\*+|\*|--|;).*?\b(?:coding\s*[:=]|charset\s*=)\s*["']?([A-Za-z0-9._-]+)/i.exec(line);
-    if (comment) return comment[1];
+function blankHtmlRawText(text: string): string {
+  const characters = text.split('');
+  let rawTextUntil = 0;
+  for (const tag of htmlOpeningTags(text).filter((item) => ['script', 'style', 'title'].includes(item.name))) {
+    if (tag.index < rawTextUntil) continue;
+    const closing = new RegExp(`<\\/${tag.name}\\s*>`, 'ig');
+    closing.lastIndex = tag.end;
+    const match = closing.exec(text);
+    const end = match ? (match.index ?? tag.end) + match[0].length : text.length;
+    rawTextUntil = end;
+    characters.fill(' ', tag.index, end);
   }
-  const leading = /^\s*(?:<\?xml\b[^>]*\bencoding\s*=|@charset\s+)\s*["']?([A-Za-z0-9._-]+)/i.exec(header);
-  if (leading) return leading[1];
-  const htmlHeader = header.replace(/<!--[\s\S]*?-->/g, blankMarkup);
-  const tags = htmlOpeningTags(htmlHeader);
-  for (const meta of tags.filter((tag) => tag.name === 'meta')) {
-    const encoding = htmlMetaEncoding(meta);
-    if (!encoding) continue;
-    const prefix = htmlHeader.slice(0, meta.index);
-    const head = tags.filter((tag) => tag.name === 'head' && tag.index < meta.index).at(-1);
-    const prolog = head ? prefix.slice(0, head.index) : prefix;
-    if (!/^\s*(?:(?:<!doctype\b[^>]*>|<html\b[^>]*>)\s*)*$/i.test(prolog)) continue;
-    if (!head) return encoding;
-    let headPrefix = prefix.slice(head.end);
-    headPrefix = headPrefix.replace(/<title\b[^>]*>[\s\S]*?<\/title\s*>/gi, blankMarkup);
-    const allowedTags = htmlOpeningTags(headPrefix).filter((tag) => ['base', 'link', 'meta'].includes(tag.name));
-    const characters = headPrefix.split('');
-    for (const tag of allowedTags) characters.fill(' ', tag.index, tag.end);
-    if (characters.join('').trim().length === 0) return encoding;
+  return characters.join('');
+}
+
+function declaredEncoding(buf: Buffer, extension?: string): string | null {
+  const header = buf.subarray(0, SOURCE_ENCODING_HEADER_BYTES).toString('latin1');
+  const ext = normalizeExtension(extension ?? '');
+  if (ext === 'py' || ext === 'rb') {
+    const lines = header.split(/\r\n|\r|\n/).slice(0, 2);
+    const magic = (line: string | undefined): string | null => (
+      /^\s*#.*?\bcoding\s*[:=]\s*([A-Za-z0-9._-]+)/i.exec(line ?? '')?.[1] ?? null
+    );
+    const first = magic(lines[0]);
+    if (first) return first;
+    const secondAllowed = ext === 'py' ? /^\s*(?:#.*)?$/.test(lines[0] ?? '') : /^\s*#!/.test(lines[0] ?? '');
+    if (secondAllowed) return magic(lines[1]);
+  }
+  if (ext === 'xml') {
+    return /^\s*<\?xml\b[^>]*\bencoding\s*=\s*["']([A-Za-z0-9._-]+)["']/i.exec(header)?.[1] ?? null;
+  }
+  if (ext === 'css' || ext === 'scss') {
+    return /^\s*@charset\s+["']([A-Za-z0-9._-]+)["']/i.exec(header)?.[1] ?? null;
+  }
+  if (ext === 'html' || ext === 'htm') {
+    const htmlHeader = blankHtmlRawText(header.replace(/<!--[\s\S]*?-->/g, blankMarkup));
+    const tags = htmlOpeningTags(htmlHeader);
+    const head = tags.find((tag) => tag.name === 'head');
+    const body = tags.find((tag) => tag.name === 'body');
+    const headClose = /<\/head\s*>/i.exec(htmlHeader);
+    for (const meta of tags.filter((tag) => tag.name === 'meta')) {
+      if (head && meta.index < head.end) continue;
+      if (body && body.index < meta.index) continue;
+      if (headClose && (headClose.index ?? 0) < meta.index) continue;
+      const encoding = htmlMetaEncoding(meta);
+      if (encoding) return encoding;
+    }
   }
   return null;
 }
@@ -253,7 +280,7 @@ function normalizeDetectedEncoding(encoding: string): string {
   return normalized;
 }
 
-function detectSourceEncoding(buf: Buffer): { encoding: string; bomBytes: number } {
+function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: string; bomBytes: number } {
   if (hasPrefix(buf, [0xef, 0xbb, 0xbf])) return { encoding: 'UTF-8 BOM', bomBytes: 3 };
   if (hasPrefix(buf, [0xff, 0xfe])) return { encoding: 'UTF-16LE', bomBytes: 2 };
   if (hasPrefix(buf, [0xfe, 0xff])) return { encoding: 'UTF-16BE', bomBytes: 2 };
@@ -261,7 +288,7 @@ function detectSourceEncoding(buf: Buffer): { encoding: string; bomBytes: number
   const utf16 = utf16WithoutBom(buf);
   if (utf16) return { encoding: utf16, bomBytes: 0 };
 
-  const declared = declaredEncoding(buf);
+  const declared = declaredEncoding(buf, extension);
   if (declared) return { encoding: normalizeDetectedEncoding(declared), bomBytes: 0 };
   if (isValidUtf8(buf)) return { encoding: 'UTF-8', bomBytes: 0 };
 
@@ -270,8 +297,8 @@ function detectSourceEncoding(buf: Buffer): { encoding: string; bomBytes: number
   return { encoding: normalizeDetectedEncoding(String(detected)), bomBytes: 0 };
 }
 
-export function decodeSource(buf: Buffer): { text: string; encoding: string } {
-  const detected = detectSourceEncoding(buf);
+export function decodeSource(buf: Buffer, extension?: string): { text: string; encoding: string } {
+  const detected = detectSourceEncoding(buf, extension);
   const decodeAs = detected.encoding === 'UTF-8 BOM' ? 'UTF-8' : detected.encoding;
   if (decodeAs.startsWith('UTF-32')) {
     throw new SourceDecodeError('unsupported-encoding', `不支持的文件编码：${detected.encoding}`);
@@ -373,7 +400,7 @@ export async function scanFileCandidate(candidate: FileCandidate, signal?: Abort
 
   let decoded: { text: string; encoding: string };
   try {
-    decoded = decodeSource(buf);
+    decoded = decodeSource(buf, candidate.ext);
   } catch (error) {
     if (error instanceof SourceDecodeError) {
       const status = error.reason === 'unsupported-encoding' ? 'skipped' : 'failed';
@@ -494,7 +521,7 @@ function scanFileCandidateSync(candidate: FileCandidate): ScanFileOutcome {
   if (buf.length === 0) return emptyFileOutcome(candidate);
   if (buf.length > MAX_FILE_BYTES) return tooLargeOutcome(candidate, buf.length);
   try {
-    const decoded = decodeSource(buf);
+    const decoded = decodeSource(buf, candidate.ext);
     if (looksBinary(buf, decoded.text, decoded.encoding)) {
       return {
         status: 'skipped',
@@ -656,8 +683,8 @@ export function countTextLines(text: string): number {
   return text.length === 0 ? 0 : text.split(/\r\n|\r|\n/).length;
 }
 
-export function countLines(buf: Buffer): number {
-  return countTextLines(decodeSource(buf).text);
+export function countLines(buf: Buffer, extension?: string): number {
+  return countTextLines(decodeSource(buf, extension).text);
 }
 
 /** 入口优先排序：入口文件在前，其余按目录深度和路径稳定排序 */

@@ -36,7 +36,7 @@ write('enc/declared-latin1.py', Buffer.concat([
 ]));
 write('enc/utf8-charset-string.ts', 'const sample = "charset=gbk";\nconst 名称 = "仍是 UTF-8";');
 write('enc/declared-html.html', Buffer.concat([
-  Buffer.from('<!-- old <head><meta charset="utf-8"> --><!doctype html><html><head><!-- old <meta charset="utf-8"> --><title>Legacy</title><meta name="viewport" content="width=device-width"><link rel="stylesheet"><meta charset="windows-1252"></head><body>', 'ascii'),
+  Buffer.from('<!-- old <head><meta charset="utf-8"> --><!doctype html><html><head><!-- old <meta charset="utf-8"> --><title>Legacy <script></title><meta name="viewport" content="width=device-width"><link rel="stylesheet"><meta charset="windows-1252"></head><body>', 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
 ]));
 write('enc/declared-html-window.html', Buffer.concat([
@@ -46,6 +46,12 @@ write('enc/declared-html-window.html', Buffer.concat([
 write('enc/utf8-meta-string.ts', 'const sample = "<meta charset=gbk>";\nconst 名称 = "仍是 UTF-8";');
 write('enc/utf8-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="charset=windows-1252"><meta charset="utf-8"></head><body>é</body></html>');
 write('enc/utf8-nested-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="<meta charset=windows-1252>"><meta charset="utf-8"></head><body>é</body></html>');
+write('enc/utf8-magic-comment.js', '// This tool supports charset=windows-1252 and coding=utf-16.\nconst value = "é";');
+write('enc/utf8-late-python-cookie.py', 'value = "é"\n# coding: windows-1252');
+write('enc/declared-html-metadata.html', Buffer.concat([
+  Buffer.from('<!doctype html><html><head><style>body { color: red; }</style><script>const fake = "<meta charset=utf-8>";</script><meta charset="windows-1252"></head><body>', 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
+]));
 write('enc/utf16le.ts', withBom([0xff, 0xfe], iconv.encode('const 名称 = "UTF-16LE";\r\nconst value = 4;', 'utf16-le')));
 write('enc/utf16be.ts', withBom([0xfe, 0xff], iconv.encode('const 名称 = "UTF-16BE";\rconst value = 5;', 'utf16-be')));
 write('enc/utf16le-no-bom.ts', iconv.encode('const value = "UTF-16LE no BOM";\nconst next = 6;', 'utf16-le'));
@@ -109,6 +115,9 @@ assert.equal(byPath.get('enc/declared-html-window.html')?.encoding, 'WINDOWS-125
 assert.equal(byPath.get('enc/utf8-meta-string.ts')?.encoding, 'UTF-8', '普通字符串中的 meta 标签不能伪装成编码声明');
 assert.equal(byPath.get('enc/utf8-meta-attribute.html')?.encoding, 'UTF-8', '普通 meta 属性值中的 charset 不能抢在真实 charset 属性前');
 assert.equal(byPath.get('enc/utf8-nested-meta-attribute.html')?.encoding, 'UTF-8', '属性值中的伪 meta 标签不能抢在真实 charset 属性前');
+assert.equal(byPath.get('enc/utf8-magic-comment.js')?.encoding, 'UTF-8', '不支持 magic comment 的语言不能把普通编码说明当作声明');
+assert.equal(byPath.get('enc/utf8-late-python-cookie.py')?.encoding, 'UTF-8', '首行已有代码时第二行 Python cookie 不能作为声明');
+assert.equal(byPath.get('enc/declared-html-metadata.html')?.encoding, 'WINDOWS-1252', 'style/script 等 head metadata 之后的真实 charset 必须生效');
 assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be.ts')?.encoding, 'UTF-16BE');
 assert.equal(byPath.get('enc/utf16le-no-bom.ts')?.encoding, 'UTF-16LE');
@@ -177,6 +186,8 @@ const latin1 = processFiles([byPath.get('enc/declared-latin1.py')!], config);
 assert.match(latin1.cleaned[0].lines.join('\n'), /Ã©/, '显式 latin-1 源码必须按声明保留原始字符语义');
 const declaredHtml = processFiles([byPath.get('enc/declared-html.html')!], config);
 assert.match(declaredHtml.cleaned[0].lines.join('\n'), /Ã©/, 'HTML meta 声明必须优先于 UTF-8 字节有效性');
+const declaredHtmlMetadata = processFiles([byPath.get('enc/declared-html-metadata.html')!], config);
+assert.match(declaredHtmlMetadata.cleaned[0].lines.join('\n'), /Ã©/, 'head metadata 后的 HTML meta 声明必须保持字符语义');
 
 const missingCandidate: FileCandidate = {
   path: path.join(root, 'missing.ts'),
