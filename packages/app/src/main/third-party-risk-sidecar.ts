@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { THIRD_PARTY_RULES_VERSION } from '@codesucker/core';
 import type {
   ThirdPartyAnalysisDiagnostic, ThirdPartyConfidence, ThirdPartyEvidence,
@@ -11,6 +12,12 @@ export type ThirdPartyFindingStatus = 'excluded' | 'partially-excluded' | 'kept-
 export interface ThirdPartyRiskPreference {
   rulesVersion: string;
   keptFindingIds: string[];
+}
+
+export interface ThirdPartyRiskWriteOptions {
+  signal?: AbortSignal;
+  /** 临时文件写完后、原子替换正式摘要前重新校验当前任务和扫描会话。 */
+  beforeCommit?: () => void;
 }
 
 interface SidecarEvidence {
@@ -304,13 +311,26 @@ export async function writeThirdPartyRiskSidecar(
   outDir: string,
   title: string,
   appVersion: string,
+  options: ThirdPartyRiskWriteOptions = {},
 ): Promise<string> {
+  options.signal?.throwIfAborted();
   const sidecar = buildThirdPartyRiskSidecar(report, includedPaths, preferenceInput, {
     appVersion,
     generatedAt: new Date().toISOString(),
   });
   await fs.promises.mkdir(outDir, { recursive: true });
   const output = path.join(outDir, `第三方代码风险摘要_${sanitizeFileName(title)}.json`);
-  await fs.promises.writeFile(output, `${JSON.stringify(sidecar, null, 2)}\n`, 'utf8');
-  return output;
+  const temporary = path.join(outDir, `.codesucker-third-party-risk-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    await fs.promises.writeFile(temporary, `${JSON.stringify(sidecar, null, 2)}\n`, {
+      encoding: 'utf8', signal: options.signal,
+    });
+    options.signal?.throwIfAborted();
+    options.beforeCommit?.();
+    await fs.promises.rename(temporary, output);
+    return output;
+  } catch (error) {
+    await fs.promises.unlink(temporary).catch(() => undefined);
+    throw error;
+  }
 }

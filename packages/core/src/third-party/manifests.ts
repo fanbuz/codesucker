@@ -267,6 +267,35 @@ function pythonName(spec: string): string | undefined {
   return /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(trimmed)?.[1];
 }
 
+interface TomlSection {
+  name: string;
+  body: string;
+}
+
+function tomlSections(text: string): TomlSection[] {
+  const headers = [...text.matchAll(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/gm)];
+  return headers.map((header, index) => ({
+    name: header[1].trim().toLocaleLowerCase(),
+    body: text.slice((header.index ?? 0) + header[0].length, headers[index + 1]?.index ?? text.length),
+  }));
+}
+
+function quotedTomlValues(value: string): string[] {
+  return [...value.matchAll(/['"]([^'"]+)['"]/g)].map((match) => match[1]);
+}
+
+function tomlArrayAssignment(body: string, key: string): string[] {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`^\\s*${escaped}\\s*=\\s*\\[([\\s\\S]*?)\\]`, 'm').exec(body);
+  return match ? quotedTomlValues(match[1]) : [];
+}
+
+function pythonDependency(
+  name: string | undefined, doc: ManifestDocument, local = false,
+): DependencyIdentity | null {
+  return name ? identity('python', name, doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', local) : null;
+}
+
 function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (/^requirements/i.test(doc.basename)) {
@@ -290,21 +319,48 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     }
     return out;
   }
-  const projectName = /\[(?:project|tool\.poetry)\]([\s\S]*?)(?=\n\[|$)/.exec(doc.text)?.[1];
-  const ownName = projectName && /^name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(projectName)?.[1];
-  if (ownName) {
-    const own = identity('python', ownName, doc.relPath, 'package-metadata', true);
-    if (own) out.push(own);
+  const sections = tomlSections(doc.text);
+  if (doc.basename === 'poetry.lock' || doc.basename === 'uv.lock') {
+    for (const section of sections.filter((item) => item.name === 'package')) {
+      const name = /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(section.body)?.[1];
+      const local = /^\s*(?:source|path)\s*=\s*.*(?:editable|path)\s*=/m.test(section.body);
+      const item = pythonDependency(name, doc, local);
+      if (item) out.push(item);
+    }
+    return out;
   }
-  for (const match of doc.text.matchAll(/^[ \t]*['"]?([A-Za-z0-9][A-Za-z0-9._-]*)['"]?\s*=\s*(.+)$/gm)) {
-    if (['name', 'version', 'description', 'python'].includes(match[1])) continue;
-    const local = /\bpath\s*=|^(?:['"])?(?:\.\.?\/|\/|file:)/.test(match[2].trim());
-    const item = identity('python', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', local);
-    if (item) out.push(item);
-  }
-  for (const match of doc.text.matchAll(/['"]([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?\s*(?:[<>=!~]|['"])/g)) {
-    const item = identity('python', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest');
-    if (item) out.push(item);
+  for (const section of sections) {
+    if (section.name === 'project' || section.name === 'tool.poetry') {
+      const ownName = /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(section.body)?.[1];
+      if (ownName) {
+        const own = identity('python', ownName, doc.relPath, 'package-metadata', true);
+        if (own) out.push(own);
+      }
+    }
+    if (section.name === 'project') {
+      for (const spec of tomlArrayAssignment(section.body, 'dependencies')) {
+        const item = pythonDependency(pythonName(spec), doc);
+        if (item) out.push(item);
+      }
+      continue;
+    }
+    if (section.name === 'project.optional-dependencies' || section.name === 'dependency-groups') {
+      for (const match of section.body.matchAll(/^\s*[A-Za-z0-9._-]+\s*=\s*\[([\s\S]*?)\]/gm)) {
+        for (const spec of quotedTomlValues(match[1])) {
+          const item = pythonDependency(pythonName(spec), doc);
+          if (item) out.push(item);
+        }
+      }
+      continue;
+    }
+    if (/^tool\.poetry\.(?:(?:group\.[^.]+\.)?dependencies|dev-dependencies)$/.test(section.name)) {
+      for (const match of section.body.matchAll(/^\s*['"]?([A-Za-z0-9][A-Za-z0-9._-]*)['"]?\s*=\s*(.+)$/gm)) {
+        if (match[1].toLocaleLowerCase() === 'python') continue;
+        const local = /\bpath\s*=|^(?:['"])?(?:\.\.?\/|\/|file:)/.test(match[2].trim());
+        const item = pythonDependency(match[1], doc, local);
+        if (item) out.push(item);
+      }
+    }
   }
   return out;
 }

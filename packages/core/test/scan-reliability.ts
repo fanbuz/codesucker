@@ -20,6 +20,7 @@ const withBom = (bom: number[], content: Buffer) => Buffer.concat([Buffer.from(b
 write('enc/utf8.ts', 'const 名称 = "UTF-8";\nconst value = 1;');
 write('enc/utf8-bom.ts', withBom([0xef, 0xbb, 0xbf], Buffer.from('const 名称 = "UTF-8 BOM";\nconst value = 2;', 'utf8')));
 write('enc/gbk.py', iconv.encode('# -*- coding: gbk -*-\n名称 = "中文编码"\n值 = 3', 'gbk'));
+write('enc/gb18030.py', iconv.encode('# -*- coding: gb18030 -*-\n名称 = "𠮷"\n值 = 30', 'gb18030'));
 write('enc/utf16le.ts', withBom([0xff, 0xfe], iconv.encode('const 名称 = "UTF-16LE";\r\nconst value = 4;', 'utf16-le')));
 write('enc/utf16be.ts', withBom([0xfe, 0xff], iconv.encode('const 名称 = "UTF-16BE";\rconst value = 5;', 'utf16-be')));
 write('enc/utf16le-no-bom.ts', iconv.encode('const value = "UTF-16LE no BOM";\nconst next = 6;', 'utf16-le'));
@@ -58,6 +59,7 @@ const byPath = new Map(sync.files.map((file) => [file.relPath, file]));
 assert.equal(byPath.get('enc/utf8.ts')?.encoding, 'UTF-8');
 assert.equal(byPath.get('enc/utf8-bom.ts')?.encoding, 'UTF-8 BOM');
 assert.equal(byPath.get('enc/gbk.py')?.encoding, 'GBK');
+assert.equal(byPath.get('enc/gb18030.py')?.encoding, 'GB18030');
 assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be.ts')?.encoding, 'UTF-16BE');
 assert.equal(byPath.get('enc/utf16le-no-bom.ts')?.encoding, 'UTF-16LE');
@@ -116,6 +118,9 @@ assert.ok(utf16.selection.totalLines > 0);
 const utf16Export = renderTxt(utf16.selection.pages, { title: config.title, fontName: 'SimSun', fontSizePt: 10.5, outDir: root });
 assert.match(fs.readFileSync(utf16Export, 'utf8'), /UTF-16LE/);
 assert.match(fs.readFileSync(utf16Export, 'utf8'), /UTF-16BE/);
+
+const gb18030 = processFiles([byPath.get('enc/gb18030.py')!], config);
+assert.match(gb18030.cleaned[0].lines.join('\n'), /𠮷/, 'GB18030 四字节字符不能按 GBK 解码损坏');
 
 const missingCandidate: FileCandidate = {
   path: path.join(root, 'missing.ts'),

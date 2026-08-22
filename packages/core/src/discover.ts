@@ -152,7 +152,8 @@ function normalizeDetectedEncoding(encoding: string): string {
   if (normalized === 'ASCII' || normalized === 'UTF8' || normalized === 'UTF-8') return 'UTF-8';
   if (normalized === 'UTF16LE' || normalized === 'UTF-16LE') return 'UTF-16LE';
   if (normalized === 'UTF16BE' || normalized === 'UTF-16BE') return 'UTF-16BE';
-  if (/^(GBK|GB2312|GB-2312|GB18030)$/.test(normalized)) return 'GBK';
+  if (/^(GBK|GB2312|GB-2312)$/.test(normalized)) return 'GBK';
+  if (normalized === 'GB18030') return 'GB18030';
   return normalized;
 }
 

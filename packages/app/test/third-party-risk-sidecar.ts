@@ -165,6 +165,37 @@ async function main() {
   const written = JSON.parse(fs.readFileSync(output, 'utf8')) as { generatedAt: string; appVersion: string };
   assert.equal(written.appVersion, metadata.appVersion);
   assert.ok(!Number.isNaN(Date.parse(written.generatedAt)));
+
+  fs.writeFileSync(output, 'previous-sidecar', 'utf8');
+  await assert.rejects(
+    writeThirdPartyRiskSidecar(
+      riskReport,
+      included,
+      { rulesVersion: riskReport.rulesVersion, keptFindingIds: [] },
+      outputDir,
+      '测试/软件:*V1.0',
+      metadata.appVersion,
+      { beforeCommit: () => { throw new Error('stale scan session'); } },
+    ),
+    /stale scan session/,
+  );
+  assert.equal(fs.readFileSync(output, 'utf8'), 'previous-sidecar', '过期会话不能覆盖既有摘要');
+
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    writeThirdPartyRiskSidecar(
+      riskReport, included, undefined, outputDir, '测试/软件:*V1.0', metadata.appVersion,
+      { signal: controller.signal },
+    ),
+    (error: unknown) => error instanceof Error && error.name === 'AbortError',
+  );
+  assert.equal(fs.readFileSync(output, 'utf8'), 'previous-sidecar', '取消导出不能覆盖既有摘要');
+  assert.equal(
+    fs.readdirSync(outputDir).filter((name) => name.startsWith('.codesucker-third-party-risk-')).length,
+    0,
+    '取消或会话失效后不能残留临时摘要',
+  );
   console.log('✅ third-party-risk-sidecar 全部通过');
 }
 

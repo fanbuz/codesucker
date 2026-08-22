@@ -485,6 +485,13 @@ export function registerPipelineIpc() {
         request.payload.outDir,
         request.payload.title,
         app.getVersion(),
+        {
+          signal: job.signal,
+          beforeCommit: () => {
+            job.assertCurrent();
+            requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+          },
+        },
       );
       report({ stage: 'rendering', completed: ++rendered, total: formatCount });
 
