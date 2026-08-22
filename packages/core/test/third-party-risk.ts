@@ -447,11 +447,11 @@ try {
       "owned-direct @ file:../owned-direct",
     ]
 
-    [project.optional-dependencies]
+    [project."optional-dependencies"]
     local = ["optional-owned @ file:../optional-owned"]
     "test-tools" = ["quoted-extra>=1"]
 
-    [dependency-groups]
+    ["dependency-groups"]
     'dev-tools' = ["quoted-group>=1"]
 
     [project.scripts]
@@ -461,6 +461,9 @@ try {
     python = ">=3.11"
     Flask = "^3.0"
     local-tool = { path = "./local-tool" }
+
+    [tool.poetry.group."qa]prod".dependencies]
+    bracket-group = "^1.0"
   `);
   await fs.mkdir(path.join(root, 'dynamic-python'), { recursive: true });
   await fs.writeFile(path.join(root, 'dynamic-python/pyproject.toml'), `
@@ -598,6 +601,7 @@ try {
     write('vendor/literal-after/library.py', 'def literal_marker(): pass'),
     write('vendor/basic-after/library.py', 'def basic_marker(): pass'),
     write('vendor/basic-five-after/library.py', 'def basic_five_marker(): pass'),
+    write('vendor/bracket-group/library.py', 'def bracket_group(): pass'),
     write('third_party/bar/index.js', 'module.exports = true;'),
     write('third_party/@scope/deep/index.js', 'module.exports = true;'),
     write('third_party/@legacy/v1-nested/index.js', 'module.exports = true;'),
@@ -781,6 +785,7 @@ try {
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'vendor/marker-second/library.py', 'vendor/literal-after/library.py',
     'vendor/basic-after/library.py', 'vendor/basic-five-after/library.py',
+    'vendor/bracket-group/library.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
     'external/slf4j-api/Logger.java', 'external/debug-lib/Debug.java', 'external/legacy-core/Legacy.java',
     'other-project/vendor/common/Other.java', 'vendor/profile-common/src/ProfileCommon.java',

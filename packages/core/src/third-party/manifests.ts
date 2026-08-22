@@ -1090,6 +1090,17 @@ interface TomlSection {
   body: string;
 }
 
+function tomlSectionKeyPath(section: TomlSection): string[] | null {
+  return parseTomlKeyAssignment(`${section.rawName} = true`)?.keyPath
+    .map((segment) => segment.toLocaleLowerCase()) ?? null;
+}
+
+function tomlSectionHasPath(section: TomlSection, ...expected: string[]): boolean {
+  const actual = tomlSectionKeyPath(section);
+  return actual?.length === expected.length
+    && actual.every((segment, index) => segment === expected[index]);
+}
+
 function tomlQuoteRun(text: string, index: number, quote: string): number {
   let end = index;
   while (text[end] === quote) end++;
@@ -1138,13 +1149,70 @@ function maskTomlMultilineStrings(text: string): string {
   return characters.join('');
 }
 
+interface TomlTableHeader {
+  index: number;
+  length: number;
+  rawName: string;
+}
+
+function tomlTableHeaders(structure: string): TomlTableHeader[] {
+  const headers: TomlTableHeader[] = [];
+  let lineStart = 0;
+  while (lineStart <= structure.length) {
+    const newline = structure.indexOf('\n', lineStart);
+    const lineEnd = newline >= 0 ? newline : structure.length;
+    const line = structure.slice(lineStart, lineEnd);
+    let cursor = 0;
+    while (line[cursor] === ' ' || line[cursor] === '\t') cursor++;
+    const arrayTable = line.startsWith('[[', cursor);
+    if (arrayTable || line[cursor] === '[') {
+      const nameStart = cursor + (arrayTable ? 2 : 1);
+      cursor = nameStart;
+      let quote: "'" | '"' | undefined;
+      let escaped = false;
+      while (cursor < line.length) {
+        const char = line[cursor];
+        if (quote) {
+          if (escaped) escaped = false;
+          else if (quote === '"' && char === '\\') escaped = true;
+          else if (char === quote) quote = undefined;
+          cursor++;
+          continue;
+        }
+        if (char === "'" || char === '"') {
+          quote = char;
+          cursor++;
+          continue;
+        }
+        const closingWidth = arrayTable && line.startsWith(']]', cursor)
+          ? 2
+          : !arrayTable && char === ']'
+            ? 1
+            : 0;
+        if (closingWidth > 0) {
+          const end = cursor + closingWidth;
+          if (line.slice(end).trim().length === 0) {
+            const rawName = line.slice(nameStart, cursor).trim();
+            if (rawName) headers.push({ index: lineStart, length: line.length, rawName });
+          }
+          break;
+        }
+        cursor++;
+      }
+    }
+    if (newline < 0) break;
+    lineStart = newline + 1;
+  }
+  return headers;
+}
+
 function tomlSections(text: string): TomlSection[] {
   const structure = maskTomlMultilineStrings(stripTomlComments(text));
-  const headers = [...structure.matchAll(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*$/gm)];
+  const headers = tomlTableHeaders(structure);
   return headers.map((header, index) => ({
-    name: header[1].trim().toLocaleLowerCase(),
-    rawName: header[1].trim(),
-    body: text.slice((header.index ?? 0) + header[0].length, headers[index + 1]?.index ?? text.length),
+    name: header.rawName.toLocaleLowerCase(),
+    rawName: header.rawName,
+    body: text.slice(header.index + header.length, headers[index + 1]?.index ?? text.length),
   }));
 }
 
@@ -1291,7 +1359,7 @@ function tomlArrayAssignmentKeys(body: string): string[] {
 function hasDynamicPep621Dependencies(doc: ManifestDocument): boolean {
   if (doc.basename !== 'pyproject.toml') return false;
   return tomlSections(doc.text).some((section) => (
-    section.name === 'project'
+    tomlSectionHasPath(section, 'project')
     && tomlArrayAssignment(section.body, 'dynamic').some((field) => (
       field === 'dependencies' || field === 'optional-dependencies'
     ))
@@ -1402,11 +1470,13 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   if (doc.basename === 'poetry.lock' || doc.basename === 'uv.lock') {
     for (let index = 0; index < sections.length; index++) {
       const section = sections[index];
-      if (section.name !== 'package') continue;
+      if (!tomlSectionHasPath(section, 'package')) continue;
       const name = /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(section.body)?.[1];
       let sourceBody = '';
-      for (let next = index + 1; next < sections.length && sections[next].name !== 'package'; next++) {
-        if (sections[next].name === 'package.source') sourceBody = sections[next].body;
+      for (let next = index + 1; next < sections.length && !tomlSectionHasPath(sections[next], 'package'); next++) {
+        if (tomlSectionHasPath(sections[next], 'package', 'source')) {
+          sourceBody = sections[next].body;
+        }
       }
       const local = pythonLockPackageIsLocal(section.body, sourceBody);
       const item = pythonDependency(name, doc, local);
@@ -1415,21 +1485,26 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     return out;
   }
   for (const section of sections) {
-    if (section.name === 'project' || section.name === 'tool.poetry') {
+    const sectionPath = tomlSectionKeyPath(section);
+    const isProject = tomlSectionHasPath(section, 'project');
+    const isPoetry = tomlSectionHasPath(section, 'tool', 'poetry');
+    if (isProject || isPoetry) {
       const ownName = /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(section.body)?.[1];
       if (ownName) {
         const own = identity('python', ownName, doc.relPath, 'package-metadata', true);
         if (own) out.push(own);
       }
     }
-    if (section.name === 'project') {
+    if (isProject) {
       for (const spec of tomlArrayAssignment(section.body, 'dependencies')) {
         const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
         if (item) out.push(item);
       }
       continue;
     }
-    if (section.name === 'project.optional-dependencies' || section.name === 'dependency-groups') {
+    const isOptionalDependencies = tomlSectionHasPath(section, 'project', 'optional-dependencies');
+    const isDependencyGroups = tomlSectionHasPath(section, 'dependency-groups');
+    if (isOptionalDependencies || isDependencyGroups) {
       for (const key of tomlArrayAssignmentKeys(section.body)) {
         for (const spec of tomlArrayAssignment(section.body, key)) {
           const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
@@ -1438,7 +1513,10 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
       }
       continue;
     }
-    if (/^tool\.poetry\.(?:(?:group\.[^.]+\.)?dependencies|dev-dependencies)$/.test(section.name)) {
+    const isPoetryDependencies = sectionPath?.[0] === 'tool' && sectionPath[1] === 'poetry'
+      && ((sectionPath.length === 3 && ['dependencies', 'dev-dependencies'].includes(sectionPath[2]))
+        || (sectionPath.length === 5 && sectionPath[2] === 'group' && sectionPath[4] === 'dependencies'));
+    if (isPoetryDependencies) {
       for (const match of section.body.matchAll(/^\s*['"]?([A-Za-z0-9][A-Za-z0-9._-]*)['"]?\s*=\s*(.+)$/gm)) {
         if (match[1].toLocaleLowerCase() === 'python') continue;
         const local = /\bpath\s*=|^(?:['"])?(?:\.\.?\/|\/|file:)/.test(match[2].trim());
