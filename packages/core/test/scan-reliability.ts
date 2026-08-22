@@ -34,6 +34,7 @@ write('issues/binary.ts', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02,
 write('issues/unsupported.ts', Buffer.from([0x81]));
 write('issues/malformed.ts', Buffer.from([0xff, 0xfe, 0x61]));
 write('issues/ignored.ts', 'const ignored = true;');
+write('.hidden-source.ts', 'const hiddenSource = true;');
 fs.writeFileSync(path.join(root, '.gitignore'), 'issues/ignored.ts\n', 'utf8');
 write('rules/generated.ts', 'const generated = true;');
 
@@ -67,6 +68,7 @@ assert.equal(byPath.get('lines/cr.ts')?.rawLines, 3);
 assert.equal(byPath.get('size/minus-one.ts')?.rawLines, 1);
 assert.equal(byPath.get('size/exact-multibyte.ts')?.rawLines, 1);
 assert.equal(byPath.has('size/plus-one.ts'), false);
+assert.equal(byPath.has('.hidden-source.ts'), true, '隐藏源码文件不能被静默漏掉');
 
 const issueByPath = new Map(sync.issues.map((item) => [item.file, item]));
 const expectReason = (file: string, reason: ScanIssue['reason']) => {

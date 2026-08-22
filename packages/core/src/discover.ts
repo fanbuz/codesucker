@@ -435,10 +435,11 @@ export function discoverDetailed(root: string, extensions: string[], excludes: s
   const { git, rules } = buildIgnoreMatchers(root, normalizedExcludes);
   const entries = fg.sync(sourcePatterns(extensions), {
     cwd: root,
-    dot: false,
+    dot: true,
     onlyFiles: true,
     stats: true,
-    suppressErrors: true,
+    suppressErrors: false,
+    followSymbolicLinks: false,
     caseSensitiveMatch: false,
     ignore: compileExcludePatterns(normalizedExcludes),
   });
@@ -493,10 +494,11 @@ export async function discoverAsync(
 
   const entries = await fg(sourcePatterns(extensions), {
     cwd: root,
-    dot: false,
+    dot: true,
     onlyFiles: true,
     stats: true,
-    suppressErrors: true,
+    suppressErrors: false,
+    followSymbolicLinks: false,
     caseSensitiveMatch: false,
     ignore: compileExcludePatterns(normalizedExcludes),
   });
