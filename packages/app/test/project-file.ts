@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   captureProjectRoot, resolveProjectEvidencePath, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  validateScannedFilesUnchanged,
 } from '../src/main/project-file.ts';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codesucker-project-file-'));
@@ -14,6 +15,18 @@ fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export {}');
 fs.writeFileSync(outside, 'secret');
 fs.mkdirSync(path.join(root, 'src', 'folder'));
 const rootSnapshot = captureProjectRoot(root);
+const scannedMain = fs.statSync(path.join(root, 'src', 'main.ts'));
+const scannedIdentity = [{
+  relPath: 'src/main.ts', sizeBytes: scannedMain.size, mtimeMs: scannedMain.mtimeMs,
+}];
+
+validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity);
+fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export const changed = true;');
+assert.throws(
+  () => validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity),
+  /扫描后发生变化.*src\/main\.ts/,
+);
+fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export {}');
 
 assert.equal(
   resolveProjectFile(rootSnapshot, root, 'src/main.ts'),

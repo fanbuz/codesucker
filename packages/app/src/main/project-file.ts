@@ -21,6 +21,12 @@ export interface ProjectRootSnapshot {
   inode: number;
 }
 
+export interface ScannedFileIdentity {
+  relPath: string;
+  sizeBytes: number;
+  mtimeMs: number;
+}
+
 export function captureProjectRoot(root: string): ProjectRootSnapshot {
   if (!path.isAbsolute(root)) throw new Error('项目目录无效，请重新导入项目');
   try {
@@ -59,6 +65,23 @@ export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: u
     throw new Error('问题路径不是普通文件，无法定位');
   }
   return realFile;
+}
+
+/** 导出使用扫描时的风险报告，因此源码元数据变化后必须先重新扫描。 */
+export function validateScannedFilesUnchanged(
+  snapshot: ProjectRootSnapshot,
+  root: unknown,
+  entries: readonly ScannedFileIdentity[],
+): void {
+  for (const entry of entries) {
+    try {
+      const file = resolveProjectFile(snapshot, root, entry.relPath);
+      const stat = fs.statSync(file);
+      if (stat.size !== entry.sizeBytes || stat.mtimeMs !== entry.mtimeMs) throw new Error('IDENTITY_CHANGED');
+    } catch {
+      throw new Error(`源码文件在扫描后发生变化，请重新扫描项目：${entry.relPath}`);
+    }
+  }
 }
 
 /** 定位风险证据，可接受项目内普通文件或目录，但拒绝符号链接越界。 */

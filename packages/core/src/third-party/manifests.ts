@@ -195,23 +195,49 @@ function xmlValue(block: string, tag: string): string | undefined {
   return new RegExp(`<${tag}\\b[^>]*>([^<]+)</${tag}>`, 'i').exec(block)?.[1]?.trim();
 }
 
+function mavenProjectCoordinates(text: string): { artifact?: string; group?: string } {
+  const parent = /<parent\b[^>]*>([\s\S]*?)<\/parent>/i.exec(text)?.[1] ?? '';
+  const project = text
+    .replace(/<parent\b[^>]*>[\s\S]*?<\/parent>/gi, '')
+    .replace(/<dependencies\b[^>]*>[\s\S]*?<\/dependencies>/gi, '')
+    .replace(/<dependencyManagement\b[^>]*>[\s\S]*?<\/dependencyManagement>/gi, '');
+  return {
+    artifact: xmlValue(project, 'artifactId'),
+    group: xmlValue(project, 'groupId') ?? xmlValue(parent, 'groupId'),
+  };
+}
+
+function mavenModuleManifests(doc: ManifestDocument): string[] {
+  const base = path.posix.dirname(doc.relPath);
+  const out = new Set<string>();
+  for (const match of doc.text.matchAll(/<module\b[^>]*>([^<]+)<\/module>/gi)) {
+    const modulePath = normalizeRel(match[1].trim().replace(/\\/g, '/'));
+    if (!modulePath || modulePath.includes('\0') || path.posix.isAbsolute(modulePath)
+      || path.win32.isAbsolute(modulePath)) continue;
+    const directory = path.posix.normalize(path.posix.join(base, modulePath));
+    if (directory === '..' || directory.startsWith('../') || path.posix.isAbsolute(directory)) continue;
+    out.add(path.posix.join(directory, 'pom.xml'));
+  }
+  return [...out].sort();
+}
+
 function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
   if (/<!DOCTYPE|<!ENTITY/i.test(doc.text)) throw new Error('包含不允许的 XML 实体或 DOCTYPE');
   const out: DependencyIdentity[] = [];
-  const projectArtifact = xmlValue(doc.text.replace(/<dependencies\b[\s\S]*$/i, ''), 'artifactId');
-  if (projectArtifact) {
-    const own = identity('java', projectArtifact, doc.relPath, 'package-metadata', true);
+  const project = mavenProjectCoordinates(doc.text);
+  if (project.artifact) {
+    const own = identity('java', project.artifact, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
+    if (project.group) {
+      const coordinate = identity('java', `${project.group}:${project.artifact}`, doc.relPath, 'package-metadata', true);
+      if (coordinate) out.push(coordinate);
+    }
   }
   for (const match of doc.text.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
     const group = xmlValue(match[1], 'groupId');
     const artifact = xmlValue(match[1], 'artifactId');
     if (!artifact) continue;
     const item = identity('java', group ? `${group}:${artifact}` : artifact, doc.relPath, 'manifest');
-    if (item) out.push(item);
-  }
-  for (const match of doc.text.matchAll(/<module\b[^>]*>([^<]+)<\/module>/gi)) {
-    const item = identity('java', match[1], doc.relPath, 'manifest', true);
     if (item) out.push(item);
   }
   return out;
@@ -600,8 +626,10 @@ export async function collectDependencyInventory(
   });
   const all = [...new Set([...regular, ...goVendor].map(normalizeRel))].sort();
   const selected = all.slice(0, maxManifestFiles);
+  const selectedSet = new Set(selected);
   const diagnostics: ThirdPartyAnalysisDiagnostic[] = [];
-  if (all.length > selected.length) {
+  let limitReported = all.length > selected.length;
+  if (limitReported) {
     diagnostics.push(diagnostic(
       'analysis-limit-reached', undefined,
       `依赖清单共 ${all.length} 个，仅分析前 ${selected.length} 个。`,
@@ -620,6 +648,24 @@ export async function collectDependencyInventory(
     try {
       dependencies.push(...parseManifest(document));
       analyzedManifests++;
+      if (document.basename === 'pom.xml') {
+        for (const moduleManifest of mavenModuleManifests(document)) {
+          if (selectedSet.has(moduleManifest)) continue;
+          if (selected.length >= maxManifestFiles) {
+            if (!limitReported) {
+              diagnostics.push(diagnostic(
+                'analysis-limit-reached', undefined,
+                `依赖清单达到 ${maxManifestFiles} 个分析上限，部分 Maven 模块未分析。`,
+                '请缩小项目范围或减少嵌套模块后重新扫描。',
+              ));
+              limitReported = true;
+            }
+            break;
+          }
+          selectedSet.add(moduleManifest);
+          selected.push(moduleManifest);
+        }
+      }
       if (hasUnsupportedGradleDeclarations(document)) {
         diagnostics.push(diagnostic(
           'dynamic-manifest-partial', document.relPath,

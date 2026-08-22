@@ -47,9 +47,21 @@ try {
   await fs.mkdir(path.join(root, 'examples/left-pad'), { recursive: true });
   await fs.writeFile(path.join(root, 'examples/left-pad/package.json'), JSON.stringify({ name: 'left-pad' }));
   await fs.writeFile(path.join(root, 'pom.xml'), `
-    <project><artifactId>self-java</artifactId><dependencies><dependency>
-      <groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId>
-    </dependency></dependencies></project>
+    <project>
+      <groupId>com.acme</groupId><artifactId>self-java</artifactId>
+      <modules><module>vendor/common</module></modules>
+      <dependencies>
+        <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId></dependency>
+        <dependency><groupId>com.acme</groupId><artifactId>common</artifactId></dependency>
+      </dependencies>
+    </project>
+  `);
+  await fs.mkdir(path.join(root, 'vendor/common'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/common/pom.xml'), `
+    <project>
+      <parent><groupId>com.acme</groupId><artifactId>self-java</artifactId></parent>
+      <artifactId>common</artifactId>
+    </project>
   `);
   await fs.writeFile(path.join(root, 'go.mod'), `
     module example.local/self
@@ -161,6 +173,7 @@ try {
   const files = await Promise.all([
     write('vendor/left-pad/index.js', '// SPDX-License-Identifier: MIT\nmodule.exports = value => value;'),
     write('external/commons-lang3/StringUtils.java', 'class StringUtils {}'),
+    write('vendor/common/src/Common.java', 'class Common {}'),
     write('third_party/github.com/acme/tool/tool.go', 'package tool'),
     write('third_party/example.local/block/tool.go', 'package block'),
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
@@ -249,6 +262,7 @@ try {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('rust-workspace/deps/workspace-member-local/lib.rs'),

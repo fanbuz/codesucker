@@ -14,6 +14,7 @@ import { assertExportableSelection } from './export-guard';
 import { validateDroppedDirectory } from './drop-path';
 import {
   captureProjectRoot, resolveProjectEvidencePath, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  validateScannedFilesUnchanged,
   type ProjectRootSnapshot,
 } from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
@@ -376,12 +377,15 @@ export function registerPipelineIpc() {
     const job = jobs.start(request.jobId, 'process');
     try {
       const entries = orderedEntries(request.payload);
+      const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const [result, preview] = await Promise.all([
         processWithWorkers(entries, request.payload, job, event.sender),
         previewWithWorker(entries[0], request.payload.clean, job),
       ]);
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const audit = result.errors.length > 0
         ? [{
             status: 'warn' as const,
@@ -431,8 +435,11 @@ export function registerPipelineIpc() {
     try {
       if (!request.payload.formats.docx && !request.payload.formats.txt) throw new Error('请至少选择一种输出格式');
       const entries = orderedEntries(request.payload);
-      const result = await processWithWorkers(entries, request.payload, job, event.sender);
       const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
+      const result = await processWithWorkers(entries, request.payload, job, event.sender);
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
       const renderOptions = {
