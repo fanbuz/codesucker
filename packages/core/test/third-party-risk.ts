@@ -24,10 +24,15 @@ async function write(relPath: string, text: string): Promise<FileEntry> {
 
 try {
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
-    name: 'self-app', dependencies: {
+    name: 'self-app',
+    workspaces: {
+      packages: ['vendor/node-*', 'vendor/range-{1..3}', 'vendor/node-missing', '!vendor/node-external'],
+    },
+    dependencies: {
       'left-pad': '^1.3.0', '@self/local': 'workspace:*', '/Users/private/customer': '^1.0.0',
       'win-drive-owned': 'C:\\repo\\owned', 'win-unc-owned': '\\\\server\\share\\owned',
       'win-relative-owned': '..\\owned',
+      'node-owned': '^1.0.0', 'node-nested-owned': '^1.0.0', 'node-external': '^1.0.0',
     },
   }));
   await fs.writeFile(path.join(root, 'package-lock.json'), JSON.stringify({
@@ -49,6 +54,35 @@ try {
   }));
   await fs.mkdir(path.join(root, 'examples/left-pad'), { recursive: true });
   await fs.writeFile(path.join(root, 'examples/left-pad/package.json'), JSON.stringify({ name: 'left-pad' }));
+  await fs.mkdir(path.join(root, 'vendor/node-owned/node-nested-owned'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/node-owned/package.json'), JSON.stringify({
+    name: 'node-owned', workspaces: ['node-nested-owned'],
+  }));
+  await fs.writeFile(path.join(root, 'vendor/node-owned/node-nested-owned/package.json'), JSON.stringify({
+    name: 'node-nested-owned',
+  }));
+  await fs.mkdir(path.join(root, 'vendor/node-external'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/node-external/package.json'), JSON.stringify({ name: 'node-external' }));
+  await fs.mkdir(path.join(root, 'vendor/range-1'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/range-1/package.json'), JSON.stringify({ name: 'node-range-owned' }));
+  await fs.mkdir(path.join(root, 'node-invalid'), { recursive: true });
+  await fs.writeFile(path.join(root, 'node-invalid/package.json'), JSON.stringify({
+    name: 'node-invalid', workspaces: { packages: '../outside' },
+  }));
+  await fs.mkdir(path.join(root, 'node-hidden-escape'), { recursive: true });
+  await fs.writeFile(path.join(root, 'node-hidden-escape/package.json'), JSON.stringify({
+    name: 'node-hidden-escape', workspaces: ['{.,}{.,}/{.,}{.,}/outside'],
+  }));
+  await fs.mkdir(path.join(root, 'node-glob-root/packages/owned/node_modules/polluted'), { recursive: true });
+  await fs.writeFile(path.join(root, 'node-glob-root/package.json'), JSON.stringify({
+    name: 'node-glob-root', workspaces: ['packages/**'],
+  }));
+  await fs.writeFile(path.join(root, 'node-glob-root/packages/owned/package.json'), JSON.stringify({
+    name: 'node-glob-owned',
+  }));
+  await fs.writeFile(path.join(root, 'node-glob-root/packages/owned/node_modules/polluted/package.json'), JSON.stringify({
+    name: 'polluted-dependency',
+  }));
   await fs.writeFile(path.join(root, 'pom.xml'), `
     <project>
       <groupId>com.acme</groupId><artifactId>self-java</artifactId>
@@ -460,6 +494,10 @@ try {
 
   const files = await Promise.all([
     write('vendor/left-pad/index.js', '// SPDX-License-Identifier: MIT\nmodule.exports = value => value;'),
+    write('vendor/node-owned/index.js', 'module.exports = true;'),
+    write('vendor/node-owned/node-nested-owned/index.js', 'module.exports = true;'),
+    write('vendor/node-external/index.js', 'module.exports = true;'),
+    write('vendor/sibling/node-nested-owned/index.js', 'module.exports = true;'),
     write('external/commons-lang3/StringUtils.java', 'class StringUtils {}'),
     write('external/dynamic-lib/Dynamic.java', 'class Dynamic {}'),
     write('external/old-lib/Old.java', 'class Old {}'),
@@ -591,6 +629,21 @@ try {
   }
   assert.ok(!fullSnapshot.manifestCandidateRelPaths.includes('vendor/go-invalid-external/go.mod'),
     '含非法 Go 字符串转义的 use 项不能形成候选成员路径');
+  for (const memberManifest of [
+    'vendor/node-owned/package.json',
+    'vendor/node-owned/node-nested-owned/package.json',
+    'vendor/range-1/package.json',
+  ]) {
+    assert.ok(limitedSnapshot.manifestCandidateRelPaths.includes(memberManifest),
+      `显式 Node workspace 成员 ${memberManifest} 必须在分析上限外进入完整候选清单快照`);
+  }
+  assert.ok(!fullSnapshot.manifestCandidateRelPaths.includes('vendor/node-external/package.json'),
+    'Node workspace 排除 glob 不能形成本地成员候选');
+  assert.ok(limitedSnapshot.manifestCandidateRelPaths.includes('node-glob-root/packages/owned/package.json'),
+    'Node workspace 嵌套 glob 成员必须进入候选清单快照');
+  assert.ok(!fullSnapshot.manifestCandidateRelPaths.includes(
+    'node-glob-root/packages/owned/node_modules/polluted/package.json',
+  ), 'Node workspace glob 不能把 node_modules 依赖包带入候选清单');
   assert.equal(limitedSnapshot.manifestCandidateRelPaths.length > 1, true);
   assert.equal(limitedSnapshot.manifestIdentities.length, limitedSnapshot.manifestCandidateRelPaths.length,
     '超过分析上限的候选清单也必须进入完整字节身份快照');
@@ -662,6 +715,13 @@ try {
     && item.file === 'local-editable/requirements.txt'),
   '无 egg 名称的本地 editable 目录与 git+file 依赖必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'node-invalid/package.json'), '无效 Node workspace 结构必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'node-hidden-escape/package.json'), 'glob 隐藏的越界 Node workspace 必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'package.json' && item.message.includes('Node workspace')),
+  '混合 workspace 声明中的单个缺失成员必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'dynamic-python/pyproject.toml'), 'PEP 621 动态依赖字段必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'quoted-dynamic-python/pyproject.toml'), 'PEP 621 引号键 dynamic 必须报告部分分析');
@@ -679,7 +739,9 @@ try {
     .filter((finding) => finding.kind === 'dependency-source')
     .flatMap((finding) => finding.affected.relPaths));
   for (const relPath of [
-    'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
+    'vendor/left-pad/index.js', 'vendor/node-external/index.js',
+    'vendor/sibling/node-nested-owned/index.js',
+    'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
     'third_party/github.com/acme/tool/tool.go', 'vendor/example/example.go', 'vendor/blockdep/blockdep.go',
     'go-workspace/app/vendor/work-external/external.go',
     'go-outsider/vendor/work-owned/external.go',
@@ -707,6 +769,10 @@ try {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/node-owned/index.js'),
+    '显式 ignored/vendor Node workspace 成员不能判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/node-owned/node-nested-owned/index.js'),
+    '递归 Node workspace 数组成员不能判为第三方');
   for (const relPath of [
     'vendor/win-drive-owned/index.js', 'vendor/win-unc-owned/index.js', 'vendor/win-relative-owned/index.js',
   ]) {

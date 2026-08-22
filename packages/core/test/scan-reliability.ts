@@ -34,6 +34,14 @@ write('enc/big5-noncanonical.py', Buffer.concat([
 write('enc/declared-latin1.py', Buffer.concat([
   Buffer.from('# coding: latin-1\nvalue = "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
 ]));
+write('enc/declared-encoding-substring.py', Buffer.concat([
+  Buffer.from('# encoding: latin-1\nvalue = "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
+]));
+write('enc/utf8-bom-python.py', withBom([0xef, 0xbb, 0xbf], Buffer.from('# coding: utf_8\nvalue = "é"', 'utf8')));
+write('enc/declared-long-first-line.py', Buffer.concat([
+  Buffer.from(`#!${'x'.repeat(1100)}\n# encoding: latin-1\nvalue = "`, 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
+]));
 write('enc/utf8-charset-string.ts', 'const sample = "charset=gbk";\nconst 名称 = "仍是 UTF-8";');
 write('enc/declared-html.html', Buffer.concat([
   Buffer.from('<!-- old <head><meta charset="utf-8"> --><!doctype html><html><head><!-- old <meta charset="utf-8"> --><title>Legacy <script></title><meta name="viewport" content="width=device-width"><link rel="stylesheet"><meta charset="windows-1252"></head><body>', 'ascii'),
@@ -57,6 +65,8 @@ for (const label of webUtf16Labels) {
 write('enc/utf8-html-http-equiv-ucs-2.html', '<!doctype html><html><head><meta http-equiv="content-type" content="text/html; charset=ucs-2"></head><body>é</body></html>');
 write('enc/utf8-magic-comment.js', '// This tool supports charset=windows-1252 and coding=utf-16.\nconst value = "é";');
 write('enc/utf8-late-python-cookie.py', 'value = "é"\n# coding: windows-1252');
+write('enc/utf8-invalid-python-cookie-space.py', '# coding : windows-1252\nvalue = "é"');
+write('enc/utf8-invalid-python-cookie-case.py', '# Coding: windows-1252\nvalue = "é"');
 write('enc/declared-xml.xml', Buffer.concat([
   Buffer.from('<?xml version="1.0" encoding="windows-1252"?><root>', 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</root>', 'ascii'),
@@ -100,6 +110,12 @@ write('issues/malformed-gb18030.py', Buffer.concat([
 write('issues/malformed-shift-jis.py', Buffer.concat([
   Buffer.from('# -*- coding: shift_jis -*-\nvalue = "', 'ascii'), Buffer.from([0x82]), Buffer.from('"', 'ascii'),
 ]));
+write('issues/python-bom-cookie-conflict.py', withBom(
+  [0xef, 0xbb, 0xbf], Buffer.from('# encoding: latin-1\nvalue = 1', 'ascii'),
+));
+write('issues/python-bom-long-cookie-conflict.py', withBom(
+  [0xef, 0xbb, 0xbf], Buffer.from(`#!${'x'.repeat(1100)}\n# encoding: latin-1\nvalue = 1`, 'ascii'),
+));
 write('issues/ignored.ts', 'const ignored = true;');
 write('.hidden-source.ts', 'const hiddenSource = true;');
 fs.writeFileSync(path.join(root, '.gitignore'), 'issues/ignored.ts\n', 'utf8');
@@ -135,6 +151,12 @@ assert.equal(byPath.get('enc/gbk-noncanonical.py')?.encoding, 'GBK', '合法 GBK
 assert.equal(byPath.get('enc/shift-jis-noncanonical.py')?.encoding, 'SHIFT-JIS', '合法 Shift-JIS 扩展映射不能误报解码失败');
 assert.equal(byPath.get('enc/big5-noncanonical.py')?.encoding, 'BIG5', '合法 Big5 重复映射不能误报解码失败');
 assert.equal(byPath.get('enc/declared-latin1.py')?.encoding, 'LATIN-1', '显式旧编码声明必须优先于 UTF-8 字节有效性');
+assert.equal(byPath.get('enc/declared-encoding-substring.py')?.encoding, 'LATIN-1',
+  'Python PEP 263 必须识别 encoding 中的 coding 子串');
+assert.equal(byPath.get('enc/utf8-bom-python.py')?.encoding, 'UTF-8 BOM',
+  'Python UTF-8 BOM 与 UTF-8 等价 cookie 可以同时存在');
+assert.equal(byPath.get('enc/declared-long-first-line.py')?.encoding, 'LATIN-1',
+  'Python 第二物理行 cookie 不能受 Web 编码探测窗口限制');
 assert.equal(byPath.get('enc/utf8-charset-string.ts')?.encoding, 'UTF-8', '普通字符串中的 charset 不能伪装成编码声明');
 assert.equal(byPath.get('enc/declared-html.html')?.encoding, 'WINDOWS-1252', 'doctype/head 后的 HTML meta 编码声明必须生效');
 assert.equal(byPath.get('enc/declared-html-window.html')?.encoding, 'WINDOWS-1252', 'HTML 前 1024 字节内的 meta 编码声明必须生效');
@@ -148,6 +170,10 @@ for (const label of webUtf16Labels) {
 assert.equal(byPath.get('enc/utf8-html-http-equiv-ucs-2.html')?.encoding, 'UTF-8', 'HTML http-equiv 的 UTF-16 别名必须映射为 UTF-8');
 assert.equal(byPath.get('enc/utf8-magic-comment.js')?.encoding, 'UTF-8', '不支持 magic comment 的语言不能把普通编码说明当作声明');
 assert.equal(byPath.get('enc/utf8-late-python-cookie.py')?.encoding, 'UTF-8', '首行已有代码时第二行 Python cookie 不能作为声明');
+assert.equal(byPath.get('enc/utf8-invalid-python-cookie-space.py')?.encoding, 'UTF-8',
+  'coding 与分隔符之间有空格的 Python 普通注释不能伪装成编码声明');
+assert.equal(byPath.get('enc/utf8-invalid-python-cookie-case.py')?.encoding, 'UTF-8',
+  '大小写不符的 Python 普通注释不能伪装成编码声明');
 assert.equal(byPath.get('enc/declared-xml.xml')?.encoding, 'WINDOWS-1252', '位于字节零的 XML 编码声明必须生效');
 assert.equal(byPath.get('enc/utf8-invalid-xml-declaration.xml')?.encoding, 'UTF-8', '前置空白后的 XML 声明无效，不能改变 UTF-8 解码');
 assert.equal(byPath.get('enc/utf8-xml-stylesheet.xml')?.encoding, 'UTF-8', 'xml-stylesheet 处理指令不能伪装成 XML 编码声明');
@@ -182,6 +208,8 @@ expectReason('issues/malformed.ts', 'decode-error');
 expectReason('issues/malformed-gbk.py', 'decode-error');
 expectReason('issues/malformed-gb18030.py', 'decode-error');
 expectReason('issues/malformed-shift-jis.py', 'decode-error');
+expectReason('issues/python-bom-cookie-conflict.py', 'decode-error');
+expectReason('issues/python-bom-long-cookie-conflict.py', 'decode-error');
 expectReason('issues/ignored.ts', 'gitignore');
 expectReason('size/plus-one.ts', 'file-too-large');
 assert.equal(issueByPath.get('size/plus-one.ts')?.sizeBytes, MAX_FILE_BYTES + 1);

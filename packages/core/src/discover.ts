@@ -262,17 +262,37 @@ function blankHtmlEncodingNoise(text: string): string {
   return characters.join('');
 }
 
+function firstPhysicalLines(buf: Buffer, count: number): Buffer {
+  let cursor = 0;
+  let lines = 0;
+  while (cursor < buf.length && lines < count) {
+    const byte = buf[cursor++];
+    if (byte === 0x0a) lines++;
+    else if (byte === 0x0d) {
+      if (buf[cursor] === 0x0a) cursor++;
+      lines++;
+    }
+  }
+  return buf.subarray(0, cursor);
+}
+
 function declaredEncoding(buf: Buffer, extension?: string): string | null {
-  const header = buf.subarray(0, SOURCE_ENCODING_HEADER_BYTES).toString('latin1');
   const ext = normalizeExtension(extension ?? '');
+  const header = (ext === 'py' || ext === 'rb'
+    ? firstPhysicalLines(buf, 2)
+    : buf.subarray(0, SOURCE_ENCODING_HEADER_BYTES)).toString('latin1');
   if (ext === 'py' || ext === 'rb') {
     const lines = header.split(/\r\n|\r|\n/).slice(0, 2);
     const magic = (line: string | undefined): string | null => (
-      /^\s*#.*?\bcoding\s*[:=]\s*([A-Za-z0-9._-]+)/i.exec(line ?? '')?.[1] ?? null
+      (ext === 'py'
+        ? /^[ \t\f]*#.*?coding[:=][ \t]*([A-Za-z0-9._-]+)/.exec(line ?? '')
+        : /^\s*#.*?\bcoding\s*[:=]\s*([A-Za-z0-9._-]+)/i.exec(line ?? ''))?.[1] ?? null
     );
     const first = magic(lines[0]);
     if (first) return first;
-    const secondAllowed = ext === 'py' ? /^\s*(?:#.*)?$/.test(lines[0] ?? '') : /^\s*#!/.test(lines[0] ?? '');
+    const secondAllowed = ext === 'py'
+      ? /^[ \t\f]*(?:#.*)?$/.test(lines[0] ?? '')
+      : /^\s*#!/.test(lines[0] ?? '');
     if (secondAllowed) return magic(lines[1]);
   }
   if (ext === 'xml') {
@@ -331,7 +351,15 @@ function normalizeDetectedEncoding(encoding: string): string {
 }
 
 function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: string; bomBytes: number } {
-  if (hasPrefix(buf, [0xef, 0xbb, 0xbf])) return { encoding: 'UTF-8 BOM', bomBytes: 3 };
+  if (hasPrefix(buf, [0xef, 0xbb, 0xbf])) {
+    if (normalizeExtension(extension ?? '') === 'py') {
+      const declared = declaredEncoding(buf.subarray(3), extension);
+      if (declared && !/^utf[-_]8(?:[-_].*)?$/i.test(declared)) {
+        throw new SourceDecodeError('decode-error', 'Python UTF-8 BOM 与编码声明冲突');
+      }
+    }
+    return { encoding: 'UTF-8 BOM', bomBytes: 3 };
+  }
   if (hasPrefix(buf, [0xff, 0xfe])) return { encoding: 'UTF-16LE', bomBytes: 2 };
   if (hasPrefix(buf, [0xfe, 0xff])) return { encoding: 'UTF-16BE', bomBytes: 2 };
   // 无 BOM 的 UTF-16 ASCII 区段同时也是合法 UTF-8 字节；必须先看 NUL 对齐与换行特征。

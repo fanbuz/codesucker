@@ -273,6 +273,146 @@ function parseNode(doc: ManifestDocument): DependencyIdentity[] {
   return out;
 }
 
+interface NodeWorkspacePatterns {
+  incomplete: boolean;
+  patterns: string[];
+}
+
+function workspaceGlobEscapesRoot(pattern: string): boolean {
+  const portablePattern = pattern.replace(/\\/g, '/');
+  const hiddenParentSegment = /(?:^|[/,{(|])\.\.(?=\/|[,})|\]]|$)/.test(portablePattern);
+  const hiddenAbsoluteBranch = /(?:^|[,|({])(?:\/|[A-Za-z]:[\\/])/.test(pattern);
+  if (hiddenParentSegment || hiddenAbsoluteBranch) return true;
+  try {
+    return fg.generateTasks([pattern]).some((task) => (
+      [...task.positive, ...task.negative].some((expandedPattern) => {
+        const portable = expandedPattern.replace(/\\/g, '/');
+        if (path.posix.isAbsolute(portable) || path.win32.isAbsolute(expandedPattern)) return true;
+        const normalized = path.posix.normalize(portable);
+        return normalized === '..' || normalized.startsWith('../') || path.posix.isAbsolute(normalized);
+      })
+    ));
+  } catch {
+    return true;
+  }
+}
+
+function nodeWorkspaceManifestPatterns(doc: ManifestDocument): NodeWorkspacePatterns {
+  if (doc.basename !== 'package.json') return { incomplete: false, patterns: [] };
+  const parsed = JSON.parse(doc.text) as Record<string, unknown>;
+  const workspaces = parsed.workspaces;
+  if (workspaces === undefined) return { incomplete: false, patterns: [] };
+  const values = Array.isArray(workspaces)
+    ? workspaces
+    : workspaces && typeof workspaces === 'object' && !Array.isArray(workspaces)
+      ? (workspaces as Record<string, unknown>).packages
+      : undefined;
+  if (!Array.isArray(values)) return { incomplete: true, patterns: [] };
+  const base = path.posix.dirname(doc.relPath);
+  const patterns: string[] = [];
+  let incomplete = false;
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      incomplete = true;
+      continue;
+    }
+    const raw = value.trim();
+    const negated = raw.startsWith('!');
+    const workspace = (negated ? raw.slice(1) : raw).trim().replace(/\\/g, '/');
+    if (!workspace || workspace.startsWith('!') || workspace.includes('\0')
+      || path.posix.isAbsolute(workspace) || path.win32.isAbsolute(workspace)
+      || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(workspace)) {
+      incomplete = true;
+      continue;
+    }
+    const directory = path.posix.normalize(path.posix.join(base, workspace));
+    if (directory === '..' || directory.startsWith('../') || path.posix.isAbsolute(directory)) {
+      incomplete = true;
+      continue;
+    }
+    const manifest = directory === '.' ? 'package.json' : `${directory.replace(/\/+$/, '')}/package.json`;
+    // fast-glob 会在访问文件系统前展开 brace；拼接后的 `{.,}{.,}` 可能变成 `..` 或 `/`。
+    // 必须检查展开任务，不能只检查用户输入的原始字符串。
+    if (workspaceGlobEscapesRoot(manifest)) {
+      incomplete = true;
+      continue;
+    }
+    patterns.push(negated ? `!${manifest}` : manifest);
+  }
+  if (patterns.length > 0 && patterns.every((pattern) => pattern.startsWith('!'))) incomplete = true;
+  return { incomplete, patterns };
+}
+
+async function nodeWorkspaceMemberManifests(
+  rootReal: string, doc: ManifestDocument,
+): Promise<{ incomplete: boolean; relPaths: string[] }> {
+  const declaration = nodeWorkspaceManifestPatterns(doc);
+  if (declaration.patterns.length === 0) return { incomplete: declaration.incomplete, relPaths: [] };
+  const globOptions = {
+    cwd: rootReal, onlyFiles: true, dot: true, followSymbolicLinks: false, unique: true,
+    ignore: ['**/.git/**', '**/node_modules/**'],
+  };
+  try {
+    const matches = await fg(declaration.patterns, globOptions);
+    const positivePatterns = declaration.patterns.filter((pattern) => !pattern.startsWith('!'));
+    let unmatched = false;
+    for (const pattern of positivePatterns) {
+      if ((await fg(pattern, globOptions)).length === 0) unmatched = true;
+    }
+    const normalizedMatches = matches.map(normalizeRel);
+    const escaped = normalizedMatches.some((relPath) => (
+      relPath === '..' || relPath.startsWith('../') || path.posix.isAbsolute(relPath)
+    ));
+    const relPaths = normalizedMatches.filter((relPath) => (
+      relPath !== '..' && !relPath.startsWith('../') && !path.posix.isAbsolute(relPath)
+    )).sort();
+    return {
+      incomplete: declaration.incomplete || unmatched || escaped,
+      relPaths,
+    };
+  } catch {
+    return { incomplete: true, relPaths: [] };
+  }
+}
+
+async function discoverNodeWorkspaceCandidates(
+  rootReal: string, seeds: string[], signal?: AbortSignal,
+): Promise<{ diagnostics: ThirdPartyAnalysisDiagnostic[]; relPaths: string[] }> {
+  const candidates = new Set(seeds.map(normalizeRel));
+  const queue = seeds.filter((relPath) => path.posix.basename(relPath) === 'package.json').sort();
+  const visited = new Set<string>();
+  const diagnostics: ThirdPartyAnalysisDiagnostic[] = [];
+  while (queue.length > 0) {
+    signal?.throwIfAborted();
+    const relPath = queue.shift()!;
+    if (visited.has(relPath)) continue;
+    visited.add(relPath);
+    const document = await readManifest(rootReal, relPath);
+    if ('code' in document) continue;
+    let workspace: Awaited<ReturnType<typeof nodeWorkspaceMemberManifests>>;
+    try {
+      workspace = await nodeWorkspaceMemberManifests(rootReal, document);
+    } catch {
+      continue;
+    }
+    if (workspace.incomplete) {
+      diagnostics.push(diagnostic(
+        'dynamic-manifest-partial', document.relPath,
+        'Node workspace 包含无效、越界、缺失或无法匹配的成员声明，只完成了保守分析。',
+        '请使用项目内可读取的 workspace 相对路径或 glob，并手工核验未识别成员。',
+      ));
+    }
+    for (const memberManifest of workspace.relPaths) {
+      if (!candidates.has(memberManifest)) {
+        candidates.add(memberManifest);
+        queue.push(memberManifest);
+      }
+    }
+    queue.sort();
+  }
+  return { diagnostics, relPaths: [...candidates].sort() };
+}
+
 function xmlValue(block: string, tag: string): string | undefined {
   return new RegExp(`<${tag}\\b[^>]*>([^<]+)</${tag}>`, 'i').exec(block)?.[1]?.trim();
 }
@@ -1315,7 +1455,10 @@ export async function collectDependencyInventory(
     cwd: rootReal, onlyFiles: true, dot: true, followSymbolicLinks: false,
     ignore: IGNORE_DIRS.filter((item) => !item.includes('vendor')),
   });
-  const candidatePaths = new Set([...regular, ...goVendor].map(normalizeRel));
+  const nodeWorkspaceDiscovery = await discoverNodeWorkspaceCandidates(
+    rootReal, [...regular, ...goVendor].map(normalizeRel), signal,
+  );
+  const candidatePaths = new Set(nodeWorkspaceDiscovery.relPaths);
   const initialCandidates = [...candidatePaths].sort();
   const selected = initialCandidates.slice(0, maxManifestFiles);
   const selectedSet = new Set(selected);
@@ -1324,7 +1467,7 @@ export async function collectDependencyInventory(
     relPath, new Set([path.posix.dirname(relPath)]),
   ]));
   const requirementEdges = new Map<string, Set<string>>();
-  const diagnostics: ThirdPartyAnalysisDiagnostic[] = [];
+  const diagnostics: ThirdPartyAnalysisDiagnostic[] = [...nodeWorkspaceDiscovery.diagnostics];
   let limitReported = initialCandidates.length > selected.length;
   if (limitReported) {
     diagnostics.push(diagnostic(
