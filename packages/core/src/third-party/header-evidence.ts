@@ -13,12 +13,15 @@ export interface HeaderEvidenceResult {
   generated: boolean;
 }
 
-async function readHeader(entry: FileEntry): Promise<string> {
+async function readHeader(entry: FileEntry, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const handle = await fs.open(entry.path, 'r');
   try {
+    signal?.throwIfAborted();
     const size = Math.min(HEADER_BYTES, Math.max(0, entry.sizeBytes));
     const buffer = Buffer.alloc(size);
     const { bytesRead } = await handle.read(buffer, 0, size, 0);
+    signal?.throwIfAborted();
     const encoding = iconv.encodingExists(entry.encoding) ? entry.encoding : 'utf8';
     return iconv.decode(buffer.subarray(0, bytesRead), encoding).replace(/^\uFEFF/, '');
   } finally {
@@ -26,11 +29,12 @@ async function readHeader(entry: FileEntry): Promise<string> {
   }
 }
 
-export async function inspectSourceHeader(entry: FileEntry): Promise<HeaderEvidenceResult> {
+export async function inspectSourceHeader(entry: FileEntry, signal?: AbortSignal): Promise<HeaderEvidenceResult> {
   let text: string;
   try {
-    text = await readHeader(entry);
-  } catch {
+    text = await readHeader(entry, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return {
       evidence: [], generated: false,
       diagnostics: [{
@@ -40,6 +44,7 @@ export async function inspectSourceHeader(entry: FileEntry): Promise<HeaderEvide
       }],
     };
   }
+  signal?.throwIfAborted();
   const comments = scanSource(text, entry.ext).flatMap((line, index) =>
     line.comments.map((comment) => ({ comment, line: index + 1 })));
   const evidence: ThirdPartyEvidence[] = [];
@@ -85,4 +90,3 @@ export async function inspectSourceHeader(entry: FileEntry): Promise<HeaderEvide
   }
   return { evidence, diagnostics: [], generated };
 }
-

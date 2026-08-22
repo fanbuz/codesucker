@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import type { FileEntry } from '../types.ts';
 import { THIRD_PARTY_RULES_VERSION } from '../version.ts';
+import { mapConcurrent } from '../async.ts';
 import { collectDependencyInventory, type DependencyIdentity } from './manifests.ts';
 import { inspectSourceHeader } from './header-evidence.ts';
 import type {
@@ -11,6 +12,7 @@ import type {
 } from './types.ts';
 
 const DEFAULT_MAX_EVIDENCE_FILES = 10_000;
+const DEFAULT_EVIDENCE_CONCURRENCY = 8;
 const VENDOR_SEGMENTS = new Set([
   'vendor', 'vendors', 'vendored', 'third_party', 'third-party',
   'thirdparty', 'external', 'externals', 'deps',
@@ -186,8 +188,13 @@ export async function analyzeThirdPartyRisksWithSnapshot(
       suggestion: '请缩小扫描范围或手工核验剩余文件。',
     });
   }
+  const headers = await mapConcurrent(
+    selected, DEFAULT_EVIDENCE_CONCURRENCY,
+    (entry) => inspectSourceHeader(entry, signal), signal,
+  );
 
-  for (const entry of selected) {
+  for (let index = 0; index < selected.length; index++) {
+    const entry = selected[index];
     signal?.throwIfAborted();
     const segments = entry.relPath.split('/');
     const vendorIndex = segments.findIndex((segment) => VENDOR_SEGMENTS.has(segment.toLocaleLowerCase()));
@@ -226,7 +233,7 @@ export async function analyzeThirdPartyRisksWithSnapshot(
     }
 
     const generatedPath = generatedByPath(entry.relPath);
-    const header = await inspectSourceHeader(entry);
+    const header = headers[index];
     diagnostics.push(...header.diagnostics);
     const generatedEvidence = header.evidence.filter((evidence) => evidence.source === 'generated-marker');
     if (generatedPath || header.generated) {

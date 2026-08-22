@@ -196,7 +196,8 @@ function identity(
 }
 
 function localSpec(spec: unknown): boolean {
-  return typeof spec === 'string' && /^(?:workspace:|file:|link:|\.\.?\/|\/)/i.test(spec.trim());
+  return typeof spec === 'string'
+    && /^(?:workspace:|file:|link:|\.\.?[\\/]|[A-Za-z]:[\\/]|[\\/]{2}|\/)/i.test(spec.trim());
 }
 
 function nodePackageNameFromLockPath(pkgPath: string): string {
@@ -759,6 +760,16 @@ function tomlArrayAssignment(body: string, key: string): string[] {
   return [];
 }
 
+function tomlArrayAssignmentKeys(body: string): string[] {
+  const structure = maskTomlMultilineStrings(stripTomlComments(body));
+  const keys = new Set<string>();
+  for (const match of structure.matchAll(/^\s*(?:([A-Za-z0-9._-]+)|"([^"\\]+)"|'([^']+)')\s*=\s*\[/gm)) {
+    const key = match[1] ?? match[2] ?? match[3];
+    if (key) keys.add(key);
+  }
+  return [...keys];
+}
+
 function hasDynamicPep621Dependencies(doc: ManifestDocument): boolean {
   if (doc.basename !== 'pyproject.toml') return false;
   return tomlSections(doc.text).some((section) => (
@@ -853,8 +864,8 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
       continue;
     }
     if (section.name === 'project.optional-dependencies' || section.name === 'dependency-groups') {
-      for (const match of section.body.matchAll(/^\s*([A-Za-z0-9._-]+)\s*=\s*\[/gm)) {
-        for (const spec of tomlArrayAssignment(section.body, match[1])) {
+      for (const key of tomlArrayAssignmentKeys(section.body)) {
+        for (const spec of tomlArrayAssignment(section.body, key)) {
           const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
           if (item) out.push(item);
         }

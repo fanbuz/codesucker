@@ -26,6 +26,8 @@ try {
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
     name: 'self-app', dependencies: {
       'left-pad': '^1.3.0', '@self/local': 'workspace:*', '/Users/private/customer': '^1.0.0',
+      'win-drive-owned': 'C:\\repo\\owned', 'win-unc-owned': '\\\\server\\share\\owned',
+      'win-relative-owned': '..\\owned',
     },
   }));
   await fs.writeFile(path.join(root, 'package-lock.json'), JSON.stringify({
@@ -256,6 +258,10 @@ try {
 
     [project.optional-dependencies]
     local = ["optional-owned @ file:../optional-owned"]
+    "test-tools" = ["quoted-extra>=1"]
+
+    [dependency-groups]
+    'dev-tools' = ["quoted-group>=1"]
 
     [project.scripts]
     acme-cli = "mine.cli:main"
@@ -341,6 +347,11 @@ try {
     write('vendor/fake-only/fake.py', 'def fake(): pass'),
     write('vendor/owned-direct/owned.py', 'def owned(): pass'),
     write('vendor/optional-owned/owned.py', 'def owned(): pass'),
+    write('vendor/quoted-extra/api.py', 'def quoted(): pass'),
+    write('vendor/quoted-group/api.py', 'def group(): pass'),
+    write('vendor/win-drive-owned/index.js', 'module.exports = true;'),
+    write('vendor/win-unc-owned/index.js', 'module.exports = true;'),
+    write('vendor/win-relative-owned/index.js', 'module.exports = true;'),
     write('vendor/pipenv-local-path/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-local-file/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-external/library.py', 'def external(): pass'),
@@ -465,6 +476,7 @@ try {
     'vendor/nested-requirement/api.py', 'vendor/deep-requirement/api.py',
     'services/app/vendor/service-only/api.py',
     'vendor/extra-only/security.py', 'vendor/after-comment/client.py',
+    'vendor/quoted-extra/api.py', 'vendor/quoted-group/api.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
@@ -474,6 +486,11 @@ try {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
+  for (const relPath of [
+    'vendor/win-drive-owned/index.js', 'vendor/win-unc-owned/index.js', 'vendor/win-relative-owned/index.js',
+  ]) {
+    assert.ok(!dependencyFiles.has(relPath), `${relPath} 的 Windows 本地路径依赖不能判为第三方`);
+  }
   assert.ok(!dependencyFiles.has('services/other/vendor/service-only/api.py'),
     '子项目 requirements include 的依赖作用域不能泄漏到兄弟项目');
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
