@@ -38,6 +38,45 @@ export interface FileEntry {
   entryScore: number;
 }
 
+export type ScanIssueStatus = 'excluded' | 'skipped' | 'failed';
+
+export type ScanIssueReason =
+  | 'exclude-rule'
+  | 'gitignore'
+  | 'empty-file'
+  | 'file-too-large'
+  | 'binary-file'
+  | 'unsupported-encoding'
+  | 'read-error'
+  | 'decode-error'
+  | 'scan-error';
+
+/** 未纳入扫描结果的可追踪原因；file 始终为项目相对路径。 */
+export interface ScanIssue {
+  status: ScanIssueStatus;
+  reason: ScanIssueReason;
+  file: string;
+  message: string;
+  suggestion: string;
+  sizeBytes?: number;
+  limitBytes?: number;
+}
+
+export interface ScanSummary {
+  /** 应用 CodeSucker 扫描排除规则后，默认支持后缀下进入发现/扫描管线的文件。 */
+  candidates: number;
+  included: number;
+  excluded: number;
+  skipped: number;
+  failed: number;
+}
+
+/** worker 与 Core 异步扫描共用的单文件结果协议。 */
+export type ScanFileOutcome =
+  | { status: 'included'; file: FileEntry }
+  | { status: 'skipped'; issue: ScanIssue & { status: 'skipped' } }
+  | { status: 'failed'; issue: ScanIssue & { status: 'failed' } };
+
 export type LineKind = 'code' | 'comment' | 'blank';
 
 export interface AnnotatedLine {

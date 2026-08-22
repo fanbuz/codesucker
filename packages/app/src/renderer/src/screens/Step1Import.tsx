@@ -6,6 +6,7 @@ import {
   clampRecentMenuPosition, nextRecentMenuIndex, reconcileRecentSelection,
   selectAllRecent, toggleRecentSelection as toggleSelectedRoot, type RecentMenuNavigationKey,
 } from '../recent-project-state';
+import { ScanIssueReport } from '../components/ScanIssueReport';
 
 interface RecentContextMenu {
   root: string;
@@ -216,12 +217,13 @@ export default function Step1Import() {
       )}
 
       {s.scanPhase === 'error' && (
-        <div style={{ border: '1.5px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 14, background: 'var(--red-soft)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, animation: 'cs-fade .18s ease-out' }}>
+        <div style={{ border: '1.5px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 14, background: 'var(--red-soft)', minHeight: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, animation: 'cs-fade .18s ease-out' }}>
           <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--red)', boxShadow: 'var(--shadow)' }}>✕</div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{s.scanError ?? '未发现可用源代码文件'}</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', lineHeight: 1.7 }}>
             该文件夹内没有可识别的源码。建议检查：<br />① 是否选错了目录（应选择包含 src/ 的项目根目录）　② 源码是否在压缩包内，需先解压
           </div>
+          <ScanIssueReport issues={s.scanIssues} summary={s.scanSummary} appliedRules={s.appliedScanExcludeRules} compact />
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             {s.root && <button className="btn-primary" style={{ height: 32, padding: '0 16px', fontSize: 13 }}
               onClick={() => { void scanProject(s.root!, s.scanIntent); }}>重试扫描</button>}

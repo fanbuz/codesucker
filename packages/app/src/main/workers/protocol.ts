@@ -1,5 +1,5 @@
 import type {
-  AnnotatedLine, CleanedFile, CleanOptions, FileCandidate, FileEntry, Page, RenderOptions,
+  AnnotatedLine, CleanedFile, CleanOptions, FileCandidate, FileEntry, Page, RenderOptions, ScanFileOutcome,
 } from '@codesucker/core';
 
 export interface PreviewResult {
@@ -16,7 +16,7 @@ export type PipelineWorkerRequest =
   | { type: 'clean'; entry: FileEntry; clean: CleanOptions }
   | { type: 'preview'; entry: FileEntry; clean: CleanOptions };
 
-export type PipelineWorkerResult = FileEntry | CleanedFile | PreviewResult | null;
+export type PipelineWorkerResult = ScanFileOutcome | CleanedFile | PreviewResult | null;
 
 export interface RenderWorkerRequest {
   pages: Page[];

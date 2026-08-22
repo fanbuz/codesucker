@@ -11,6 +11,7 @@ import {
   setAllIncluded, setDirectoryIncluded,
   type FileTreeDirectoryNode, type FileTreeFileNode, type SelectionState,
 } from '../file-selection';
+import { ScanIssueReport } from '../components/ScanIssueReport';
 
 const FILE_TREE_SEARCH_DEBOUNCE_MS = 180;
 
@@ -68,7 +69,9 @@ function FileTreeNode({ node, depth, expandedDirectories, onToggleExpanded, onTo
           label={`${node.file.included ? '取消' : '选择'}文件 ${node.relPath}`} onChange={() => onToggleFile(node.file.relPath)} />
         <span className="file-tree-row__language" style={{ color: fg, background: bg }}>{node.file.lang}</span>
         <span className="file-tree-row__name" title={node.relPath}>{node.file.name}</span>
-        <span className="file-tree-row__meta">{node.file.rawLines} 行</span>
+        <span className="file-tree-row__meta" title={`编码：${node.file.encoding}`}>
+          {node.file.encoding === 'UTF-8' ? '' : `${node.file.encoding} · `}{node.file.rawLines} 行
+        </span>
       </div>
     );
   }
@@ -334,14 +337,7 @@ export default function Step2Files() {
       {/* 统计 */}
       <aside className="step2-stats-panel">
         <div className="step2-stats-panel__title">统计</div>
-        {s.scanErrors.length > 0 && (
-          <div className="step2-scan-error" style={{ background: 'var(--orange-soft)', border: '1px solid color-mix(in srgb, var(--orange) 35%, transparent)', borderRadius: 9, padding: 10 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--orange)' }}>{s.scanErrors.length} 个文件扫描失败，已跳过</div>
-            <div className="step2-scan-error__detail" title={`${s.scanErrors[0].file} · ${s.scanErrors[0].message}`} style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4, fontFamily: 'var(--mono)' }}>
-              {s.scanErrors[0].file} · {s.scanErrors[0].message}
-            </div>
-          </div>
-        )}
+        <ScanIssueReport issues={s.scanIssues} summary={s.scanSummary} appliedRules={s.appliedScanExcludeRules} />
         <div className="step2-stat-grid">
           <StatCard label="总文件" value={String(s.files.length)} />
           <StatCard label="已纳入" value={String(included.length)} accent />

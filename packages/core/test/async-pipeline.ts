@@ -68,7 +68,9 @@ const failed = await discoverAsync(tmp, DEFAULT_EXTENSIONS, DEFAULT_EXCLUDES, {
     try {
       await new Promise((resolve) => setTimeout(resolve, 3));
       if (candidate.relPath.endsWith('module-07.ts')) throw new Error('模拟读取失败');
-      return asyncResult.files.find((file) => file.relPath === candidate.relPath) ?? null;
+      const file = asyncResult.files.find((item) => item.relPath === candidate.relPath);
+      if (!file) throw new Error(`缺少测试文件：${candidate.relPath}`);
+      return { status: 'included', file };
     } finally {
       active--;
     }
@@ -86,7 +88,9 @@ const cancelled = discoverAsync(tmp, DEFAULT_EXTENSIONS, DEFAULT_EXCLUDES, {
   signal: controller.signal,
   scanFile: async (candidate) => {
     await new Promise((resolve) => setTimeout(resolve, 200));
-    return asyncResult.files.find((file) => file.relPath === candidate.relPath) ?? null;
+    const file = asyncResult.files.find((item) => item.relPath === candidate.relPath);
+    if (!file) throw new Error(`缺少测试文件：${candidate.relPath}`);
+    return { status: 'included', file };
   },
 });
 setTimeout(() => controller.abort('测试取消'), 10);

@@ -1,7 +1,7 @@
 export * from './types.ts';
 export {
-  discover, discoverAsync, sortFiles, readSource, readSourceAsync, scanFileCandidate,
-  langOf, entryScore, countLines, MAX_FILE_BYTES,
+  discover, discoverDetailed, discoverAsync, sortFiles, readSource, readSourceAsync, scanFileCandidate,
+  decodeSource, langOf, entryScore, countLines, countTextLines, MAX_FILE_BYTES, SourceDecodeError,
   type DiscoverAsyncOptions, type DiscoverResult, type FileCandidate,
 } from './discover.ts';
 export { annotate, cleanFile, extractAttributions, wrapLine } from './clean.ts';

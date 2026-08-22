@@ -6,7 +6,7 @@ import {
   discoverAsync, processFilesAsync, renderTxtAsync, sortFiles,
 } from '@codesucker/core';
 import type {
-  CleanedFile, CleanOptions, FileCandidate, FileEntry, PipelineProgress, ProjectConfig,
+  CleanedFile, CleanOptions, FileCandidate, FileEntry, PipelineProgress, ProjectConfig, ScanFileOutcome,
 } from '@codesucker/core';
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
@@ -243,7 +243,7 @@ async function scanWithWorkers(
       onProgress: report,
       scanFile: async (candidate: FileCandidate, signal) => {
         const scanned = await workerResources.pipeline.run({ type: 'scan', candidate }, signal);
-        return scanned as FileEntry | null;
+        return scanned as ScanFileOutcome;
       },
     });
     job.assertCurrent();
@@ -264,6 +264,9 @@ async function scanWithWorkers(
       root: rootSnapshot.inputPath,
       pathSeparator: path.sep === '\\' ? '\\' : '/',
       files: result.files,
+      issues: result.issues,
+      summary: result.summary,
+      appliedExcludeRules: result.appliedExcludeRules,
       errors: result.errors,
       workerCount: workerResources.workerCount,
       langCounts,
