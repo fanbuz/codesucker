@@ -138,6 +138,12 @@ assert.doesNotThrow(() => new TextDecoder('utf-8', { fatal: true }).decode(utf16
   'UTF-16BE 回归样本字节必须能通过 UTF-8 语法校验');
 write('enc/utf16le-valid-utf8-bytes.java', utf16leValidUtf8Bytes);
 write('enc/utf16be-valid-utf8-bytes.java', utf16beValidUtf8Bytes);
+const utf16Cyrillic = `// ${'Привет мир '.repeat(20)}`;
+write('enc/utf16le-cyrillic-no-bom.java', iconv.encode(utf16Cyrillic, 'utf16-le'));
+write('enc/utf16be-cyrillic-no-bom.java', iconv.encode(utf16Cyrillic, 'utf16-be'));
+const utf16Greek = `// ${'Καλημέρα κόσμε '.repeat(20)}`;
+write('enc/utf16le-greek-no-bom.java', iconv.encode(utf16Greek, 'utf16-le'));
+write('enc/utf16be-greek-no-bom.java', iconv.encode(utf16Greek, 'utf16-be'));
 write('enc/utf8-even-cjk.java', '中文源码');
 write('enc/utf16le-no-bom.xml', iconv.encode(
   '<?xml version="1.0" encoding="UTF-16"?><root>有效</root>', 'utf16-le',
@@ -293,6 +299,15 @@ assert.equal(byPath.get('enc/utf16le-valid-utf8-bytes.java')?.encoding, 'UTF-16L
   'UTF-16LE 字节恰好符合 UTF-8 语法时不能静默按二进制跳过');
 assert.equal(byPath.get('enc/utf16be-valid-utf8-bytes.java')?.encoding, 'UTF-16BE',
   'UTF-16BE 字节恰好符合 UTF-8 语法时不能静默按二进制跳过');
+for (const [language, expected] of [['cyrillic', utf16Cyrillic], ['greek', utf16Greek]] as const) {
+  for (const [byteOrder, encoding] of [['le', 'UTF-16LE'], ['be', 'UTF-16BE']] as const) {
+    const relPath = `enc/utf16${byteOrder}-${language}-no-bom.java`;
+    assert.equal(byPath.get(relPath)?.encoding, encoding,
+      `无 BOM ${encoding} 的 ${language} 源码不能按反向字节序导出乱码`);
+    assert.equal(decodeSource(fs.readFileSync(path.join(root, relPath)), '.java').text, expected,
+      `无 BOM ${encoding} 的 ${language} 源码必须保持原文`);
+  }
+}
 assert.equal(byPath.get('enc/utf8-even-cjk.java')?.encoding, 'UTF-8',
   '偶数字节 UTF-8 中文源码不能被弱 UTF-16 探测抢占');
 assert.equal(byPath.get('enc/utf16le-no-bom.xml')?.encoding, 'UTF-16LE',

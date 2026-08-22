@@ -341,29 +341,49 @@ interface Utf16Candidate {
 }
 
 interface TextPlausibility {
+  asciiRatio: number;
   cjkRatio: number;
   bad: number;
+  letterRatio: number;
   score: number;
+  scriptCoherence: number;
 }
+
+const TEXT_SCRIPT_PATTERNS = [
+  /\p{Script=Han}/u, /\p{Script=Hiragana}/u, /\p{Script=Katakana}/u, /\p{Script=Hangul}/u,
+  /\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u,
+  /\p{Script=Arabic}/u, /\p{Script=Hebrew}/u, /\p{Script=Devanagari}/u, /\p{Script=Thai}/u,
+] as const;
 
 function inspectTextPlausibility(text: string): TextPlausibility | null {
   let common = 0;
   let neutral = 0;
   let cjk = 0;
   let bad = 0;
+  let ascii = 0;
+  let letters = 0;
+  const scriptCounts = new Array<number>(TEXT_SCRIPT_PATTERNS.length + 1).fill(0);
   const characters = [...text];
   for (const char of characters) {
     const code = char.codePointAt(0) ?? 0;
     if (code === 9 || code === 10 || code === 12 || code === 13 || (code >= 32 && code <= 126)) {
       common++;
-    } else if (/\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(char)) {
-      common++;
-      cjk++;
-    } else if (/\p{Script=Latin}|\p{Script=Cyrillic}|\p{Script=Greek}/u.test(char)) {
-      common++;
+      ascii++;
+      if (/\p{L}/u.test(char)) {
+        letters++;
+        scriptCounts[4]++;
+      }
     } else if (/\p{Cc}|\p{Cn}|\p{Co}/u.test(char)) {
       bad++;
-    } else if (/\p{L}|\p{M}|\p{N}|\p{P}|\p{S}|\p{Z}/u.test(char)) {
+    } else if (/\p{L}/u.test(char)) {
+      common++;
+      letters++;
+      const script = TEXT_SCRIPT_PATTERNS.findIndex((pattern) => pattern.test(char));
+      scriptCounts[script >= 0 ? script : TEXT_SCRIPT_PATTERNS.length]++;
+      if (script >= 0 && script <= 3) cjk++;
+    } else if (/\p{M}|\p{N}/u.test(char)) {
+      common++;
+    } else if (/\p{P}|\p{S}|\p{Z}/u.test(char)) {
       neutral++;
     } else {
       bad++;
@@ -371,10 +391,18 @@ function inspectTextPlausibility(text: string): TextPlausibility | null {
   }
   if (characters.length === 0) return null;
   return {
+    asciiRatio: ascii / characters.length,
     cjkRatio: cjk / characters.length,
     bad,
+    letterRatio: letters / characters.length,
     score: (common + neutral * 0.5 - bad * 2) / characters.length,
+    scriptCoherence: letters > 0 ? Math.max(...scriptCounts) / letters : 0,
   };
+}
+
+function utf16CandidateScore(candidate: Utf16Candidate): number {
+  const { asciiRatio, score, scriptCoherence } = candidate.plausibility;
+  return score + asciiRatio * 0.4 + scriptCoherence * 0.25;
 }
 
 function inspectUtf16Candidate(
@@ -448,11 +476,11 @@ function utf16WithoutBom(buf: Buffer, allowWeak = false): 'UTF-16LE' | 'UTF-16BE
     .filter((candidate): candidate is Utf16Candidate => candidate !== null);
   const plausible = candidates
     .filter((candidate) => candidate.plausibility.bad === 0
-      && candidate.plausibility.cjkRatio >= 0.25
+      && candidate.plausibility.letterRatio >= 0.2
       && candidate.plausibility.score >= 0.85)
-    .sort((left, right) => right.plausibility.score - left.plausibility.score);
+    .sort((left, right) => utf16CandidateScore(right) - utf16CandidateScore(left));
   const distinctUtf16 = plausible.length === 1
-    || (plausible[1] && plausible[0].plausibility.score - plausible[1].plausibility.score >= 0.12);
+    || (plausible[1] && utf16CandidateScore(plausible[0]) - utf16CandidateScore(plausible[1]) >= 0.05);
   if (distinctUtf16) {
     const legacyEncoding = plausibleLegacyEncoding(buf);
     if (legacyEncoding) {
@@ -463,7 +491,7 @@ function utf16WithoutBom(buf: Buffer, allowWeak = false): 'UTF-16LE' | 'UTF-16BE
     }
     return plausible[0].encoding;
   }
-  if (candidates.some((candidate) => candidate.plausibility.cjkRatio >= 0.25
+  if (candidates.some((candidate) => candidate.plausibility.letterRatio >= 0.2
     && candidate.plausibility.score >= 0.7)) {
     throw new SourceDecodeError('decode-error', '无 BOM UTF-16 字节序无法安全判定');
   }
