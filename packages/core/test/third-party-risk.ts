@@ -362,6 +362,204 @@ try {
     [dependencies]
     workspace-member-local = "1"
   `);
+  await fs.mkdir(path.join(root, 'rust-patch'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-patch/Cargo.toml'), `
+    [package]
+    name = "patch-consumer"
+    [dependencies]
+    patch-owned = "1"
+    patch-dotted = "1"
+    patch-table = "1"
+    patch-actual = "1"
+    patch-git = "1"
+    patch-invalid = "1"
+    patch-description = "1"
+    patch-case-sensitive = "1"
+    patch-git-mismatch = { git = "https://example.invalid/git-mismatch.git" }
+    patch-registry-match = { version = "1", registry = "custom" }
+    patch-registry-mismatch = { version = "1", registry = "other" }
+
+    [patch.crates-io]
+    patch-owned = { path = "vendor/patch-owned" }
+    patch-dotted.path = "vendor/patch-dotted"
+    patch-alias = { package = "patch-actual", path = "vendor/patch-actual" }
+    patch-git = { git = "https://example.invalid/patch-git.git" }
+    patch-invalid = { path = true }
+    patch-description = { version = "1", description = "path = not-a-property" }
+    patch-git-mismatch = { path = "vendor/patch-git-mismatch" }
+
+    [patch.crates-io.patch-table]
+    path = "vendor/patch-table"
+
+    [Patch.crates-io]
+    patch-case-sensitive = { path = "vendor/patch-case-sensitive" }
+
+    [patch.custom]
+    patch-registry-match = { path = "vendor/patch-registry-match" }
+    patch-registry-mismatch = { path = "vendor/patch-registry-mismatch" }
+  `);
+  await fs.mkdir(path.join(root, 'rust-replace'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-replace/Cargo.toml'), `
+    [package]
+    name = "replace-consumer"
+    [dependencies]
+    replace-owned = "1.0.0"
+    replace-mismatch = "2.0.0"
+
+    [replace]
+    "replace-owned:1.0.0" = { path = "vendor/replace-owned" }
+    "replace-mismatch:1.0.0" = { path = "vendor/replace-mismatch" }
+  `);
+  await fs.mkdir(path.join(root, 'rust-patch-url'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-patch-url/Cargo.toml'), `
+    [package]
+    name = "url-patch-consumer"
+    [dependencies]
+    url-patch = { git = "https://example.invalid/index" }
+
+    [patch."https://example.invalid/index"]
+    url-patch = { path = "vendor/url-patch" }
+  `);
+  await fs.mkdir(path.join(root, 'rust-patch-container'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-patch-container/Cargo.toml'), `
+    [package]
+    name = "container-patch-consumer"
+    [dependencies]
+    container-patch = "1"
+    container-dotted = { git = "https://example.invalid/index" }
+
+    [patch]
+    crates-io.container-patch = { path = "vendor/container-patch" }
+    "https://example.invalid/index".container-dotted.path = "vendor/container-dotted"
+  `);
+  await fs.mkdir(path.join(root, 'rust-patch-collision'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-patch-collision/Cargo.toml'), `
+    [package]
+    name = "collision-consumer"
+    [dependencies]
+    patch-collision = "1"
+
+    [patch.crates-io]
+    patch-collision = { path = "vendor/patch-collision" }
+  `);
+  await fs.writeFile(path.join(root, 'rust-patch-collision/Cargo.lock'), `
+    version = 3
+
+    [[package]]
+    name = "patch-collision"
+    version = "1.0.0"
+    source = "registry+https://github.com/rust-lang/crates.io-index"
+  `);
+  await fs.mkdir(path.join(root, 'rust-patch-workspace/member'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-patch-workspace/Cargo.toml'), `
+    [workspace]
+    members = ["mem\\u0062er"]
+
+    [workspace.dependencies]
+    workspace-source-patch = { git = "https://example.invalid/workspace-source.git" }
+
+    [patch.crates-io]
+    workspace-patch = { path = "vendor/workspace-patch" }
+
+    [patch."https://example.invalid/workspace-source.git"]
+    workspace-source-patch = { path = "vendor/workspace-source-patch" }
+  `);
+  await fs.writeFile(path.join(root, 'rust-patch-workspace/member/Cargo.toml'), `
+    [package]
+    name = "workspace-patch-consumer"
+    [dependencies]
+    workspace-patch = "1"
+    workspace-source-patch = { workspace = true }
+    member-patch-ignored = "1"
+
+    [patch.crates-io]
+    member-patch-ignored = { path = "vendor/member-patch-ignored" }
+  `);
+  await fs.mkdir(path.join(root, 'rust-nested-workspaces/nested/member'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-nested-workspaces/Cargo.toml'), `
+    [workspace]
+    exclude = ["ne\\u0073ted"]
+    [workspace.dependencies]
+    nearest-workspace-source = { git = "https://example.invalid/outer.git" }
+  `);
+  await fs.writeFile(path.join(root, 'rust-nested-workspaces/nested/Cargo.toml'), `
+    [workspace]
+    members = ["member"]
+    [workspace.dependencies]
+    nearest-workspace-source = { git = "https://example.invalid/inner.git" }
+
+    [patch."https://example.invalid/inner.git"]
+    nearest-workspace-source = { path = "vendor/nearest-workspace-source" }
+  `);
+  await fs.writeFile(path.join(root, 'rust-nested-workspaces/nested/member/Cargo.toml'), `
+    [package]
+    name = "nearest-workspace-consumer"
+    [dependencies]
+    nearest-workspace-source = { workspace = true }
+  `);
+  await fs.mkdir(path.join(root, 'rust-case-workspace/member'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-case-workspace/Cargo.toml'), `
+    [package]
+    name = "case-workspace-root"
+    [Workspace]
+    members = ["member"]
+
+    [patch.crates-io]
+    case-workspace-external = { path = "vendor/case-workspace-external" }
+  `);
+  await fs.writeFile(path.join(root, 'rust-case-workspace/member/Cargo.toml'), `
+    [package]
+    name = "case-workspace-member"
+    [dependencies]
+    case-workspace-external = "1"
+  `);
+  await fs.mkdir(path.join(root, 'rust-invalid-workspace-escape/member'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-invalid-workspace-escape/Cargo.toml'), `
+    [workspace]
+    members = ["mem\\qber"]
+  `);
+  await fs.writeFile(path.join(root, 'rust-invalid-workspace-escape/member/Cargo.toml'), `
+    [package]
+    name = "invalid-workspace-escape-member"
+    [dependencies]
+    invalid-workspace-escape = "1"
+
+    [patch.crates-io]
+    invalid-workspace-escape = { path = "vendor/invalid-workspace-escape" }
+  `);
+  await fs.mkdir(path.join(root, 'rust-multiline-workspace/member'), { recursive: true });
+  await fs.mkdir(path.join(root, 'rust-multiline-workspace/other'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-multiline-workspace/Cargo.toml'), `
+    [workspace]
+    members = ["""
+member""", '''
+other''']
+  `);
+  for (const member of ['member', 'other']) {
+    await fs.writeFile(path.join(root, `rust-multiline-workspace/${member}/Cargo.toml`), `
+      [package]
+      name = "multiline-${member}"
+      [dependencies]
+      multiline-${member} = "1"
+
+      [patch.crates-io]
+      multiline-${member} = { path = "vendor/multiline-${member}" }
+    `);
+  }
+  await fs.mkdir(path.join(root, 'rust-unclosed-workspace/member'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-unclosed-workspace/Cargo.toml'), `
+    [workspace]
+    members = ["member"
+  `);
+  await fs.writeFile(path.join(root, 'rust-unclosed-workspace/member/Cargo.toml'), `
+    [package]
+    name = "unclosed-workspace-member"
+    [dependencies]
+    unclosed-workspace = "1"
+
+    [patch.crates-io]
+    unclosed-workspace = { path = "vendor/unclosed-workspace" }
+  `);
   await fs.writeFile(path.join(root, 'requirements.txt'), [
     'requests==2.32.0',
     '-e ./local-python#egg=local-python',
@@ -574,6 +772,32 @@ try {
     write('rust-workspace/member/vendor/workspace-alias/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/member/vendor/table-workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-external/deps/workspace-member-local/lib.rs', 'pub fn external() {}'),
+    write('rust-patch/vendor/patch-owned/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch/vendor/patch-dotted/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch/vendor/patch-table/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch/vendor/patch-actual/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch/vendor/patch-git/lib.rs', 'pub fn external() {}'),
+    write('rust-patch/vendor/patch-invalid/lib.rs', 'pub fn external() {}'),
+    write('rust-patch/vendor/patch-description/lib.rs', 'pub fn external() {}'),
+    write('rust-patch/vendor/patch-case-sensitive/lib.rs', 'pub fn external() {}'),
+    write('rust-patch/vendor/patch-git-mismatch/lib.rs', 'pub fn external() {}'),
+    write('rust-patch/vendor/patch-registry-match/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch/vendor/patch-registry-mismatch/lib.rs', 'pub fn external() {}'),
+    write('rust-replace/vendor/replace-owned/lib.rs', 'pub fn owned() {}'),
+    write('rust-replace/vendor/replace-mismatch/lib.rs', 'pub fn external() {}'),
+    write('rust-patch-url/vendor/url-patch/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch-container/vendor/container-patch/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch-container/vendor/container-dotted/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch-collision/vendor/patch-collision/lib.rs', 'pub fn external() {}'),
+    write('rust-patch-workspace/member/vendor/workspace-patch/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch-workspace/member/vendor/workspace-source-patch/lib.rs', 'pub fn owned() {}'),
+    write('rust-patch-workspace/member/vendor/member-patch-ignored/lib.rs', 'pub fn external() {}'),
+    write('rust-nested-workspaces/nested/member/vendor/nearest-workspace-source/lib.rs', 'pub fn owned() {}'),
+    write('rust-case-workspace/member/vendor/case-workspace-external/lib.rs', 'pub fn external() {}'),
+    write('rust-invalid-workspace-escape/member/vendor/invalid-workspace-escape/lib.rs', 'pub fn external() {}'),
+    write('rust-multiline-workspace/member/vendor/multiline-member/lib.rs', 'pub fn external() {}'),
+    write('rust-multiline-workspace/other/vendor/multiline-other/lib.rs', 'pub fn external() {}'),
+    write('rust-unclosed-workspace/member/vendor/unclosed-workspace/lib.rs', 'pub fn external() {}'),
     write('vendors/requests/api.py', 'def get(): pass'),
     write('vendor/nested-requirement/api.py', 'def nested(): pass'),
     write('vendor/deep-requirement/api.py', 'def deep(): pass'),
@@ -751,6 +975,20 @@ try {
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'invalid-go/go.mod'), 'go.mod 非法字符串转义必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'rust-patch/Cargo.toml'), 'Cargo patch 的非字符串 path 必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'rust-patch-workspace/member/Cargo.toml'),
+  'Cargo workspace 成员中的 patch 必须按未生效覆盖报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'rust-case-workspace/Cargo.toml'),
+  'Cargo 大小写错误的 Workspace 表必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'rust-invalid-workspace-escape/Cargo.toml'),
+  'Cargo workspace 成员字符串含无效转义时必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'rust-unclosed-workspace/Cargo.toml'),
+  'Cargo workspace members 数组未闭合时必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'requirements.txt'), '无 egg 名称的 editable VCS 依赖必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'local-editable/requirements.txt'),
@@ -810,6 +1048,19 @@ try {
     'empty-profile/vendor/empty-profile/External.java',
     'vendor/go-invalid-external/external.go',
     'rust-external/deps/workspace-member-local/lib.rs',
+    'rust-patch/vendor/patch-git/lib.rs', 'rust-patch/vendor/patch-invalid/lib.rs',
+    'rust-patch/vendor/patch-description/lib.rs',
+    'rust-patch/vendor/patch-case-sensitive/lib.rs',
+    'rust-patch/vendor/patch-git-mismatch/lib.rs',
+    'rust-patch/vendor/patch-registry-mismatch/lib.rs',
+    'rust-patch-collision/vendor/patch-collision/lib.rs',
+    'rust-replace/vendor/replace-mismatch/lib.rs',
+    'rust-patch-workspace/member/vendor/member-patch-ignored/lib.rs',
+    'rust-case-workspace/member/vendor/case-workspace-external/lib.rs',
+    'rust-invalid-workspace-escape/member/vendor/invalid-workspace-escape/lib.rs',
+    'rust-multiline-workspace/member/vendor/multiline-member/lib.rs',
+    'rust-multiline-workspace/other/vendor/multiline-other/lib.rs',
+    'rust-unclosed-workspace/member/vendor/unclosed-workspace/lib.rs',
   ]) {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
@@ -876,6 +1127,30 @@ try {
     'Cargo workspace 重命名依赖必须按别名传播本地属性');
   assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/table-workspace-local/lib.rs'),
     'Cargo workspace table-form 本地依赖必须传播到成员 table-form 引用');
+  assert.ok(!dependencyFiles.has('rust-patch/vendor/patch-owned/lib.rs'),
+    'Cargo patch 的本地路径覆盖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-patch/vendor/patch-dotted/lib.rs'),
+    'Cargo patch 的 dotted path 覆盖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-patch/vendor/patch-table/lib.rs'),
+    'Cargo patch 的 table-form path 覆盖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-patch/vendor/patch-actual/lib.rs'),
+    'Cargo patch 的 package rename 必须按实际包名识别本地源码');
+  assert.ok(!dependencyFiles.has('rust-patch/vendor/patch-registry-match/lib.rs'),
+    'Cargo patch 只能在同名 registry source 内将依赖识别为本地源码');
+  assert.ok(!dependencyFiles.has('rust-replace/vendor/replace-owned/lib.rs'),
+    'Cargo replace 的本地路径覆盖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-patch-url/vendor/url-patch/lib.rs'),
+    'Cargo quoted URL patch 的本地路径覆盖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-patch-container/vendor/container-patch/lib.rs'),
+    'Cargo patch 容器表的 inline 本地覆盖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-patch-container/vendor/container-dotted/lib.rs'),
+    'Cargo patch 容器表的 dotted 本地覆盖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-patch-workspace/member/vendor/workspace-patch/lib.rs'),
+    'Cargo workspace 根 patch 必须传播到成员依赖');
+  assert.ok(!dependencyFiles.has('rust-patch-workspace/member/vendor/workspace-source-patch/lib.rs'),
+    'Cargo workspace 引用必须继承根依赖来源并匹配同 source patch');
+  assert.ok(!dependencyFiles.has('rust-nested-workspaces/nested/member/vendor/nearest-workspace-source/lib.rs'),
+    '嵌套 Cargo workspace 引用必须继承最近根定义的依赖来源');
   assert.ok(!dependencyFiles.has('vendor/acme-cli/owned.py'), 'project.scripts 不能误当 Python 依赖');
   assert.ok(!dependencyFiles.has('vendor/local-tool/owned.py'), 'Poetry path 依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/owned-direct/owned.py'), 'PEP 508 file 直接引用不能默认判为第三方');

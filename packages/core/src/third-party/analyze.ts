@@ -75,6 +75,15 @@ function dependencyScopeDepth(dependency: DependencyIdentity, relPath: string): 
   return Math.max(-1, ...depths);
 }
 
+function cargoRequirementIncludesReplace(requirement: string | undefined, version: string | undefined): boolean {
+  if (!requirement || !version) return false;
+  const normalized = requirement.trim();
+  return normalized === version
+    || normalized === `=${version}`
+    || normalized === `^${version}`
+    || normalized === `~${version}`;
+}
+
 function matchDependency(
   relPath: string, relSegments: string[], dependencies: DependencyIdentity[],
 ): DependencyIdentity | undefined {
@@ -90,6 +99,14 @@ function matchDependency(
   if (matches.length === 0) return undefined;
   const external = matches.filter((match) => !match.dependency.local && !matches.some((candidate) => (
     candidate.dependency.local
+    && !(candidate.dependency.localOverride && match.dependency.source === 'lockfile')
+    && (!candidate.dependency.localOverride
+      || (candidate.dependency.cargoOverrideKind === 'replace'
+        && cargoRequirementIncludesReplace(
+          match.dependency.cargoVersionRequirement, candidate.dependency.cargoReplaceVersion,
+        ))
+      || (candidate.dependency.cargoSource !== undefined
+        && candidate.dependency.cargoSource === match.dependency.cargoSource))
     && candidate.depth >= match.depth
     && candidate.dependency.ecosystem === match.dependency.ecosystem
     && candidate.dependency.normalizedName === match.dependency.normalizedName

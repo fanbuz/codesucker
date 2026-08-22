@@ -35,6 +35,11 @@ export interface DependencyIdentity {
   sourceFile: string;
   source: ThirdPartyEvidenceSource;
   local: boolean;
+  localOverride?: boolean;
+  cargoOverrideKind?: 'patch' | 'replace';
+  cargoReplaceVersion?: string;
+  cargoSource?: string;
+  cargoVersionRequirement?: string;
   workspaceRole?: 'definition' | 'reference';
   workspaceKey?: string;
   workspaceScopes?: string[];
@@ -1030,6 +1035,88 @@ function parseTomlKeyAssignment(line: string): TomlKeyAssignment | null {
   return null;
 }
 
+function splitTomlTopLevel(text: string, separator: ',' | '\n'): {
+  parts: string[];
+  complete: boolean;
+} {
+  const parts: string[] = [];
+  let start = 0;
+  let braces = 0;
+  let brackets = 0;
+  let quote: "'" | '"' | "'''" | '"""' | undefined;
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const triple = text.slice(index, index + 3);
+    if (quote === "'''" || quote === '"""') {
+      const wasEscaped = escaped;
+      if (escaped) escaped = false;
+      else if (quote === '"""' && char === '\\') escaped = true;
+      const run = char === quote[0] && !wasEscaped ? tomlQuoteRun(text, index, quote[0]) : 0;
+      if (run >= 3) {
+        index += run - 1;
+        quote = undefined;
+      }
+      continue;
+    }
+    if (quote) {
+      if (char === '\r' || char === '\n') return { parts, complete: false };
+      if (escaped) escaped = false;
+      else if (quote === '"' && char === '\\') escaped = true;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (triple === "'''" || triple === '"""') {
+      quote = triple;
+      index += 2;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') braces++;
+    else if (char === '}') {
+      if (braces === 0) return { parts, complete: false };
+      braces--;
+    } else if (char === '[') brackets++;
+    else if (char === ']') {
+      if (brackets === 0) return { parts, complete: false };
+      brackets--;
+    } else if ((char === separator || (separator === '\n' && char === '\r' && text[index + 1] === '\n'))
+      && braces === 0 && brackets === 0) {
+      parts.push(text.slice(start, index));
+      if (char === '\r') index++;
+      start = index + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return { parts, complete: !quote && braces === 0 && brackets === 0 };
+}
+
+function parseTomlAssignments(text: string, separator: ',' | '\n' = '\n'): {
+  assignments: TomlKeyAssignment[];
+  complete: boolean;
+} {
+  const split = splitTomlTopLevel(stripTomlComments(text), separator);
+  const assignments: TomlKeyAssignment[] = [];
+  let complete = split.complete;
+  for (const part of split.parts) {
+    if (!part.trim()) continue;
+    const assignment = parseTomlKeyAssignment(part);
+    if (assignment) assignments.push(assignment);
+    else complete = false;
+  }
+  return { assignments, complete };
+}
+
+function tomlStringValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed[0] !== "'" && trimmed[0] !== '"') return null;
+  const parsed = parseTomlKeyAssignment(`${trimmed} = true`);
+  return parsed?.keyPath.length === 1 && parsed.value === 'true' ? parsed.keyPath[0] : null;
+}
+
 function cargoDependencySection(rawName: string): {
   tableDependency?: string;
   workspaceDefinition: boolean;
@@ -1049,6 +1136,230 @@ function cargoDependencySection(rawName: string): {
   }
   if (dependencyIndex < 0 || keyPath.length > dependencyIndex + 2) return null;
   return { workspaceDefinition, tableDependency: keyPath[dependencyIndex + 1] };
+}
+
+function cargoOverrideSection(rawName: string): {
+  kind: 'patch' | 'replace';
+  patchSource?: string;
+  tableDependency?: string;
+  sourceContainer?: boolean;
+} | null {
+  const keyPath = parseTomlKeyAssignment(`${rawName} = true`)?.keyPath;
+  if (!keyPath) return null;
+  const kind = keyPath[0];
+  if (kind === 'patch' && keyPath.length === 1) {
+    return { kind, sourceContainer: true };
+  }
+  if (kind === 'patch' && (keyPath.length === 2 || keyPath.length === 3)) {
+    return { kind, patchSource: keyPath[1], tableDependency: keyPath[2] };
+  }
+  if (kind === 'replace' && (keyPath.length === 1 || keyPath.length === 2)) {
+    return { kind, tableDependency: keyPath[1] };
+  }
+  return null;
+}
+
+interface CargoAssignment {
+  key: string;
+  patchSource?: string;
+  value: string;
+}
+
+function cargoSectionAssignments(sectionBody: string, tableDependency?: string): {
+  entries: CargoAssignment[];
+  complete: boolean;
+} {
+  if (tableDependency) return { entries: [{ key: tableDependency, value: sectionBody }], complete: true };
+  const parsed = parseTomlAssignments(sectionBody);
+  const direct: CargoAssignment[] = [];
+  const dotted = new Map<string, string[]>();
+  for (const assignment of parsed.assignments) {
+    const [key, ...details] = assignment.keyPath;
+    if (details.length === 0) {
+      direct.push({ key, value: assignment.value });
+      continue;
+    }
+    const values = dotted.get(key) ?? [];
+    values.push(`${details.join('.')} = ${assignment.value}`);
+    dotted.set(key, values);
+  }
+  for (const [key, values] of dotted) direct.push({ key, value: values.join('\n') });
+  return { entries: direct, complete: parsed.complete };
+}
+
+function cargoOverrideAssignments(
+  sectionBody: string,
+  context: NonNullable<ReturnType<typeof cargoOverrideSection>>,
+): { entries: CargoAssignment[]; complete: boolean } {
+  if (!context.sourceContainer) {
+    const parsed = cargoSectionAssignments(sectionBody, context.tableDependency);
+    return {
+      ...parsed,
+      entries: parsed.entries.map((entry) => ({ ...entry, patchSource: context.patchSource })),
+    };
+  }
+  const parsed = parseTomlAssignments(sectionBody);
+  const direct: CargoAssignment[] = [];
+  const dotted = new Map<string, { key: string; patchSource: string; values: string[] }>();
+  let complete = parsed.complete;
+  for (const assignment of parsed.assignments) {
+    const [, key, ...details] = assignment.keyPath;
+    if (!key) {
+      complete = false;
+      continue;
+    }
+    if (details.length === 0) {
+      direct.push({ key, patchSource: assignment.keyPath[0], value: assignment.value });
+      continue;
+    }
+    const source = assignment.keyPath[0];
+    const mapKey = `${source}\0${key}`;
+    const grouped = dotted.get(mapKey) ?? { key, patchSource: source, values: [] };
+    grouped.values.push(`${details.join('.')} = ${assignment.value}`);
+    dotted.set(mapKey, grouped);
+  }
+  for (const { key, patchSource, values } of dotted.values()) {
+    direct.push({ key, patchSource, value: values.join('\n') });
+  }
+  return { entries: direct, complete };
+}
+
+function cargoDependencySpec(value: string): {
+  complete: boolean;
+  local: boolean;
+  packageOverride?: string;
+  cargoSource?: string;
+  versionRequirement?: string;
+} {
+  const trimmed = value.trim();
+  let parsed: ReturnType<typeof parseTomlAssignments>;
+  if (trimmed.startsWith('{')) {
+    if (!trimmed.endsWith('}')) return { complete: false, local: false };
+    parsed = parseTomlAssignments(trimmed.slice(1, -1), ',');
+  } else if (trimmed.startsWith("'") || trimmed.startsWith('"')) {
+    const versionRequirement = tomlStringValue(trimmed);
+    return {
+      complete: versionRequirement !== null,
+      local: false,
+      cargoSource: 'registry:crates-io',
+      ...(versionRequirement ? { versionRequirement } : {}),
+    };
+  } else if (/^[0-9]+(?:\.[0-9]+)*$/.test(trimmed)) {
+    return { complete: true, local: false, cargoSource: 'registry:crates-io' };
+  } else {
+    parsed = parseTomlAssignments(trimmed);
+  }
+  let complete = parsed.complete;
+  let local = false;
+  let packageOverride: string | undefined;
+  let cargoSource: string | undefined;
+  let versionRequirement: string | undefined;
+  const seen = new Set<string>();
+  for (const assignment of parsed.assignments) {
+    if (assignment.keyPath.length !== 1) continue;
+    const key = assignment.keyPath[0];
+    if (key !== 'path' && key !== 'package' && key !== 'git' && key !== 'registry' && key !== 'version') continue;
+    if (seen.has(key)) complete = false;
+    seen.add(key);
+    const stringValue = tomlStringValue(assignment.value);
+    if (stringValue === null) {
+      complete = false;
+      continue;
+    }
+    if (key === 'path') local = true;
+    else if (key === 'package') packageOverride = stringValue;
+    else if (key === 'version') versionRequirement = stringValue;
+    else {
+      const source = key === 'git' ? `git:${stringValue}` : `registry:${stringValue}`;
+      if (cargoSource && cargoSource !== source) complete = false;
+      cargoSource = source;
+    }
+  }
+  return {
+    complete,
+    local,
+    ...(packageOverride ? { packageOverride } : {}),
+    ...(!local ? { cargoSource: cargoSource ?? 'registry:crates-io' } : {}),
+    ...(versionRequirement ? { versionRequirement } : {}),
+  };
+}
+
+function cargoPatchSource(source: string | undefined): string | undefined {
+  if (!source) return undefined;
+  if (source === 'crates-io') return 'registry:crates-io';
+  return /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(source) ? `git:${source}` : `registry:${source}`;
+}
+
+function cargoReplaceTarget(key: string): { name: string; version: string } | null {
+  const match = /^([^:]+):(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(key);
+  if (!match) return null;
+  return { name: match[1], version: key.slice(match[1].length + 1) };
+}
+
+function cargoWorkspaceOverrideScopes(doc: ManifestDocument): {
+  scopes?: string[];
+  memberScopes: string[];
+  incomplete: boolean;
+} {
+  const sections = tomlSections(doc.text);
+  const workspace = sections.find((section) => tomlSectionHasExactPath(section, 'workspace'));
+  if (!workspace) return { memberScopes: [], incomplete: false };
+  const base = path.posix.dirname(doc.relPath);
+  const arrayStatus = { complete: true };
+  const excluded = new Set(tomlArrayAssignment(workspace.body, 'exclude', arrayStatus).map((member) => (
+    path.posix.normalize(path.posix.join(base, member.replace(/\\/g, '/')))
+  )));
+  const scopes = new Set<string>();
+  if (sections.some((section) => tomlSectionHasExactPath(section, 'package'))) {
+    scopes.add(base === '.' ? '' : base);
+  }
+  const memberScopes = new Set<string>();
+  let incomplete = !arrayStatus.complete;
+  for (const rawMember of tomlArrayAssignment(workspace.body, 'members', arrayStatus)) {
+    const member = rawMember.replace(/\\/g, '/');
+    if (!member || member.includes('\0') || path.posix.isAbsolute(member) || path.win32.isAbsolute(rawMember)
+      || /[*?{}[\]!]/.test(member)) {
+      incomplete = true;
+      continue;
+    }
+    const resolved = path.posix.normalize(path.posix.join(base, member));
+    if (resolved === '..' || resolved.startsWith('../') || path.posix.isAbsolute(resolved)) {
+      incomplete = true;
+      continue;
+    }
+    if (!excluded.has(resolved)) {
+      const scope = resolved === '.' ? '' : resolved;
+      scopes.add(scope);
+      memberScopes.add(scope);
+    }
+  }
+  if (!arrayStatus.complete) incomplete = true;
+  return { scopes: [...scopes].sort(), memberScopes: [...memberScopes].sort(), incomplete };
+}
+
+function hasIncompleteCargoOverrides(doc: ManifestDocument): boolean {
+  if (doc.basename !== 'Cargo.toml') return false;
+  const sections = tomlSections(doc.text);
+  if (sections.some((section) => {
+    const first = parseTomlKeyAssignment(`${section.rawName} = true`)?.keyPath[0];
+    return first !== 'patch' && first !== 'replace'
+      && (first?.toLocaleLowerCase() === 'patch' || first?.toLocaleLowerCase() === 'replace');
+  })) return true;
+  const hasOverrides = sections.some((section) => cargoOverrideSection(section.rawName));
+  if (hasOverrides && sections.some((section) => {
+    const first = parseTomlKeyAssignment(`${section.rawName} = true`)?.keyPath[0];
+    return first !== 'workspace' && first !== 'package'
+      && (first?.toLocaleLowerCase() === 'workspace' || first?.toLocaleLowerCase() === 'package');
+  })) return true;
+  if (hasOverrides && cargoWorkspaceOverrideScopes(doc).incomplete) return true;
+  return sections.some((section) => {
+    const override = cargoOverrideSection(section.rawName);
+    if (!override) return false;
+    const parsed = cargoOverrideAssignments(stripTomlComments(section.body), override);
+    return !parsed.complete || parsed.entries.some(({ key, value }) => (
+      (override.kind === 'replace' && !cargoReplaceTarget(key)) || !cargoDependencySpec(value).complete
+    ));
+  });
 }
 
 function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
@@ -1079,14 +1390,18 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
     if (own) out.push(own);
   }
   const addDependency = (key: string, value: string, workspaceDefinition: boolean): void => {
-    const packageOverride = /\bpackage\s*=\s*['"]([^'"]+)['"]/.exec(value)?.[1];
-    const item = identity('rust', packageOverride ?? key, doc.relPath, 'manifest', /\bpath\s*=/.test(value));
+    const spec = cargoDependencySpec(value);
+    const item = identity('rust', spec.packageOverride ?? key, doc.relPath, 'manifest', spec.local);
     if (!item) return;
+    const workspace = workspaceDefinition ? cargoWorkspaceOverrideScopes(doc) : undefined;
     const workspaceReference = /\bworkspace\s*=\s*true\b/.test(value);
     const workspaceKey = normalizePackageName(key, 'rust');
     out.push({
       ...item,
-      ...(workspaceDefinition && item.local
+      ...(spec.cargoSource ? { cargoSource: spec.cargoSource } : {}),
+      ...(spec.versionRequirement ? { cargoVersionRequirement: spec.versionRequirement } : {}),
+      ...(workspace?.scopes ? { workspaceScopes: workspace.scopes } : {}),
+      ...(workspaceDefinition
         ? { workspaceRole: 'definition' as const, workspaceKey }
         : {}),
       ...(workspaceReference
@@ -1094,31 +1409,41 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
         : {}),
     });
   };
+  const addOverride = (
+    key: string, value: string, kind: 'patch' | 'replace', patchSource?: string,
+  ): void => {
+    const spec = cargoDependencySpec(value);
+    const replaceTarget = kind === 'replace' ? cargoReplaceTarget(key) : null;
+    const dependencyName = spec.packageOverride ?? (replaceTarget?.name ?? key);
+    if (!dependencyName) return;
+    const item = identity('rust', dependencyName, doc.relPath, 'manifest', spec.local);
+    if (item) {
+      const workspace = cargoWorkspaceOverrideScopes(doc);
+      out.push({
+        ...item,
+        ...(spec.local ? { localOverride: true, cargoOverrideKind: kind } : {}),
+        ...(replaceTarget ? { cargoReplaceVersion: replaceTarget.version } : {}),
+        ...(kind === 'patch' && patchSource ? { cargoSource: cargoPatchSource(patchSource) } : {}),
+        ...(workspace.scopes ? { workspaceScopes: workspace.scopes } : {}),
+      });
+    }
+  };
   for (const section of tomlSections(doc.text)) {
+    const override = cargoOverrideSection(section.rawName);
+    if (override) {
+      const sectionBody = stripTomlComments(section.body);
+      const parsed = cargoOverrideAssignments(sectionBody, override);
+      for (const { key, patchSource, value } of parsed.entries) {
+        addOverride(key, value, override.kind, patchSource);
+      }
+      continue;
+    }
     const context = cargoDependencySection(section.rawName);
     if (!context) continue;
     const { tableDependency, workspaceDefinition } = context;
     const sectionBody = stripTomlComments(section.body);
-    if (tableDependency) {
-      addDependency(tableDependency, sectionBody, workspaceDefinition);
-      continue;
-    }
-    const dottedAssignments = new Map<string, string[]>();
-    for (const line of sectionBody.split(/\r?\n/)) {
-      const assignment = parseTomlKeyAssignment(line);
-      if (!assignment) continue;
-      const [key, ...details] = assignment.keyPath;
-      if (details.length === 0) {
-        addDependency(key, assignment.value, workspaceDefinition);
-        continue;
-      }
-      const values = dottedAssignments.get(key) ?? [];
-      values.push(`${details.join('.')} = ${assignment.value}`);
-      dottedAssignments.set(key, values);
-    }
-    for (const [key, values] of dottedAssignments) {
-      addDependency(key, values.join('\n'), workspaceDefinition);
-    }
+    const parsed = cargoSectionAssignments(sectionBody, tableDependency);
+    for (const { key, value } of parsed.entries) addDependency(key, value, workspaceDefinition);
   }
   return out;
 }
@@ -1148,6 +1473,12 @@ function tomlSectionKeyPath(section: TomlSection): string[] | null {
 
 function tomlSectionHasPath(section: TomlSection, ...expected: string[]): boolean {
   const actual = tomlSectionKeyPath(section);
+  return actual?.length === expected.length
+    && actual.every((segment, index) => segment === expected[index]);
+}
+
+function tomlSectionHasExactPath(section: TomlSection, ...expected: string[]): boolean {
+  const actual = parseTomlKeyAssignment(`${section.rawName} = true`)?.keyPath;
   return actual?.length === expected.length
     && actual.every((segment, index) => segment === expected[index]);
 }
@@ -1316,7 +1647,41 @@ function stripTomlComments(text: string): string {
   return out;
 }
 
-function quotedTomlValues(value: string): string[] {
+function decodeTomlBasicString(value: string, multiline: boolean): string | null {
+  let out = '';
+  for (let index = 0; index < value.length; index++) {
+    const char = value[index];
+    if (char !== '\\') {
+      out += char;
+      continue;
+    }
+    const escape = value[++index];
+    const simpleEscapes: Record<string, string> = {
+      b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\',
+    };
+    if (escape in simpleEscapes) {
+      out += simpleEscapes[escape];
+      continue;
+    }
+    if (multiline && (escape === '\n' || (escape === '\r' && value[index + 1] === '\n'))) {
+      if (escape === '\r') index++;
+      while (value[index + 1] === ' ' || value[index + 1] === '\t'
+        || value[index + 1] === '\r' || value[index + 1] === '\n') index++;
+      continue;
+    }
+    if (escape !== 'u' && escape !== 'U') return null;
+    const digits = escape === 'u' ? 4 : 8;
+    const hex = value.slice(index + 1, index + 1 + digits);
+    if (!new RegExp(`^[A-Fa-f0-9]{${digits}}$`).test(hex)) return null;
+    const codePoint = Number.parseInt(hex, 16);
+    if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return null;
+    out += String.fromCodePoint(codePoint);
+    index += digits;
+  }
+  return out;
+}
+
+function quotedTomlValues(value: string, onInvalid?: () => void): string[] {
   const out: string[] = [];
   for (let index = 0; index < value.length; index++) {
     const triple = value.slice(index, index + 3);
@@ -1345,7 +1710,14 @@ function quotedTomlValues(value: string): string[] {
         : 0;
       if ((!multiline && value.startsWith(delimiter, cursor)) || (multiline && run >= 3)) {
         const retainedQuotes = multiline ? delimiter[0].repeat(Math.min(2, run - 3)) : '';
-        out.push(value.slice(start, cursor) + retainedQuotes);
+        let raw = value.slice(start, cursor) + retainedQuotes;
+        if (multiline) {
+          if (raw.startsWith('\r\n')) raw = raw.slice(2);
+          else if (raw.startsWith('\n')) raw = raw.slice(1);
+        }
+        const decoded = delimiter[0] === '"' ? decodeTomlBasicString(raw, multiline) : raw;
+        if (decoded !== null) out.push(decoded);
+        else onInvalid?.();
         const consumed = multiline ? run : delimiter.length;
         index = cursor + consumed - 1;
         break;
@@ -1355,7 +1727,7 @@ function quotedTomlValues(value: string): string[] {
   return out;
 }
 
-function tomlArrayAssignment(body: string, key: string): string[] {
+function tomlArrayAssignment(body: string, key: string, status?: { complete: boolean }): string[] {
   const source = stripTomlComments(body);
   const structure = maskTomlMultilineStrings(source);
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1391,9 +1763,12 @@ function tomlArrayAssignment(body: string, key: string): string[] {
     } else if (char === "'" || char === '"') {
       quote = char;
     } else if (char === ']') {
-      return quotedTomlValues(source.slice(start, index));
+      return quotedTomlValues(source.slice(start, index), () => {
+        if (status) status.complete = false;
+      });
     }
   }
+  if (status) status.complete = false;
   return [];
 }
 
@@ -1615,13 +1990,13 @@ function parseManifest(doc: ManifestDocument): DependencyIdentity[] {
 }
 
 function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
-  const workspaceDefinitions = items.filter((item) => item.local && item.workspaceRole === 'definition');
+  const workspaceDefinitions = items.filter((item) => item.workspaceRole === 'definition');
   const seen = new Set<string>();
   return items
     .map((item) => {
       if (item.local || item.workspaceRole !== 'reference') return item;
       const referenceDir = path.posix.dirname(item.sourceFile);
-      const relatedDefinition = workspaceDefinitions.some((definition) => {
+      const relatedDefinitions = workspaceDefinitions.filter((definition) => {
         if (definition.ecosystem !== item.ecosystem
           || (definition.workspaceKey ?? definition.normalizedName) !== (item.workspaceKey ?? item.normalizedName)) return false;
         const workspaceDir = path.posix.dirname(definition.sourceFile);
@@ -1630,16 +2005,60 @@ function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
         }
         const rel = path.posix.relative(workspaceDir, referenceDir);
         return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel));
+      }).sort((left, right) => {
+        const leftDepth = path.posix.dirname(left.sourceFile).split('/').filter((part) => part !== '.').length;
+        const rightDepth = path.posix.dirname(right.sourceFile).split('/').filter((part) => part !== '.').length;
+        return rightDepth - leftDepth || left.sourceFile.localeCompare(right.sourceFile);
       });
-      return relatedDefinition ? { ...item, local: true } : item;
+      const relatedDefinition = relatedDefinitions[0];
+      return relatedDefinition
+        ? {
+          ...item,
+          ...(relatedDefinition.local ? { local: true } : {}),
+          ...(relatedDefinition.cargoSource ? { cargoSource: relatedDefinition.cargoSource } : {}),
+          ...(relatedDefinition.cargoVersionRequirement
+            ? { cargoVersionRequirement: relatedDefinition.cargoVersionRequirement }
+            : {}),
+        }
+        : item;
     })
     .filter((item) => {
-      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.workspaceKey ?? ''}\0${item.workspaceScopes?.join('\0') ?? ''}\0${item.projectScopes?.join('\0') ?? ''}\0${item.sourceFile}\0${item.source}\0${item.local}`;
+      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.workspaceKey ?? ''}\0${item.workspaceScopes?.join('\0') ?? ''}\0${item.projectScopes?.join('\0') ?? ''}\0${item.sourceFile}\0${item.source}\0${item.local}\0${item.localOverride ?? false}\0${item.cargoOverrideKind ?? ''}\0${item.cargoReplaceVersion ?? ''}\0${item.cargoSource ?? ''}\0${item.cargoVersionRequirement ?? ''}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     })
     .sort((a, b) => `${a.ecosystem}:${a.normalizedName}:${a.sourceFile}`.localeCompare(`${b.ecosystem}:${b.normalizedName}:${b.sourceFile}`));
+}
+
+interface CargoWorkspaceRoot {
+  baseDir: string;
+  incomplete: boolean;
+  manifest: string;
+  memberScopes: string[];
+}
+
+function applyCargoWorkspaceOverrideRules(
+  items: DependencyIdentity[], roots: CargoWorkspaceRoot[],
+): { dependencies: DependencyIdentity[]; ignoredOverrideFiles: string[] } {
+  const ignoredOverrideFiles = new Set<string>();
+  const dependencies = items.map((item) => {
+    if (!item.localOverride) return item;
+    const sourceDir = path.posix.dirname(item.sourceFile);
+    const ignored = roots.some((root) => (
+      root.manifest !== item.sourceFile
+      && (root.memberScopes.includes(sourceDir === '.' ? '' : sourceDir)
+        || (root.incomplete && (() => {
+          const rel = path.posix.relative(root.baseDir || '.', sourceDir);
+          return rel !== '' && rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel);
+        })()))
+    ));
+    if (!ignored) return item;
+    ignoredOverrideFiles.add(item.sourceFile);
+    const { localOverride: _localOverride, workspaceScopes: _workspaceScopes, ...rest } = item;
+    return { ...rest, local: false };
+  });
+  return { dependencies, ignoredOverrideFiles: [...ignoredOverrideFiles].sort() };
 }
 
 export async function collectDependencyInventory(
@@ -1676,6 +2095,7 @@ export async function collectDependencyInventory(
     ));
   }
   const dependencies: DependencyIdentity[] = [];
+  const cargoWorkspaceRoots: CargoWorkspaceRoot[] = [];
   const manifestIdentities: ThirdPartyManifestIdentity[] = [];
   const identityPaths = new Set<string>();
   const attemptedPaths = new Set<string>();
@@ -1694,6 +2114,17 @@ export async function collectDependencyInventory(
     try {
       manifestIdentities.push(document.identity);
       identityPaths.add(document.identity.relPath);
+      if (document.basename === 'Cargo.toml') {
+        const workspace = cargoWorkspaceOverrideScopes(document);
+        if (workspace.scopes) {
+          cargoWorkspaceRoots.push({
+            baseDir: path.posix.dirname(document.relPath) === '.' ? '' : path.posix.dirname(document.relPath),
+            incomplete: workspace.incomplete,
+            manifest: document.relPath,
+            memberScopes: workspace.memberScopes,
+          });
+        }
+      }
       dependencies.push(...parseManifest(document));
       analyzedManifests++;
       const requirementIncludes = pythonRequirementIncludes(document);
@@ -1771,6 +2202,7 @@ export async function collectDependencyInventory(
       if (hasUnsupportedGradleDeclarations(document)
         || hasUnresolvedMavenCoordinates(document)
         || hasInvalidGoDirectives(document)
+        || hasIncompleteCargoOverrides(document)
         || hasIncompletePythonRequirements(document)
         || hasDynamicPep621Dependencies(document)) {
         diagnostics.push(diagnostic(
@@ -1804,7 +2236,26 @@ export async function collectDependencyInventory(
       }
     }
   }
-  const scopedDependencies = dependencies.map((item) => (
+  const cargoScoped = applyCargoWorkspaceOverrideRules(dependencies, cargoWorkspaceRoots);
+  for (const root of cargoWorkspaceRoots.filter((item) => item.incomplete)) {
+    if (!diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === root.manifest)) {
+      diagnostics.push(diagnostic(
+        'dynamic-manifest-partial', root.manifest,
+        'Cargo workspace 成员范围包含无法可靠解析的路径，已保守处理后代覆盖声明。',
+        '请修正 members/exclude 路径或手工核验对应源码。',
+      ));
+    }
+  }
+  for (const file of cargoScoped.ignoredOverrideFiles) {
+    if (!diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === file)) {
+      diagnostics.push(diagnostic(
+        'dynamic-manifest-partial', file,
+        'Cargo workspace 成员中的 patch/replace 不会由 workspace 构建采用，已按外部依赖保守分析。',
+        '请将覆盖声明移到 workspace 根 Cargo.toml，或手工核验对应源码。',
+      ));
+    }
+  }
+  const scopedDependencies = cargoScoped.dependencies.map((item) => (
     item.ecosystem === 'python' && requirementFiles.has(item.sourceFile)
       ? { ...item, projectScopes: [...(requirementScopes.get(item.sourceFile) ?? [])].sort() }
       : item
