@@ -37,6 +37,17 @@ write('enc/declared-latin1.py', Buffer.concat([
 write('enc/declared-encoding-substring.py', Buffer.concat([
   Buffer.from('# encoding: latin-1\nvalue = "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
 ]));
+write('enc/declared-ruby-encoding.rb', Buffer.concat([
+  Buffer.from('# encoding: windows-1252\nvalue = "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
+]));
+write('enc/declared-ruby-shebang-encoding.rb', Buffer.concat([
+  Buffer.from('#!/usr/bin/env ruby\n# encoding=windows-1252\nvalue = "', 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
+]));
+write('enc/declared-ruby-bom-encoding.rb', withBom([0xef, 0xbb, 0xbf], Buffer.concat([
+  Buffer.from('# encoding: windows-1252\nvalue = "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
+])));
+write('enc/utf8-ruby-indented-shebang.rb', ' #!/usr/bin/env ruby\n# encoding: windows-1252\nvalue = "é"');
 write('enc/utf8-bom-python.py', withBom([0xef, 0xbb, 0xbf], Buffer.from('# coding: utf_8\nvalue = "é"', 'utf8')));
 write('enc/declared-long-first-line.py', Buffer.concat([
   Buffer.from(`#!${'x'.repeat(1100)}\n# encoding: latin-1\nvalue = "`, 'ascii'),
@@ -174,6 +185,14 @@ assert.equal(byPath.get('enc/big5-noncanonical.py')?.encoding, 'BIG5', '合法 B
 assert.equal(byPath.get('enc/declared-latin1.py')?.encoding, 'LATIN-1', '显式旧编码声明必须优先于 UTF-8 字节有效性');
 assert.equal(byPath.get('enc/declared-encoding-substring.py')?.encoding, 'LATIN-1',
   'Python PEP 263 必须识别 encoding 中的 coding 子串');
+assert.equal(byPath.get('enc/declared-ruby-encoding.rb')?.encoding, 'WINDOWS-1252',
+  'Ruby 首行 encoding magic comment 必须优先于 UTF-8 字节有效性');
+assert.equal(byPath.get('enc/declared-ruby-shebang-encoding.rb')?.encoding, 'WINDOWS-1252',
+  'Ruby shebang 后第二行 encoding magic comment 必须生效');
+assert.equal(byPath.get('enc/declared-ruby-bom-encoding.rb')?.encoding, 'WINDOWS-1252',
+  'Ruby UTF-8 BOM 后的非 UTF-8 encoding magic comment 必须生效');
+assert.equal(byPath.get('enc/utf8-ruby-indented-shebang.rb')?.encoding, 'UTF-8',
+  'Ruby 带前导空白的伪 shebang 不能放行第二行 encoding magic comment');
 assert.equal(byPath.get('enc/utf8-bom-python.py')?.encoding, 'UTF-8 BOM',
   'Python UTF-8 BOM 与 UTF-8 等价 cookie 可以同时存在');
 assert.equal(byPath.get('enc/declared-long-first-line.py')?.encoding, 'LATIN-1',

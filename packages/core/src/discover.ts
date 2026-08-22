@@ -298,13 +298,13 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
     const magic = (line: string | undefined): string | null => (
       (ext === 'py'
         ? /^[ \t\f]*#.*?coding[:=][ \t]*([A-Za-z0-9._-]+)/.exec(line ?? '')
-        : /^\s*#.*?\bcoding\s*[:=]\s*([A-Za-z0-9._-]+)/i.exec(line ?? ''))?.[1] ?? null
+        : /^\s*#.*?\b(?:en)?coding\s*[:=]\s*([A-Za-z0-9._-]+)/i.exec(line ?? ''))?.[1] ?? null
     );
     const first = magic(lines[0]);
     if (first) return first;
     const secondAllowed = ext === 'py'
       ? /^[ \t\f]*(?:#.*)?$/.test(lines[0] ?? '')
-      : /^\s*#!/.test(lines[0] ?? '');
+      : /^#!/.test(lines[0] ?? '');
     if (secondAllowed) return magic(lines[1]);
   }
   if (ext === 'xml') {
@@ -381,10 +381,18 @@ function assertXmlEncodingMatchesBytes(
 
 function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: string; bomBytes: number } {
   if (hasPrefix(buf, [0xef, 0xbb, 0xbf])) {
-    if (normalizeExtension(extension ?? '') === 'py') {
+    const ext = normalizeExtension(extension ?? '');
+    if (ext === 'py') {
       const declared = declaredEncoding(buf.subarray(3), extension);
       if (declared && !/^utf[-_]8(?:[-_].*)?$/i.test(declared)) {
         throw new SourceDecodeError('decode-error', 'Python UTF-8 BOM 与编码声明冲突');
+      }
+    }
+    if (ext === 'rb') {
+      const declared = declaredEncoding(buf.subarray(3), extension);
+      if (declared) {
+        const normalized = normalizeDetectedEncoding(declared);
+        if (normalized !== 'UTF-8') return { encoding: normalized, bomBytes: 3 };
       }
     }
     assertXmlEncodingMatchesBytes(buf, extension, 'UTF-8', 3);
