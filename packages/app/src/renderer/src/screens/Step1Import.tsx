@@ -6,6 +6,7 @@ import {
   clampRecentMenuPosition, nextRecentMenuIndex, reconcileRecentSelection,
   selectAllRecent, toggleRecentSelection as toggleSelectedRoot, type RecentMenuNavigationKey,
 } from '../recent-project-state';
+import { ScanIssueReport } from '../components/ScanIssueReport';
 
 interface RecentContextMenu {
   root: string;
@@ -21,10 +22,11 @@ function unavailableLabel(reason: RecentProject['unavailableReason']): string {
 
 function scanPercent(progress: JobProgress | null): number {
   if (!progress) return 2;
-  if (progress.stage === 'discovering') return progress.total > 0 ? 8 : 3;
+  if (progress.stage === 'discovering') return progress.total > 0 ? 6 : 3;
   if (progress.stage === 'scanning') {
-    return 8 + (progress.total > 0 ? (progress.completed / progress.total) * 92 : 0);
+    return 6 + (progress.total > 0 ? (progress.completed / progress.total) * 86 : 0);
   }
+  if (progress.stage === 'analyzing-risks') return 92 + (progress.completed / Math.max(1, progress.total)) * 8;
   return 100;
 }
 
@@ -194,7 +196,11 @@ export default function Step1Import() {
         <div style={{ border: '1.5px solid var(--border)', borderRadius: 14, background: 'var(--panel)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
           <svg width="30" height="30" viewBox="0 0 30 30" style={{ animation: 'cs-spin 1s linear infinite' }}><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" strokeWidth="3" /><path d="M15 3a12 12 0 0 1 12 12" fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" /></svg>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
-            {progress?.stage === 'discovering' ? '正在发现源代码文件…' : '正在并发扫描项目…'}
+            {progress?.stage === 'discovering'
+              ? '正在发现源代码文件…'
+              : progress?.stage === 'analyzing-risks'
+                ? '正在本地分析第三方代码风险…'
+                : '正在并发扫描项目…'}
           </div>
           <div style={{ width: 360, height: 6, borderRadius: 3, background: 'var(--border2)', overflow: 'hidden' }}>
             <div style={{ height: '100%', borderRadius: 3, background: 'var(--accent)', width: `${pct}%`, transition: 'width .12s', position: 'relative', overflow: 'hidden' }}>
@@ -211,17 +217,21 @@ export default function Step1Import() {
               {' · '}{progress.workerCount} workers
             </div>
           )}
+          {progress?.stage === 'analyzing-risks' && (
+            <div style={{ fontSize: 12, color: 'var(--text2)' }}>分析仅在本机进行，不上传源码或项目路径</div>
+          )}
           <button className="btn-ghost" style={{ height: 28, padding: '0 12px', fontSize: 11.5 }} onClick={() => { void cancelActiveScan(); }}>取消扫描</button>
         </div>
       )}
 
       {s.scanPhase === 'error' && (
-        <div style={{ border: '1.5px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 14, background: 'var(--red-soft)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, animation: 'cs-fade .18s ease-out' }}>
+        <div style={{ border: '1.5px solid color-mix(in srgb, var(--red) 35%, transparent)', borderRadius: 14, background: 'var(--red-soft)', minHeight: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, animation: 'cs-fade .18s ease-out' }}>
           <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--red)', boxShadow: 'var(--shadow)' }}>✕</div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{s.scanError ?? '未发现可用源代码文件'}</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', lineHeight: 1.7 }}>
             该文件夹内没有可识别的源码。建议检查：<br />① 是否选错了目录（应选择包含 src/ 的项目根目录）　② 源码是否在压缩包内，需先解压
           </div>
+          <ScanIssueReport issues={s.scanIssues} summary={s.scanSummary} appliedRules={s.appliedScanExcludeRules} compact />
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             {s.root && <button className="btn-primary" style={{ height: 32, padding: '0 16px', fontSize: 13 }}
               onClick={() => { void scanProject(s.root!, s.scanIntent); }}>重试扫描</button>}

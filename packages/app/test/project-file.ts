@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
-  captureProjectRoot, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  captureProjectRoot, resolveProjectEvidencePath, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  validateScannedFilesUnchanged,
 } from '../src/main/project-file.ts';
 
+async function main() {
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codesucker-project-file-'));
 const root = path.join(sandbox, 'project');
 const outside = path.join(sandbox, 'outside.ts');
@@ -14,6 +17,27 @@ fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export {}');
 fs.writeFileSync(outside, 'secret');
 fs.mkdirSync(path.join(root, 'src', 'folder'));
 const rootSnapshot = captureProjectRoot(root);
+const scannedMain = fs.statSync(path.join(root, 'src', 'main.ts'));
+const scannedIdentity = [{
+  relPath: 'src/main.ts', sizeBytes: scannedMain.size, mtimeMs: scannedMain.mtimeMs,
+  contentSha256: createHash('sha256').update(fs.readFileSync(path.join(root, 'src', 'main.ts'))).digest('hex'),
+}];
+
+await validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity);
+fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export const changed = true;');
+await assert.rejects(
+  validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity),
+  /扫描后发生变化.*src\/main\.ts/,
+);
+fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export {}');
+
+fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'changed!!');
+fs.utimesSync(path.join(root, 'src', 'main.ts'), scannedMain.atime, new Date(scannedIdentity[0].mtimeMs));
+await assert.rejects(
+  validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity),
+  /扫描后发生变化.*src\/main\.ts/,
+  '同长度且保留时间戳的内容替换也必须被摘要识别',
+);
 
 assert.equal(
   resolveProjectFile(rootSnapshot, root, 'src/main.ts'),
@@ -27,6 +51,7 @@ for (const input of ['/etc/passwd', 'C:\\Windows\\system.ini', '../outside.ts', 
 
 assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/missing.ts'), /不存在/);
 assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/folder'), /普通文件/);
+assert.equal(resolveProjectEvidencePath(rootSnapshot, root, 'src/folder'), fs.realpathSync(path.join(root, 'src', 'folder')));
 assert.throws(() => resolveProjectFile(rootSnapshot, root, ''), /相对路径/);
 assert.throws(() => resolveProjectFile(null, root, 'src/main.ts'), /重新扫描/);
 assert.throws(() => resolveProjectFile(rootSnapshot, sandbox, 'outside.ts'), /扫描结果/);
@@ -63,3 +88,9 @@ try {
 }
 
 console.log('✅ project file guard 全部通过');
+}
+
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -3,6 +3,7 @@ import {
   cleanOptions, createJobId, isCancellation, orderedIncluded, refreshRecent, runProcess, toast, useStore,
 } from '../store';
 import { settleExportState } from '../export-state';
+import { thirdPartyStatusCounts } from '../third-party-risk-state';
 
 export default function Step5Export() {
   const s = useStore();
@@ -16,6 +17,11 @@ export default function Step5Export() {
   const warnN = audit.filter((a) => a.status === 'warn').length;
   const failN = audit.filter((a) => a.status === 'fail').length;
   const hasRisk = failN > 0;
+  const thirdPartyCounts = s.thirdPartyRiskReport
+    ? thirdPartyStatusCounts(s.thirdPartyRiskReport, s.files, s.keptThirdPartyRiskFindingIds)
+    : { excluded: 0, 'partially-excluded': 0, 'kept-by-user': 0, pending: 0 };
+  const unresolvedThirdParty = thirdPartyCounts.pending + thirdPartyCounts['partially-excluded'];
+  const thirdPartyAnalysisIncomplete = (s.thirdPartyRiskReport?.diagnostics.length ?? 0) > 0;
   const hasExportableContent = !!p && p.selection.pages.length > 0 && p.selection.pickedLines > 0;
 
   const doExport = async () => {
@@ -38,6 +44,12 @@ export default function Step5Export() {
         clean: cleanOptions(s.clean),
         outDir: s.outDir || `${s.root}/软著申报`,
         formats: { docx: s.fmtDocx, txt: s.fmtTxt },
+        ...(s.thirdPartyRiskReport ? {
+          thirdPartyRisk: {
+            rulesVersion: s.thirdPartyRiskReport.rulesVersion,
+            keptFindingIds: s.keptThirdPartyRiskFindingIds,
+          },
+        } : {}),
       }, jobId);
       const result = r as NonNullable<typeof s.exportResult>;
       const current = useStore.getState();
@@ -99,10 +111,31 @@ export default function Step5Export() {
           <span style={{ fontSize: 17 }}>{hasRisk ? '⛔' : '✅'}</span>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13.5, fontWeight: 600 }}>{passN} 项通过 · {warnN} 项警告 · {failN} 项退回风险</div>
-            <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 1 }}>{hasRisk ? '存在退回风险，导出前建议全部处理' : '主要风险已清零，可以放心导出'}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 1 }}>
+              {hasRisk
+                ? '存在退回风险，导出前建议全部处理'
+                : unresolvedThirdParty > 0 || thirdPartyAnalysisIncomplete
+                  ? '软著格式校验未发现退回风险；仍有第三方代码提示建议核验'
+                  : '软著格式校验未发现退回风险，可以生成申报文档'}
+            </div>
           </div>
           {s.processing && <span style={{ fontSize: 11.5, color: 'var(--text3)' }}>正在重新校验…</span>}
         </div>
+        {s.thirdPartyRiskReport && (
+          <section className={`step5-third-party-summary${unresolvedThirdParty > 0 || thirdPartyAnalysisIncomplete ? ' has-unresolved' : ''}`}
+            aria-label="第三方代码风险摘要">
+            <div className="step5-third-party-summary__icon">{unresolvedThirdParty > 0 || thirdPartyAnalysisIncomplete ? '⚑' : '✓'}</div>
+            <div className="step5-third-party-summary__copy">
+              <strong>第三方代码风险提示</strong>
+              <span>
+                {thirdPartyCounts.excluded} 项已排除 · {thirdPartyCounts['kept-by-user']} 项已确认纳入 · {' '}
+                {thirdPartyCounts['partially-excluded']} 项部分排除 · {thirdPartyCounts.pending} 项待处理
+              </span>
+              <small>此项独立于软著合规审计，仅作本地辅助判断，不会阻止导出。</small>
+            </div>
+            <button type="button" className="btn-ghost" onClick={() => s.set({ step: 2 })}>返回文件筛选</button>
+          </section>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {audit.map((a, i) => {
             const [bg, fg, icon] = iconFor(a.status);
@@ -177,6 +210,10 @@ export default function Step5Export() {
               onClick={async () => { const d = await window.cs.pickOutDir(); if (d) s.set({ outDir: d }); }}>更改</span>
           </div>
         </div>
+        <div className="step5-third-party-output-note">
+          <strong>随附风险摘要</strong>
+          <span>每次导出都会生成“第三方代码风险摘要_软件名.json”，仅含相对路径与结构化证据。</span>
+        </div>
         <div style={{ flex: 1 }} />
         {hasRisk && (
           <div style={{ display: 'flex', gap: 7, padding: '9px 11px', borderRadius: 8, background: 'var(--red-soft)', fontSize: 11.5, color: 'var(--red)', lineHeight: 1.5 }}>
@@ -201,6 +238,9 @@ export default function Step5Export() {
               {(r.docx ?? r.txt ?? '').split('/').pop()}<br />
               <span style={{ color: 'var(--text3)' }}>{r.pages} 页 · {r.lines.toLocaleString()} 行{r.size > 0 && ` · ${Math.round(r.size / 1024)} KB`}</span>
               <br /><span style={{ color: 'var(--text3)', fontSize: 11 }}>CodeSucker {r.appVersion} · 规则 {r.rulesVersion}</span>
+              {r.thirdPartyRiskSummary && <><br /><span style={{ color: 'var(--text3)', fontSize: 11 }}>
+                附：{r.thirdPartyRiskSummary.split(/[\\/]/).pop()}
+              </span></>}
               {r.errors.length > 0 && <><br /><span style={{ color: 'var(--orange)', fontSize: 11 }}>已跳过 {r.errors.length} 个处理失败文件</span></>}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>

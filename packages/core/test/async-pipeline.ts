@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, defaultCleanOptions,
-  discover, discoverAsync, processFiles, processFilesAsync, sortFiles,
+  cleanFile, discover, discoverAsync, processFiles, processFilesAsync, readSourceAsync, sortFiles,
   type FileCandidate, type PipelineProgress, type ProjectConfig,
 } from '../src/index.ts';
 
@@ -68,7 +68,9 @@ const failed = await discoverAsync(tmp, DEFAULT_EXTENSIONS, DEFAULT_EXCLUDES, {
     try {
       await new Promise((resolve) => setTimeout(resolve, 3));
       if (candidate.relPath.endsWith('module-07.ts')) throw new Error('模拟读取失败');
-      return asyncResult.files.find((file) => file.relPath === candidate.relPath) ?? null;
+      const file = asyncResult.files.find((item) => item.relPath === candidate.relPath);
+      if (!file) throw new Error(`缺少测试文件：${candidate.relPath}`);
+      return { status: 'included', file };
     } finally {
       active--;
     }
@@ -79,6 +81,18 @@ assert.equal(failed.errors.length, 1, '单文件失败应形成错误摘要');
 assert.equal(failed.errors[0].file, 'src/module-07.ts');
 assert.equal(failed.files.length, syncFiles.length - 1, '单文件失败不应让整个扫描失败');
 
+const failedDuringCleaning = await processFilesAsync(sortFiles(asyncResult.files, 'entry'), cfg, {
+  concurrency: 2,
+  cleanEntry: async (entry) => {
+    if (entry.relPath === 'src/module-07.ts') throw new Error('模拟清洗读取失败');
+    const { text, encoding } = await readSourceAsync(entry.path);
+    return cleanFile({ ...entry, encoding }, text, cfg.clean);
+  },
+});
+assert.equal(failedDuringCleaning.errors.length, 1, '清洗读取失败应形成错误摘要');
+assert.ok(!failedDuringCleaning.selection.selectedRelPaths.includes('src/module-07.ts'),
+  '导出选择不得包含清洗失败、未实际进入正文的文件');
+
 const controller = new AbortController();
 const started = Date.now();
 const cancelled = discoverAsync(tmp, DEFAULT_EXTENSIONS, DEFAULT_EXCLUDES, {
@@ -86,7 +100,9 @@ const cancelled = discoverAsync(tmp, DEFAULT_EXTENSIONS, DEFAULT_EXCLUDES, {
   signal: controller.signal,
   scanFile: async (candidate) => {
     await new Promise((resolve) => setTimeout(resolve, 200));
-    return asyncResult.files.find((file) => file.relPath === candidate.relPath) ?? null;
+    const file = asyncResult.files.find((item) => item.relPath === candidate.relPath);
+    if (!file) throw new Error(`缺少测试文件：${candidate.relPath}`);
+    return { status: 'included', file };
   },
 });
 setTimeout(() => controller.abort('测试取消'), 10);

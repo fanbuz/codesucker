@@ -1,14 +1,21 @@
 export * from './types.ts';
 export {
-  discover, discoverAsync, sortFiles, readSource, readSourceAsync, scanFileCandidate,
-  langOf, entryScore, countLines, MAX_FILE_BYTES,
+  discover, discoverDetailed, discoverAsync, sortFiles, readSource, readSourceAsync, scanFileCandidate,
+  decodeSource, langOf, entryScore, countLines, countTextLines, MAX_FILE_BYTES, SourceDecodeError,
   type DiscoverAsyncOptions, type DiscoverResult, type FileCandidate,
 } from './discover.ts';
 export { annotate, cleanFile, extractAttributions, wrapLine } from './clean.ts';
 export { select } from './select.ts';
 export { renderDocx, renderTxt, renderTxtAsync, type RenderOptions } from './render.ts';
 export { audit } from './audit.ts';
-export { CONFIG_SCHEMA_VERSION, RULES_VERSION } from './version.ts';
+export { CONFIG_SCHEMA_VERSION, RULES_VERSION, THIRD_PARTY_RULES_VERSION } from './version.ts';
+export { analyzeThirdPartyRisks, analyzeThirdPartyRisksWithSnapshot } from './third-party/analyze.ts';
+export type {
+  ThirdPartyAnalysisDiagnostic, ThirdPartyAnalysisDiagnosticCode, ThirdPartyAnalysisOptions,
+  ThirdPartyConfidence, ThirdPartyEcosystem, ThirdPartyEvidence, ThirdPartyEvidenceSource,
+  ThirdPartyManifestIdentity, ThirdPartyRecommendation, ThirdPartyRiskAnalysis,
+  ThirdPartyRiskFinding, ThirdPartyRiskKind, ThirdPartyRiskReport,
+} from './third-party/types.ts';
 export { abortError, mapConcurrent, throwIfAborted } from './async.ts';
 export {
   compileExcludePatterns, normalizeExcludeRules, validateExcludeRule,

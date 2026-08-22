@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 
 function isPathInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
@@ -19,6 +20,13 @@ export interface ProjectRootSnapshot {
   realPath: string;
   device: number;
   inode: number;
+}
+
+export interface ScannedFileIdentity {
+  relPath: string;
+  sizeBytes: number;
+  mtimeMs: number;
+  contentSha256?: string;
 }
 
 export function captureProjectRoot(root: string): ProjectRootSnapshot {
@@ -54,6 +62,43 @@ export function validateProjectRoot(snapshot: ProjectRootSnapshot, root: unknown
  * 返回 realpath，避免在校验完成后继续沿用可能被替换的项目内符号链接。
  */
 export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: unknown, relPath: unknown): string {
+  const realFile = resolveProjectEvidencePath(snapshot, root, relPath);
+  if (!fs.statSync(realFile).isFile()) {
+    throw new Error('问题路径不是普通文件，无法定位');
+  }
+  return realFile;
+}
+
+/** 导出使用扫描时的风险报告，因此源码元数据变化后必须先重新扫描。 */
+export async function validateScannedFilesUnchanged(
+  snapshot: ProjectRootSnapshot,
+  root: unknown,
+  entries: readonly ScannedFileIdentity[],
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) {
+      const entry = entries[next++];
+      try {
+        if (!/^[a-f0-9]{64}$/i.test(entry.contentSha256 ?? '')) throw new Error('MISSING_DIGEST');
+        const file = resolveProjectFile(snapshot, root, entry.relPath);
+        const buffer = await fs.promises.readFile(file);
+        const stat = await fs.promises.stat(file);
+        const digest = createHash('sha256').update(buffer).digest('hex');
+        if (stat.size !== entry.sizeBytes || stat.mtimeMs !== entry.mtimeMs || digest !== entry.contentSha256) {
+          throw new Error('IDENTITY_CHANGED');
+        }
+      } catch {
+        throw new Error(`源码文件在扫描后发生变化，请重新扫描项目：${entry.relPath}`);
+      }
+    }
+  };
+  const concurrency = Math.min(8, entries.length);
+  await Promise.all(Array.from({ length: concurrency }, worker));
+}
+
+/** 定位风险证据，可接受项目内普通文件或目录，但拒绝符号链接越界。 */
+export function resolveProjectEvidencePath(snapshot: ProjectRootSnapshot | null, root: unknown, relPath: unknown): string {
   if (!snapshot) {
     throw new Error('请先重新扫描项目，再定位问题文件');
   }
@@ -75,8 +120,9 @@ export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: u
   if (!isPathInside(realRoot, realFile)) {
     throw new Error('问题文件不在项目目录内，已拒绝定位');
   }
-  if (!fs.statSync(realFile).isFile()) {
-    throw new Error('问题路径不是普通文件，无法定位');
+  const stat = fs.statSync(realFile);
+  if (!stat.isFile() && !stat.isDirectory()) {
+    throw new Error('问题路径不是普通文件或目录，无法定位');
   }
   return realFile;
 }

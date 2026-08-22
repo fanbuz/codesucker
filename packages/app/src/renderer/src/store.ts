@@ -1,14 +1,25 @@
 import { create } from 'zustand';
+import type { ThirdPartyRiskReport } from '@codesucker/core';
 import type { UpdateCheckResult } from '../../shared/update-types';
 import { mergeRescannedFiles } from './scan-project-state';
 import { canStartScan } from './scan-guard';
 import { LatestRequestGuard } from './latest-request-guard';
+import { restoreKeptFindingIds } from './third-party-risk-state';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
-  sizeBytes: number; rawLines: number; mtimeMs: number; included: boolean; entryScore: number;
+  sizeBytes: number; rawLines: number; mtimeMs: number; encoding: string; included: boolean; entryScore: number;
 }
 export interface FileTaskError { stage: 'scanning' | 'cleaning' | 'rendering'; file: string; message: string }
+export type ScanIssueStatus = 'excluded' | 'skipped' | 'failed';
+export type ScanIssueReason = 'exclude-rule' | 'gitignore' | 'empty-file' | 'file-too-large' | 'binary-file' | 'unsupported-encoding' | 'read-error' | 'decode-error' | 'scan-error';
+export interface ScanIssueRow {
+  status: ScanIssueStatus; reason: ScanIssueReason; file: string; message: string; suggestion: string;
+  sizeBytes?: number; limitBytes?: number;
+}
+export interface ScanSummary {
+  candidates: number; included: number; excluded: number; skipped: number; failed: number;
+}
 export interface AuditLocation { file: string; line?: number }
 export interface AuditEvidence { location: AuditLocation; detail: string }
 export interface AuditRow {
@@ -53,6 +64,10 @@ interface ScanResult {
   root: string;
   pathSeparator: '/' | '\\';
   files: FileRow[];
+  issues: ScanIssueRow[];
+  summary: ScanSummary;
+  appliedExcludeRules: string[];
+  thirdPartyRisk: ThirdPartyRiskReport;
   errors: FileTaskError[];
   workerCount: number;
   langCounts: Record<string, number>;
@@ -65,6 +80,7 @@ interface ScanResult {
     order?: string[]; excludedRelPaths?: string[];
     clean?: CleanToggles;
     fmtDocx?: boolean; fmtTxt?: boolean; outDir?: string;
+    thirdPartyRisk?: { rulesVersion?: string; keptFindingIds?: string[] };
   };
 }
 
@@ -87,6 +103,11 @@ interface State {
   scanIntent: ScanIntent;
   scanError: string | null;
   scanErrors: FileTaskError[];
+  scanIssues: ScanIssueRow[];
+  scanSummary: ScanSummary | null;
+  appliedScanExcludeRules: string[];
+  thirdPartyRiskReport: ThirdPartyRiskReport | null;
+  keptThirdPartyRiskFindingIds: string[];
   scanSessionId: string | null;
   activeJobId: string | null;
   jobProgress: JobProgress | null;
@@ -110,7 +131,7 @@ interface State {
   fmtTxt: boolean;
   outDir: string;
   exporting: boolean;
-  exportResult: null | { scanSessionId: string; docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
+  exportResult: null | { scanSessionId: string; docx?: string; txt?: string; thirdPartyRiskSummary?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
   toast: string | null;
   set: (p: Partial<State>) => void;
 }
@@ -127,6 +148,11 @@ export const useStore = create<State>((set) => ({
   scanIntent: 'open',
   scanError: null,
   scanErrors: [],
+  scanIssues: [],
+  scanSummary: null,
+  appliedScanExcludeRules: [],
+  thirdPartyRiskReport: null,
+  keptThirdPartyRiskFindingIds: [],
   scanSessionId: null,
   activeJobId: null,
   jobProgress: null,
@@ -265,6 +291,11 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
     scanIntent: intent,
     scanError: null,
     scanErrors: [],
+    scanIssues: [],
+    scanSummary: null,
+    appliedScanExcludeRules: [],
+    thirdPartyRiskReport: null,
+    keptThirdPartyRiskFindingIds: [],
     scanSessionId: null,
     activeJobId: jobId,
     jobProgress: null,
@@ -289,8 +320,13 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
         scanPhase: 'error',
         scanError: result.errors.length > 0
           ? `扫描失败 ${result.errors.length} 个文件，未发现可用源码`
-          : '未发现可用源代码文件',
+          : `未发现可用源代码文件（跳过 ${result.summary.skipped}，排除 ${result.summary.excluded}）`,
         scanErrors: result.errors,
+        scanIssues: result.issues,
+        scanSummary: result.summary,
+        appliedScanExcludeRules: result.appliedExcludeRules,
+        thirdPartyRiskReport: result.thirdPartyRisk,
+        keptThirdPartyRiskFindingIds: [],
         activeJobId: null,
         jobProgress: null,
       });
@@ -307,6 +343,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
     let fmtDocx: boolean;
     let fmtTxt: boolean;
     let outDir: string;
+    let keptThirdPartyRiskFindingIds: string[];
 
     if (preserveCurrentConfig) {
       const merged = mergeRescannedFiles(previous.files, previous.order, result.files, preferredOrder);
@@ -319,6 +356,10 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       fmtDocx = previous.fmtDocx;
       fmtTxt = previous.fmtTxt;
       outDir = previous.outDir;
+      keptThirdPartyRiskFindingIds = restoreKeptFindingIds(result.thirdPartyRisk, {
+        rulesVersion: previous.thirdPartyRiskReport?.rulesVersion,
+        keptFindingIds: previous.keptThirdPartyRiskFindingIds,
+      });
     } else {
       const config = result.savedConfig;
       const excluded = new Set(config?.excludedRelPaths ?? []);
@@ -335,6 +376,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       fmtDocx = config?.fmtDocx ?? true;
       fmtTxt = config?.fmtTxt ?? false;
       outDir = config?.outDir ?? '';
+      keptThirdPartyRiskFindingIds = restoreKeptFindingIds(result.thirdPartyRisk, config?.thirdPartyRisk);
     }
 
     current.set({
@@ -346,6 +388,11 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       projName: projectName(result.root),
       scanSessionId,
       scanErrors: result.errors,
+      scanIssues: result.issues,
+      scanSummary: result.summary,
+      appliedScanExcludeRules: result.appliedExcludeRules,
+      thirdPartyRiskReport: result.thirdPartyRisk,
+      keptThirdPartyRiskFindingIds,
       activeJobId: null,
       jobProgress: null,
       pathSeparator: result.pathSeparator,
@@ -364,7 +411,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
 
     await refreshRecent();
 
-    if (result.errors.length > 0) toast(`${result.errors.length} 个文件扫描失败，已跳过`);
+    if (result.issues.length > 0) toast(`${result.issues.length} 个文件未纳入，可在统计区查看原因`);
     else if (intent === 'rescan') toast('重新扫描完成，旧处理结果已失效');
     else if (result.savedConfigWarning) toast(result.savedConfigWarning);
     else if (result.savedConfig) toast('已恢复项目配置（.codesucker.json）');

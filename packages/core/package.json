@@ -1,13 +1,13 @@
 {
   "name": "@codesucker/core",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "tsx test/smoke.ts && tsx test/attribution.ts && tsx test/multiline-strings.ts && tsx test/language-compat.ts && tsx test/empty-result.ts && tsx test/release-matrix.ts && tsx test/async-pipeline.ts && tsx test/exclude-rules.ts",
+    "test": "tsx test/smoke.ts && tsx test/attribution.ts && tsx test/multiline-strings.ts && tsx test/language-compat.ts && tsx test/empty-result.ts && tsx test/release-matrix.ts && tsx test/async-pipeline.ts && tsx test/scan-reliability.ts && tsx test/exclude-rules.ts && tsx test/third-party-risk.ts",
     "test:real-projects": "tsx test/real-projects.ts"
   },
   "dependencies": {

@@ -13,6 +13,8 @@ on:
       - 'packages/core/**'
       - 'scripts/gen-icons.mjs'
       - 'scripts/gen-third-party-notices.mjs'
+      - 'scripts/check-release-tag.mjs'
+      - 'CHANGELOG.md'
       - 'THIRD_PARTY_NOTICES.txt'
   push:
     tags: ['v*']
@@ -25,6 +27,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check versions, test, and build
+        run: npm run verify
+
+      - name: Check tag, product version, and changelog
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run release:check -- "$GITHUB_REF_NAME"
+
   license:
     name: License compliance
     runs-on: ubuntu-latest
@@ -47,7 +73,7 @@ jobs:
 
   package:
     name: Package ${{ matrix.label }}
-    needs: license
+    needs: [verify, license]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
@@ -114,7 +140,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [license, package]
+    needs: [verify, license, package]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -146,4 +172,5 @@ jobs:
             --verify-tag \
             --title "CodeSucker $GITHUB_REF_NAME" \
             --generate-notes \
+            --notes $'### 安装与风险提示\n\n当前 macOS 安装包尚未进行 Apple Developer ID 签名与公证。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。\n\n第三方代码风险提示完全在本机运行，只提供启发式证据与筛选建议，不自动判定代码归属，也不构成法律意见。' \
             "${release_options[@]}"

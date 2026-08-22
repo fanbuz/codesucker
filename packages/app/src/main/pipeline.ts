@@ -7,12 +7,17 @@ import {
 } from '@codesucker/core';
 import type {
   CleanedFile, CleanOptions, FileCandidate, FileEntry, PipelineProgress, ProjectConfig,
+  ScanFileOutcome, ThirdPartyManifestIdentity, ThirdPartyRiskAnalysis, ThirdPartyRiskReport,
 } from '@codesucker/core';
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
+import {
+  commitStagedExportFiles, createExportStagingDirectory, discardExportStagingDirectory,
+} from './export-transaction';
 import { validateDroppedDirectory } from './drop-path';
 import {
-  captureProjectRoot, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  captureProjectRoot, resolveProjectEvidencePath, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  validateScannedFilesUnchanged,
   type ProjectRootSnapshot,
 } from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
@@ -26,10 +31,22 @@ import {
 import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, RenderWorkerRequest,
 } from './workers/protocol';
+import {
+  assertThirdPartyManifestDiscoveryUnchanged, assertThirdPartyManifestSnapshotUnchanged,
+  assertThirdPartyRiskReportUnchanged, assertThirdPartyRiskScanBaselineUnchanged,
+  emptyThirdPartyRiskReport,
+  sanitizeProjectConfigValues, trustedThirdPartyEvidenceRelPath,
+  writeThirdPartyRiskSidecar,
+  type ThirdPartyRiskPreference,
+} from './third-party-risk-sidecar';
 
 interface ScanSnapshot {
   rootSnapshot: ProjectRootSnapshot;
   byRel: Map<string, FileEntry>;
+  thirdPartyRisk: ThirdPartyRiskReport;
+  thirdPartyRiskAnalysisComplete: boolean;
+  thirdPartyManifestIdentities: ThirdPartyManifestIdentity[];
+  thirdPartyManifestCandidateRelPaths: string[];
 }
 
 /** 当前扫描会话只保存文件元数据，不保存原始源码。 */
@@ -171,6 +188,7 @@ interface ProcessPayload {
   owner?: string;
   foundedDate?: string;
   clean: CleanOptions;
+  thirdPartyRisk?: ThirdPartyRiskPreference;
 }
 
 function buildConfig(payload: ProcessPayload): ProjectConfig {
@@ -243,14 +261,43 @@ async function scanWithWorkers(
       onProgress: report,
       scanFile: async (candidate: FileCandidate, signal) => {
         const scanned = await workerResources.pipeline.run({ type: 'scan', candidate }, signal);
-        return scanned as FileEntry | null;
+        return scanned as ScanFileOutcome;
       },
     });
+    job.assertCurrent();
+    validateProjectRoot(rootSnapshot, request.root);
+    report({ stage: 'analyzing-risks', completed: 0, total: 1 });
+    let thirdPartyRisk: ThirdPartyRiskReport;
+    let thirdPartyRiskAnalysisComplete: boolean;
+    let thirdPartyManifestIdentities: ThirdPartyManifestIdentity[];
+    let thirdPartyManifestCandidateRelPaths: string[];
+    try {
+      const analysis = await workerResources.pipeline.run({
+        type: 'analyze-risks-with-snapshot',
+        root: rootSnapshot.realPath,
+        files: result.files,
+      }, job.signal) as ThirdPartyRiskAnalysis;
+      thirdPartyRisk = analysis.report;
+      thirdPartyRiskAnalysisComplete = true;
+      thirdPartyManifestIdentities = analysis.manifestIdentities;
+      thirdPartyManifestCandidateRelPaths = analysis.manifestCandidateRelPaths;
+    } catch (error) {
+      if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+      thirdPartyRisk = emptyThirdPartyRiskReport(0, '本地分析任务发生内部错误');
+      thirdPartyRiskAnalysisComplete = false;
+      thirdPartyManifestIdentities = [];
+      thirdPartyManifestCandidateRelPaths = [];
+    }
+    report({ stage: 'analyzing-risks', completed: 1, total: 1 });
     job.assertCurrent();
     validateProjectRoot(rootSnapshot, request.root);
     scanSessions.commit(request.scanSessionId, normalizedRoot, {
       rootSnapshot,
       byRel: new Map(result.files.map((file) => [file.relPath, file])),
+      thirdPartyRisk,
+      thirdPartyRiskAnalysisComplete,
+      thirdPartyManifestIdentities,
+      thirdPartyManifestCandidateRelPaths,
     });
     const entryOrder = sortFiles(result.files, 'entry').map((file) => file.relPath);
     const mtimeOrder = sortFiles(result.files, 'mtime').map((file) => file.relPath);
@@ -264,6 +311,10 @@ async function scanWithWorkers(
       root: rootSnapshot.inputPath,
       pathSeparator: path.sep === '\\' ? '\\' : '/',
       files: result.files,
+      issues: result.issues,
+      summary: result.summary,
+      appliedExcludeRules: result.appliedExcludeRules,
+      thirdPartyRisk,
       errors: result.errors,
       workerCount: workerResources.workerCount,
       langCounts,
@@ -326,6 +377,14 @@ export function registerPipelineIpc() {
     shell.showItemInFolder(resolveProjectFile(scanSessions.peek()?.rootSnapshot ?? null, root, relPath));
   });
 
+  ipcMain.handle('project:revealRiskEvidence', (_event, root: unknown, relPath: unknown) => {
+    const scan = scanSessions.peek();
+    if (!scan) throw new Error('请先重新扫描项目，再定位风险证据');
+    const trustedRelPath = trustedThirdPartyEvidenceRelPath(scan.thirdPartyRisk, relPath);
+    if (!trustedRelPath) throw new Error('风险证据与最近扫描结果不一致，请重新扫描项目');
+    shell.showItemInFolder(resolveProjectEvidencePath(scan.rootSnapshot, root, trustedRelPath));
+  });
+
   ipcMain.handle('project:revealLatestExport', () => {
     shell.showItemInFolder(resolveRecentExportFile(lastExportFile));
   });
@@ -340,12 +399,15 @@ export function registerPipelineIpc() {
     const job = jobs.start(request.jobId, 'process');
     try {
       const entries = orderedEntries(request.payload);
+      const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const [result, preview] = await Promise.all([
         processWithWorkers(entries, request.payload, job, event.sender),
         previewWithWorker(entries[0], request.payload.clean, job),
       ]);
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const audit = result.errors.length > 0
         ? [{
             status: 'warn' as const,
@@ -392,19 +454,80 @@ export function registerPipelineIpc() {
     lastExportFile = null;
     const workerResources = getResources();
     const report = createProgressReporter(job, event.sender, workerResources.workerCount);
+    let stagingDir: string | null = null;
     try {
+      if (!request.payload.formats.docx && !request.payload.formats.txt) throw new Error('请至少选择一种输出格式');
       const entries = orderedEntries(request.payload);
+      const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const result = await processWithWorkers(entries, request.payload, job, event.sender);
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
+      const scannedEntries = [...scan.byRel.values()];
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+      report({ stage: 'analyzing-risks', completed: 0, total: 1 });
+      let currentThirdPartyAnalysis: ThirdPartyRiskAnalysis;
+      try {
+        currentThirdPartyAnalysis = await workerResources.pipeline.run({
+          type: 'analyze-risks-with-snapshot',
+          root: scan.rootSnapshot.realPath,
+          files: scannedEntries,
+        }, job.signal) as ThirdPartyRiskAnalysis;
+      } catch (error) {
+        if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+        throw new Error('无法复核第三方代码风险，请重新扫描项目后再导出');
+      }
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+      job.assertCurrent();
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      assertThirdPartyRiskScanBaselineUnchanged(
+        scan.thirdPartyRiskAnalysisComplete,
+        scan.thirdPartyRisk,
+        scan.thirdPartyManifestIdentities,
+        scan.thirdPartyManifestCandidateRelPaths,
+        currentThirdPartyAnalysis,
+      );
+      const assertExportEvidenceCurrent = async () => {
+        job.assertCurrent();
+        requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+        validateProjectRoot(scan.rootSnapshot, request.payload.root);
+        await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+        let finalThirdPartyAnalysis: ThirdPartyRiskAnalysis;
+        try {
+          finalThirdPartyAnalysis = await workerResources.pipeline.run({
+            type: 'analyze-risks-with-snapshot',
+            root: scan.rootSnapshot.realPath,
+            files: scannedEntries,
+          }, job.signal) as ThirdPartyRiskAnalysis;
+        } catch (error) {
+          if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+          throw new Error('无法最终复核第三方代码风险，请重新扫描项目后再导出');
+        }
+        await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+        job.assertCurrent();
+        requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+        validateProjectRoot(scan.rootSnapshot, request.payload.root);
+        assertThirdPartyRiskReportUnchanged(currentThirdPartyAnalysis.report, finalThirdPartyAnalysis.report);
+        assertThirdPartyManifestSnapshotUnchanged(
+          currentThirdPartyAnalysis.manifestIdentities,
+          finalThirdPartyAnalysis.manifestIdentities,
+        );
+        assertThirdPartyManifestDiscoveryUnchanged(
+          currentThirdPartyAnalysis.manifestCandidateRelPaths,
+          finalThirdPartyAnalysis.manifestCandidateRelPaths,
+        );
+      };
+      report({ stage: 'analyzing-risks', completed: 1, total: 1 });
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
+      stagingDir = await createExportStagingDirectory(request.payload.outDir);
       const renderOptions = {
         title: request.payload.title,
         fontName: 'SimSun',
         fontSizePt: 10.5,
-        outDir: request.payload.outDir,
+        outDir: stagingDir,
       };
-      const formatCount = Number(request.payload.formats.docx) + Number(request.payload.formats.txt);
+      const formatCount = Number(request.payload.formats.docx) + Number(request.payload.formats.txt) + 1;
       let rendered = 0;
       report({ stage: 'rendering', completed: 0, total: formatCount });
       const output: {
@@ -415,6 +538,7 @@ export function registerPipelineIpc() {
         lines: number;
         appVersion: string;
         rulesVersion: string;
+        thirdPartyRiskSummary?: string;
         errors: typeof result.errors;
       } = {
         size: 0,
@@ -440,6 +564,40 @@ export function registerPipelineIpc() {
 
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      output.thirdPartyRiskSummary = await writeThirdPartyRiskSidecar(
+        currentThirdPartyAnalysis.report,
+        result.selection.selectedRelPaths,
+        request.payload.thirdPartyRisk,
+        stagingDir,
+        request.payload.title,
+        app.getVersion(),
+        {
+          signal: job.signal,
+        },
+      );
+      job.assertCurrent();
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      validateProjectRoot(scan.rootSnapshot, request.payload.root);
+      const stagedPaths = [output.docx, output.txt, output.thirdPartyRiskSummary]
+        .filter((item): item is string => typeof item === 'string');
+      const committedPaths = await commitStagedExportFiles(stagingDir, request.payload.outDir, stagedPaths, {
+        signal: job.signal,
+        beforeCommit: assertExportEvidenceCurrent,
+        assertCurrent: () => {
+          job.assertCurrent();
+          requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+          validateProjectRoot(scan.rootSnapshot, request.payload.root);
+        },
+      });
+      const committedByName = new Map(committedPaths.map((item) => [path.basename(item), item]));
+      if (output.docx) output.docx = committedByName.get(path.basename(output.docx));
+      if (output.txt) output.txt = committedByName.get(path.basename(output.txt));
+      if (output.thirdPartyRiskSummary) {
+        output.thirdPartyRiskSummary = committedByName.get(path.basename(output.thirdPartyRiskSummary));
+      }
+      stagingDir = null;
+      report({ stage: 'rendering', completed: ++rendered, total: formatCount });
+
       const exportedFile = output.docx ?? output.txt;
       if (!exportedFile) throw new Error('请至少选择一种输出格式');
       lastExportFile = fs.realpathSync.native(exportedFile);
@@ -452,14 +610,15 @@ export function registerPipelineIpc() {
       });
       return { ...output, scanSessionId: request.payload.scanSessionId };
     } finally {
+      await discardExportStagingDirectory(stagingDir).catch(() => undefined);
       jobs.finish(job.id);
     }
   });
 
-  ipcMain.handle('project:saveConfig', (_event, root: string, config: unknown) => {
-    const values = isRecord(config) ? config : {};
+  ipcMain.handle('project:saveConfig', (_event, root: string, scanSessionId: string, config: unknown) => {
+    const scan = requireCurrentScan(root, scanSessionId);
     const persisted = {
-      ...values,
+      ...sanitizeProjectConfigValues(scan.thirdPartyRisk, config, new Set(scan.byRel.keys())),
       schemaVersion: CONFIG_SCHEMA_VERSION,
       appVersion: app.getVersion(),
       rulesVersion: RULES_VERSION,

@@ -53,13 +53,23 @@ export default function App() {
   }, []);
 
   const saveConfig = async () => {
-    if (!s.root) { toast('请先导入项目'); return; }
-    await window.cs.saveConfig(s.root, {
-      title: s.swName, owner: s.owner, sortMode: s.sortMode,
-      order: s.order, excludedRelPaths: s.files.filter((f) => !f.included).map((f) => f.relPath),
-      clean: s.clean, fmtDocx: s.fmtDocx, fmtTxt: s.fmtTxt, outDir: s.outDir,
-    });
-    toast('配置已保存到项目（.codesucker.json）');
+    if (!s.root || !s.scanSessionId) { toast('请先导入并完成扫描'); return; }
+    try {
+      await window.cs.saveConfig(s.root, s.scanSessionId, {
+        title: s.swName, owner: s.owner, sortMode: s.sortMode,
+        order: s.order, excludedRelPaths: s.files.filter((f) => !f.included).map((f) => f.relPath),
+        clean: s.clean, fmtDocx: s.fmtDocx, fmtTxt: s.fmtTxt, outDir: s.outDir,
+        ...(s.thirdPartyRiskReport ? {
+          thirdPartyRisk: {
+            rulesVersion: s.thirdPartyRiskReport.rulesVersion,
+            keptFindingIds: s.keptThirdPartyRiskFindingIds,
+          },
+        } : {}),
+      });
+      toast('配置已保存到项目（.codesucker.json）');
+    } catch (error) {
+      toast('保存配置失败：' + (error instanceof Error ? error.message : String(error)));
+    }
   };
 
   const rescan = () => {
