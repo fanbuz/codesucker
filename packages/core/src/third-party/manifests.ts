@@ -464,8 +464,13 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     for (const key of ['default', 'develop']) {
       const values = parsed[key];
       if (!values || typeof values !== 'object' || Array.isArray(values)) continue;
-      for (const name of Object.keys(values as Record<string, unknown>)) {
-        const item = identity('python', name, doc.relPath, 'lockfile');
+      for (const [name, metadata] of Object.entries(values as Record<string, unknown>)) {
+        const record = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+          ? metadata as Record<string, unknown>
+          : undefined;
+        const local = typeof record?.path === 'string' && record.path.trim().length > 0
+          || localSpec(record?.file);
+        const item = identity('python', name, doc.relPath, 'lockfile', local);
         if (item) out.push(item);
       }
     }
