@@ -276,11 +276,23 @@ function firstPhysicalLines(buf: Buffer, count: number): Buffer {
   return buf.subarray(0, cursor);
 }
 
+function xmlDeclaredEncoding(header: string): string | null {
+  const declaration = /^<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(?:"1\.[0-9]+"|'1\.[0-9]+')[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(?:"([A-Za-z][A-Za-z0-9._-]*)"|'([A-Za-z][A-Za-z0-9._-]*)')(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(?:"(?:yes|no)"|'(?:yes|no)'))?[ \t\r\n]*\?>/i.exec(header);
+  return declaration?.[1] ?? declaration?.[2] ?? null;
+}
+
+function xmlDeclarationText(text: string): string {
+  const end = text.indexOf('?>');
+  return end >= 0 ? text.slice(0, end + 2) : text;
+}
+
 function declaredEncoding(buf: Buffer, extension?: string): string | null {
   const ext = normalizeExtension(extension ?? '');
   const header = (ext === 'py' || ext === 'rb'
     ? firstPhysicalLines(buf, 2)
-    : buf.subarray(0, SOURCE_ENCODING_HEADER_BYTES)).toString('latin1');
+    : ext === 'xml'
+      ? buf
+      : buf.subarray(0, SOURCE_ENCODING_HEADER_BYTES)).toString('latin1');
   if (ext === 'py' || ext === 'rb') {
     const lines = header.split(/\r\n|\r|\n/).slice(0, 2);
     const magic = (line: string | undefined): string | null => (
@@ -296,8 +308,7 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
     if (secondAllowed) return magic(lines[1]);
   }
   if (ext === 'xml') {
-    const declaration = /^<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(?:"1\.[0-9]+"|'1\.[0-9]+')[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(?:"([A-Za-z][A-Za-z0-9._-]*)"|'([A-Za-z][A-Za-z0-9._-]*)')(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(?:"(?:yes|no)"|'(?:yes|no)'))?[ \t\r\n]*\?>/i.exec(header);
-    return declaration?.[1] ?? declaration?.[2] ?? null;
+    return xmlDeclaredEncoding(xmlDeclarationText(header));
   }
   if (ext === 'css' || ext === 'scss') {
     const encoding = /^@charset "([A-Za-z0-9._-]+)";/.exec(header)?.[1];
@@ -350,6 +361,24 @@ function normalizeDetectedEncoding(encoding: string): string {
   return normalized;
 }
 
+function assertXmlEncodingMatchesBytes(
+  buf: Buffer, extension: string | undefined, byteEncoding: 'UTF-8' | 'UTF-16LE' | 'UTF-16BE', bomBytes: number,
+): void {
+  if (normalizeExtension(extension ?? '') !== 'xml') return;
+  const content = buf.subarray(bomBytes);
+  const header = xmlDeclarationText(byteEncoding === 'UTF-8'
+    ? content.toString('latin1')
+    : iconv.decode(content, byteEncoding));
+  const declared = xmlDeclaredEncoding(header);
+  if (!declared) return;
+  const normalized = normalizeDetectedEncoding(declared);
+  const matches = normalized === byteEncoding
+    || (normalized === 'UTF-16' && byteEncoding.startsWith('UTF-16'));
+  if (!matches) {
+    throw new SourceDecodeError('decode-error', `XML 编码声明 ${normalized} 与实际字节布局 ${byteEncoding} 冲突`);
+  }
+}
+
 function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: string; bomBytes: number } {
   if (hasPrefix(buf, [0xef, 0xbb, 0xbf])) {
     if (normalizeExtension(extension ?? '') === 'py') {
@@ -358,16 +387,32 @@ function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: stri
         throw new SourceDecodeError('decode-error', 'Python UTF-8 BOM 与编码声明冲突');
       }
     }
+    assertXmlEncodingMatchesBytes(buf, extension, 'UTF-8', 3);
     return { encoding: 'UTF-8 BOM', bomBytes: 3 };
   }
-  if (hasPrefix(buf, [0xff, 0xfe])) return { encoding: 'UTF-16LE', bomBytes: 2 };
-  if (hasPrefix(buf, [0xfe, 0xff])) return { encoding: 'UTF-16BE', bomBytes: 2 };
+  if (hasPrefix(buf, [0xff, 0xfe])) {
+    assertXmlEncodingMatchesBytes(buf, extension, 'UTF-16LE', 2);
+    return { encoding: 'UTF-16LE', bomBytes: 2 };
+  }
+  if (hasPrefix(buf, [0xfe, 0xff])) {
+    assertXmlEncodingMatchesBytes(buf, extension, 'UTF-16BE', 2);
+    return { encoding: 'UTF-16BE', bomBytes: 2 };
+  }
   // 无 BOM 的 UTF-16 ASCII 区段同时也是合法 UTF-8 字节；必须先看 NUL 对齐与换行特征。
   const utf16 = utf16WithoutBom(buf);
-  if (utf16) return { encoding: utf16, bomBytes: 0 };
+  if (utf16) {
+    assertXmlEncodingMatchesBytes(buf, extension, utf16, 0);
+    return { encoding: utf16, bomBytes: 0 };
+  }
 
   const declared = declaredEncoding(buf, extension);
-  if (declared) return { encoding: normalizeDetectedEncoding(declared), bomBytes: 0 };
+  if (declared) {
+    const normalized = normalizeDetectedEncoding(declared);
+    if (normalizeExtension(extension ?? '') === 'xml' && normalized.startsWith('UTF-16')) {
+      throw new SourceDecodeError('decode-error', 'XML UTF-16 编码声明与实际字节布局不符');
+    }
+    return { encoding: normalized, bomBytes: 0 };
+  }
   if (isValidUtf8(buf)) return { encoding: 'UTF-8', bomBytes: 0 };
 
   const detected = chardet.detect(buf);
@@ -393,10 +438,14 @@ export function decodeSource(buf: Buffer, extension?: string): { text: string; e
       throw new SourceDecodeError('decode-error', `${decodeAs} 字节长度不完整`);
     }
     let text = iconv.decode(content, decodeAs);
-    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-    if (decodeAs !== 'UTF-8' && text.includes('\uFFFD') && !iconv.encode(text, decodeAs).equals(content)) {
-      throw new SourceDecodeError('decode-error', `${decodeAs} 字节序列无效或无法无损解码`);
+    if (decodeAs !== 'UTF-8') {
+      const roundTripMatches = iconv.encode(text, decodeAs).equals(content);
+      const permitsDuplicateMappings = new Set(['GBK', 'GB18030', 'SHIFT-JIS', 'BIG5']).has(decodeAs);
+      if (!roundTripMatches && (!permitsDuplicateMappings || text.includes('\uFFFD'))) {
+        throw new SourceDecodeError('decode-error', `${decodeAs} 字节序列无效或无法无损解码`);
+      }
     }
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
     return { text, encoding: detected.encoding };
   } catch (error) {
     if (error instanceof SourceDecodeError) throw error;

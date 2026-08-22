@@ -71,6 +71,10 @@ write('enc/declared-xml.xml', Buffer.concat([
   Buffer.from('<?xml version="1.0" encoding="windows-1252"?><root>', 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</root>', 'ascii'),
 ]));
+write('enc/declared-long-xml.xml', Buffer.concat([
+  Buffer.from(`<?xml version="1.0" ${' '.repeat(1100)}encoding="windows-1252"?><root>`, 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('</root>', 'ascii'),
+]));
 write('enc/utf8-invalid-xml-declaration.xml', ' \n<?xml version="1.0" encoding="windows-1252"?><root>é</root>');
 write('enc/utf8-xml-stylesheet.xml', '<?xml-stylesheet encoding="windows-1252"?><root>é</root>');
 write('enc/declared-css.css', Buffer.concat([
@@ -92,6 +96,9 @@ write('enc/utf16le.ts', withBom([0xff, 0xfe], iconv.encode('const 名称 = "UTF-
 write('enc/utf16be.ts', withBom([0xfe, 0xff], iconv.encode('const 名称 = "UTF-16BE";\rconst value = 5;', 'utf16-be')));
 write('enc/utf16le-no-bom.ts', iconv.encode('const value = "UTF-16LE no BOM";\nconst next = 6;', 'utf16-le'));
 write('enc/utf16be-no-bom.ts', iconv.encode('const value = "UTF-16BE no BOM";\nconst next = 7;', 'utf16-be'));
+write('enc/utf16le-no-bom.xml', iconv.encode(
+  '<?xml version="1.0" encoding="UTF-16"?><root>有效</root>', 'utf16-le',
+));
 
 for (const [name, newline] of [['lf', '\n'], ['crlf', '\r\n'], ['cr', '\r']] as const) {
   write(`lines/${name}.ts`, ['const first = 1;', 'const second = 2;', 'const third = 3;'].join(newline));
@@ -110,6 +117,20 @@ write('issues/malformed-gb18030.py', Buffer.concat([
 write('issues/malformed-shift-jis.py', Buffer.concat([
   Buffer.from('# -*- coding: shift_jis -*-\nvalue = "', 'ascii'), Buffer.from([0x82]), Buffer.from('"', 'ascii'),
 ]));
+write('issues/malformed-utf7.py', Buffer.from('# coding: utf-7\nvalue = 1\n+A', 'ascii'));
+write('issues/xml-utf16-ascii.xml', Buffer.from(
+  '<?xml version="1.0" encoding="UTF-16LE"?><root>ascii bytes</root>', 'ascii',
+));
+write('issues/xml-utf16-bom-conflict.xml', withBom(
+  [0xff, 0xfe], iconv.encode(
+    `<?xml version="1.0" ${' '.repeat(1100)}encoding="UTF-16BE"?><root>冲突</root>`, 'utf16-le',
+  ),
+));
+write('issues/xml-utf8-bom-long-conflict.xml', withBom(
+  [0xef, 0xbb, 0xbf], Buffer.from(
+    `<?xml version="1.0" ${' '.repeat(1100)}encoding="UTF-16"?><root>conflict</root>`, 'utf8',
+  ),
+));
 write('issues/python-bom-cookie-conflict.py', withBom(
   [0xef, 0xbb, 0xbf], Buffer.from('# encoding: latin-1\nvalue = 1', 'ascii'),
 ));
@@ -175,6 +196,8 @@ assert.equal(byPath.get('enc/utf8-invalid-python-cookie-space.py')?.encoding, 'U
 assert.equal(byPath.get('enc/utf8-invalid-python-cookie-case.py')?.encoding, 'UTF-8',
   '大小写不符的 Python 普通注释不能伪装成编码声明');
 assert.equal(byPath.get('enc/declared-xml.xml')?.encoding, 'WINDOWS-1252', '位于字节零的 XML 编码声明必须生效');
+assert.equal(byPath.get('enc/declared-long-xml.xml')?.encoding, 'WINDOWS-1252',
+  'XML 声明必须扫描到完整 ?>，不能受 Web 编码窗口限制');
 assert.equal(byPath.get('enc/utf8-invalid-xml-declaration.xml')?.encoding, 'UTF-8', '前置空白后的 XML 声明无效，不能改变 UTF-8 解码');
 assert.equal(byPath.get('enc/utf8-xml-stylesheet.xml')?.encoding, 'UTF-8', 'xml-stylesheet 处理指令不能伪装成 XML 编码声明');
 assert.equal(byPath.get('enc/declared-css.css')?.encoding, 'WINDOWS-1252', '位于字节零的 CSS @charset 必须生效');
@@ -188,6 +211,8 @@ assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be.ts')?.encoding, 'UTF-16BE');
 assert.equal(byPath.get('enc/utf16le-no-bom.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be-no-bom.ts')?.encoding, 'UTF-16BE');
+assert.equal(byPath.get('enc/utf16le-no-bom.xml')?.encoding, 'UTF-16LE',
+  '无 BOM XML 的 UTF-16 声明与字节布局一致时必须允许');
 assert.equal(byPath.get('lines/lf.ts')?.rawLines, 3);
 assert.equal(byPath.get('lines/crlf.ts')?.rawLines, 3);
 assert.equal(byPath.get('lines/cr.ts')?.rawLines, 3);
@@ -208,6 +233,10 @@ expectReason('issues/malformed.ts', 'decode-error');
 expectReason('issues/malformed-gbk.py', 'decode-error');
 expectReason('issues/malformed-gb18030.py', 'decode-error');
 expectReason('issues/malformed-shift-jis.py', 'decode-error');
+expectReason('issues/malformed-utf7.py', 'decode-error');
+expectReason('issues/xml-utf16-ascii.xml', 'decode-error');
+expectReason('issues/xml-utf16-bom-conflict.xml', 'decode-error');
+expectReason('issues/xml-utf8-bom-long-conflict.xml', 'decode-error');
 expectReason('issues/python-bom-cookie-conflict.py', 'decode-error');
 expectReason('issues/python-bom-long-cookie-conflict.py', 'decode-error');
 expectReason('issues/ignored.ts', 'gitignore');
