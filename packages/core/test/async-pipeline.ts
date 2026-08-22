@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, defaultCleanOptions,
-  discover, discoverAsync, processFiles, processFilesAsync, sortFiles,
+  cleanFile, discover, discoverAsync, processFiles, processFilesAsync, readSourceAsync, sortFiles,
   type FileCandidate, type PipelineProgress, type ProjectConfig,
 } from '../src/index.ts';
 
@@ -80,6 +80,18 @@ assert.equal(maxActive, 2, '有限并发不得超过配置上限');
 assert.equal(failed.errors.length, 1, '单文件失败应形成错误摘要');
 assert.equal(failed.errors[0].file, 'src/module-07.ts');
 assert.equal(failed.files.length, syncFiles.length - 1, '单文件失败不应让整个扫描失败');
+
+const failedDuringCleaning = await processFilesAsync(sortFiles(asyncResult.files, 'entry'), cfg, {
+  concurrency: 2,
+  cleanEntry: async (entry) => {
+    if (entry.relPath === 'src/module-07.ts') throw new Error('模拟清洗读取失败');
+    const { text, encoding } = await readSourceAsync(entry.path);
+    return cleanFile({ ...entry, encoding }, text, cfg.clean);
+  },
+});
+assert.equal(failedDuringCleaning.errors.length, 1, '清洗读取失败应形成错误摘要');
+assert.ok(!failedDuringCleaning.selection.selectedRelPaths.includes('src/module-07.ts'),
+  '导出选择不得包含清洗失败、未实际进入正文的文件');
 
 const controller = new AbortController();
 const started = Date.now();

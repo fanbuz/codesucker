@@ -480,7 +480,7 @@ export function registerPipelineIpc() {
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       output.thirdPartyRiskSummary = await writeThirdPartyRiskSidecar(
         scan.thirdPartyRisk,
-        entries.map((entry) => entry.relPath),
+        result.selection.selectedRelPaths,
         request.payload.thirdPartyRisk,
         request.payload.outDir,
         request.payload.title,
