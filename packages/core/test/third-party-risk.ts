@@ -89,6 +89,7 @@ try {
     <project>
       <groupId>com.acme</groupId><artifactId>self-java</artifactId>
       <properties>
+        <module.dir>vendor/property-common</module.dir>
         <cdata.open><![CDATA[<dependencyManagement>]]></cdata.open>
         <cdata.comment><![CDATA[<!--]]></cdata.comment>
         <cdata.declarations><![CDATA[<!DOCTYPE sample><!ENTITY fake "value">]]></cdata.declarations>
@@ -98,12 +99,14 @@ try {
       </properties>
       <modules>
         <module>vendor/common</module>
+        <module>\${module.dir}</module>
         <module>vendor/profile-common</module>
         <module>empty-profile</module>
       </modules>
       <dependencies>
         <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId></dependency>
         <dependency><groupId>com.acme</groupId><artifactId>common</artifactId></dependency>
+        <dependency><groupId>com.acme</groupId><artifactId>property-common</artifactId></dependency>
         <dependency><groupId>com.acme</groupId><artifactId>profile-common</artifactId></dependency>
         <dependency><groupId>com.acme</groupId><artifactId>empty-profile</artifactId></dependency>
         <dependency><groupId>\${dynamic.group}</groupId><artifactId>dynamic-lib</artifactId></dependency>
@@ -139,6 +142,13 @@ try {
           <properties><module.name><![CDATA[profile-common]]></module.name></properties>
         </profile>
       </profiles>
+    </project>
+  `);
+  await fs.mkdir(path.join(root, 'vendor/property-common'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/property-common/pom.xml'), `
+    <project>
+      <parent><groupId>com.acme</groupId><artifactId>self-java</artifactId></parent>
+      <artifactId>property-common</artifactId>
     </project>
   `);
   await fs.mkdir(path.join(root, 'empty-profile'), { recursive: true });
@@ -693,6 +703,7 @@ other''']
 
     ["dependency-groups"]
     'dev-tools' = ["quoted-group>=1"]
+    "run\\u0074ime" = ["escaped-group>=1"]
 
     [project.scripts]
     acme-cli = "mine.cli:main"
@@ -776,6 +787,7 @@ other''']
     write('external/old-lib/Old.java', 'class Old {}'),
     write('vendor/common/src/Common.java', 'class Common {}'),
     write('vendor/profile-common/src/ProfileCommon.java', 'class ProfileCommon {}'),
+    write('vendor/property-common/src/PropertyCommon.java', 'class PropertyCommon {}'),
     write('empty-profile/vendor/empty-profile/External.java', 'class External {}'),
     write('other-project/vendor/common/Other.java', 'class Other {}'),
     write('third_party/github.com/acme/tool/tool.go', 'package tool'),
@@ -880,6 +892,7 @@ other''']
     write('vendor/optional-owned/owned.py', 'def owned(): pass'),
     write('vendor/quoted-extra/api.py', 'def quoted(): pass'),
     write('vendor/quoted-group/api.py', 'def group(): pass'),
+    write('vendor/escaped-group/api.py', 'def escaped_group(): pass'),
     write('vendor/win-drive-owned/index.js', 'module.exports = true;'),
     write('vendor/win-unc-owned/index.js', 'module.exports = true;'),
     write('vendor/win-relative-owned/index.js', 'module.exports = true;'),
@@ -1112,6 +1125,7 @@ other''']
     'vendor/vcs-owned/api.py', 'vendor/vcs-owned-two/api.py', 'vendor/vcs_owned_three/api.py',
     'vendor/vcs-owned-four/api.py', 'vendor/direct-vcs/api.py',
     'vendor/quoted-extra/api.py', 'vendor/quoted-group/api.py',
+    'vendor/escaped-group/api.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'vendor/marker-second/library.py', 'vendor/literal-after/library.py',
@@ -1154,6 +1168,8 @@ other''']
   assert.ok(!dependencyFiles.has('services/other/vendor/service-only/api.py'),
     '子项目 requirements include 的依赖作用域不能泄漏到兄弟项目');
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/property-common/src/PropertyCommon.java'),
+    'Maven reactor 属性展开后的本地模块不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('vendor/managed-only/Managed.java'),
     'Maven dependencyManagement 中仅管理版本的坐标不能当作实际依赖');
   assert.ok(!dependencyFiles.has('vendor/cdata-fake/Fake.java'),

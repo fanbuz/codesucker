@@ -599,8 +599,11 @@ function mavenModuleManifests(doc: ManifestDocument): string[] {
   const base = path.posix.dirname(doc.relPath);
   const out = new Set<string>();
   const source = stripXmlComments(doc.text);
+  const project = mavenContext(source);
   for (const match of source.matchAll(/<module\b[^>]*>([^<]+)<\/module>/gi)) {
-    const modulePath = normalizeRel(match[1].trim().replace(/\\/g, '/'));
+    const resolved = project.resolve(match[1]);
+    if (!resolved) continue;
+    const modulePath = normalizeRel(resolved.replace(/\\/g, '/'));
     if (!modulePath || modulePath.includes('\0') || path.posix.isAbsolute(modulePath)
       || path.win32.isAbsolute(modulePath)) continue;
     const directory = path.posix.normalize(path.posix.join(base, modulePath));
@@ -608,6 +611,14 @@ function mavenModuleManifests(doc: ManifestDocument): string[] {
     out.add(path.posix.join(directory, 'pom.xml'));
   }
   return [...out].sort();
+}
+
+function hasUnresolvedMavenModules(doc: ManifestDocument): boolean {
+  if (doc.basename !== 'pom.xml') return false;
+  const source = stripXmlComments(doc.text);
+  const project = mavenContext(source);
+  return [...source.matchAll(/<module\b[^>]*>([^<]+)<\/module>/gi)]
+    .some((match) => !project.resolve(match[1]));
 }
 
 function mavenStructuralSource(source: string): string {
@@ -1850,14 +1861,15 @@ function tomlArrayAssignment(body: string, key: string, status?: { complete: boo
   return [];
 }
 
-function tomlArrayAssignmentKeys(body: string): string[] {
-  const structure = maskTomlMultilineStrings(stripTomlComments(body));
-  const keys = new Set<string>();
-  for (const match of structure.matchAll(/^\s*(?:([A-Za-z0-9._-]+)|"([^"\\]+)"|'([^']+)')\s*=\s*\[/gm)) {
-    const key = match[1] ?? match[2] ?? match[3];
-    if (key) keys.add(key);
+function tomlNamedArrayValues(body: string): string[][] {
+  const parsed = parseTomlAssignments(body);
+  const out: string[][] = [];
+  for (const assignment of parsed.assignments) {
+    if (assignment.keyPath.length !== 1 || !assignment.value.trimStart().startsWith('[')) continue;
+    // 赋值解析器已按 TOML 规则解码键；使用固定内部键复用数组值解析，避免再次匹配原始转义文本。
+    out.push(tomlArrayAssignment(`value = ${assignment.value}`, 'value'));
   }
-  return [...keys];
+  return out;
 }
 
 function hasDynamicPep621Dependencies(doc: ManifestDocument): boolean {
@@ -2058,8 +2070,8 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     const isOptionalDependencies = tomlSectionHasPath(section, 'project', 'optional-dependencies');
     const isDependencyGroups = tomlSectionHasPath(section, 'dependency-groups');
     if (isOptionalDependencies || isDependencyGroups) {
-      for (const key of tomlArrayAssignmentKeys(section.body)) {
-        for (const spec of tomlArrayAssignment(section.body, key)) {
+      for (const values of tomlNamedArrayValues(section.body)) {
+        for (const spec of values) {
           const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
           if (item) out.push(item);
         }
@@ -2346,6 +2358,7 @@ export async function collectDependencyInventory(
       }
       if (hasUnsupportedGradleDeclarations(document)
         || hasUnresolvedMavenCoordinates(document)
+        || hasUnresolvedMavenModules(document)
         || hasInvalidGoDirectives(document)
         || hasIncompleteCargoOverrides(document)
         || hasIncompleteCargoLock(document)
