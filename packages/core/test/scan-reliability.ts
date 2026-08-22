@@ -49,6 +49,12 @@ write('enc/utf8-meta-attribute.html', '<!doctype html><html><head><meta name="de
 write('enc/utf8-nested-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="<meta charset=windows-1252>"><meta charset="utf-8"></head><body>é</body></html>');
 write('enc/utf8-magic-comment.js', '// This tool supports charset=windows-1252 and coding=utf-16.\nconst value = "é";');
 write('enc/utf8-late-python-cookie.py', 'value = "é"\n# coding: windows-1252');
+write('enc/declared-css.css', Buffer.concat([
+  Buffer.from('@charset "windows-1252";\n.sample { content: "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"; }', 'ascii'),
+]));
+write('enc/utf8-invalid-css-charset.css', ' \n@charset "windows-1252";\n.sample { content: "é"; }');
+write('enc/utf8-invalid-css-syntax.scss', "@charset  'windows-1252';\n.sample { content: 'é'; }");
+write('enc/utf8-css-utf16-label.css', '@charset "utf-16le";\n.sample { content: "é"; }');
 write('enc/declared-html-metadata.html', Buffer.concat([
   Buffer.from('<!doctype html><html><head><style>body { color: red; }</style><script>const fake = "<meta charset=utf-8>";</script><meta charset="windows-1252"></head><body>', 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
@@ -123,6 +129,10 @@ assert.equal(byPath.get('enc/utf8-meta-attribute.html')?.encoding, 'UTF-8', '普
 assert.equal(byPath.get('enc/utf8-nested-meta-attribute.html')?.encoding, 'UTF-8', '属性值中的伪 meta 标签不能抢在真实 charset 属性前');
 assert.equal(byPath.get('enc/utf8-magic-comment.js')?.encoding, 'UTF-8', '不支持 magic comment 的语言不能把普通编码说明当作声明');
 assert.equal(byPath.get('enc/utf8-late-python-cookie.py')?.encoding, 'UTF-8', '首行已有代码时第二行 Python cookie 不能作为声明');
+assert.equal(byPath.get('enc/declared-css.css')?.encoding, 'WINDOWS-1252', '位于字节零的 CSS @charset 必须生效');
+assert.equal(byPath.get('enc/utf8-invalid-css-charset.css')?.encoding, 'UTF-8', '前置空白后的 CSS @charset 无效，不能改变 UTF-8 解码');
+assert.equal(byPath.get('enc/utf8-invalid-css-syntax.scss')?.encoding, 'UTF-8', '非精确 CSS @charset 字节序列不能改变 UTF-8 解码');
+assert.equal(byPath.get('enc/utf8-css-utf16-label.css')?.encoding, 'UTF-8', 'CSS 的 UTF-16 声明必须按规范回退为 UTF-8');
 assert.equal(byPath.get('enc/declared-html-metadata.html')?.encoding, 'WINDOWS-1252', 'style/script 等 head metadata 之后的真实 charset 必须生效');
 assert.equal(byPath.get('enc/declared-html-comment-attribute.html')?.encoding, 'WINDOWS-1252', 'HTML 属性值内的 comment opener 不能隐藏后续真实 charset');
 assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');

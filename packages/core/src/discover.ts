@@ -270,7 +270,8 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
     return /^\s*<\?xml\b[^>]*\bencoding\s*=\s*["']([A-Za-z0-9._-]+)["']/i.exec(header)?.[1] ?? null;
   }
   if (ext === 'css' || ext === 'scss') {
-    return /^\s*@charset\s+["']([A-Za-z0-9._-]+)["']/i.exec(header)?.[1] ?? null;
+    const encoding = /^@charset "([A-Za-z0-9._-]+)";/.exec(header)?.[1];
+    return /^utf-16(?:be|le)?$/i.test(encoding ?? '') ? 'UTF-8' : encoding ?? null;
   }
   if (ext === 'html' || ext === 'htm') {
     const htmlHeader = blankHtmlEncodingNoise(header);
