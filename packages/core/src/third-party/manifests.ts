@@ -281,15 +281,136 @@ function stripXmlComments(text: string): string {
   return text.replace(/<!--[\s\S]*?-->/g, (comment) => comment.replace(/[^\r\n]/g, ' '));
 }
 
-function mavenProjectCoordinates(text: string): { artifact?: string; group?: string } {
+interface MavenContext {
+  artifact?: string;
+  group?: string;
+  unresolved: boolean;
+  resolve: (value: string | undefined) => string | undefined;
+}
+
+function xmlProjectChildContents(text: string, childName: string): string[] {
+  const project = /<project\b[^>]*>([\s\S]*)<\/project>/i.exec(text)?.[1];
+  if (project === undefined) return [];
+  const structural = project.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (value) => ' '.repeat(value.length));
+  const out: string[] = [];
+  const stack: string[] = [];
+  let captureStart: number | undefined;
+  for (const token of structural.matchAll(/<\s*(\/?)\s*([A-Za-z_][A-Za-z0-9_.:-]*)\b[^>]*>/g)) {
+    const closing = token[1] === '/';
+    const name = token[2].toLocaleLowerCase();
+    const selfClosing = !closing && /\/\s*>$/.test(token[0]);
+    if (closing) {
+      const opened = stack.pop();
+      if (opened !== name) return [];
+      if (stack.length === 0 && name === childName.toLocaleLowerCase() && captureStart !== undefined) {
+        out.push(project.slice(captureStart, token.index));
+        captureStart = undefined;
+      }
+      continue;
+    }
+    if (selfClosing) continue;
+    if (stack.length === 0 && name === childName.toLocaleLowerCase()) {
+      captureStart = token.index + token[0].length;
+    }
+    stack.push(name);
+  }
+  return stack.length === 0 ? out : [];
+}
+
+function xmlDirectChildNames(text: string): string[] {
+  const structural = text.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (value) => ' '.repeat(value.length));
+  const out: string[] = [];
+  const stack: string[] = [];
+  for (const token of structural.matchAll(/<\s*(\/?)\s*([A-Za-z_][A-Za-z0-9_.:-]*)\b[^>]*>/g)) {
+    const closing = token[1] === '/';
+    const name = token[2];
+    const normalizedName = name.toLocaleLowerCase();
+    const selfClosing = !closing && /\/\s*>$/.test(token[0]);
+    if (closing) {
+      if (stack.pop() !== normalizedName) return [];
+      continue;
+    }
+    if (stack.length === 0) out.push(name);
+    if (!selfClosing) stack.push(normalizedName);
+  }
+  return stack.length === 0 ? out : [];
+}
+
+function mavenContext(text: string): MavenContext {
   const parent = /<parent\b[^>]*>([\s\S]*?)<\/parent>/i.exec(text)?.[1] ?? '';
   const project = text
     .replace(/<parent\b[^>]*>[\s\S]*?<\/parent>/gi, '')
     .replace(/<dependencies\b[^>]*>[\s\S]*?<\/dependencies>/gi, '')
     .replace(/<dependencyManagement\b[^>]*>[\s\S]*?<\/dependencyManagement>/gi, '');
+  const properties = new Map<string, string>();
+  for (const block of xmlProjectChildContents(text, 'properties')) {
+    for (const property of block.matchAll(/<([A-Za-z_][A-Za-z0-9_.-]*)\b[^>]*>([^<]*)<\/\1>/g)) {
+      properties.set(property[1], property[2].trim());
+    }
+  }
+  const profileProperties = new Set<string>();
+  for (const profiles of xmlProjectChildContents(text, 'profiles')) {
+    for (const block of profiles.matchAll(/<properties\b[^>]*>([\s\S]*?)<\/properties>/gi)) {
+      xmlDirectChildNames(block[1]).forEach((name) => profileProperties.add(name));
+    }
+  }
+  const resolve = (input: string | undefined): string | undefined => {
+    if (input === undefined) return undefined;
+    let current = input.trim();
+    for (let depth = 0; depth < 20; depth++) {
+      let missing = false;
+      const next = current.replace(/\$\{([^}]+)\}/g, (_match, key: string) => {
+        const normalizedKey = key.trim();
+        const value = profileProperties.has(normalizedKey) ? undefined : properties.get(normalizedKey);
+        if (value === undefined) missing = true;
+        return value ?? '';
+      });
+      if (missing) return undefined;
+      if (!/\$\{[^}]+\}/.test(next)) return next.trim();
+      if (next === current) return undefined;
+      current = next;
+    }
+    return undefined;
+  };
+  const parentCoordinates = {
+    artifactId: resolve(xmlValue(parent, 'artifactId')),
+    groupId: resolve(xmlValue(parent, 'groupId')),
+    version: resolve(xmlValue(parent, 'version')),
+  };
+  for (const [key, value] of Object.entries(parentCoordinates)) {
+    if (!value) continue;
+    properties.set(`project.parent.${key}`, value);
+    properties.set(`pom.parent.${key}`, value);
+    properties.set(`parent.${key}`, value);
+  }
+  const rawGroup = xmlValue(project, 'groupId') ?? parentCoordinates.groupId;
+  const literalGroup = rawGroup && !/\$\{[^}]+\}/.test(rawGroup) ? rawGroup : undefined;
+  if (literalGroup) {
+    properties.set('project.groupId', literalGroup);
+    properties.set('pom.groupId', literalGroup);
+  }
+  const group = resolve(rawGroup);
+  if (group) {
+    properties.set('project.groupId', group);
+    properties.set('pom.groupId', group);
+  }
+  const rawArtifact = xmlValue(project, 'artifactId');
+  const artifact = resolve(rawArtifact);
+  if (artifact) {
+    properties.set('project.artifactId', artifact);
+    properties.set('pom.artifactId', artifact);
+  }
   return {
-    artifact: xmlValue(project, 'artifactId'),
-    group: xmlValue(project, 'groupId') ?? xmlValue(parent, 'groupId'),
+    artifact,
+    group,
+    unresolved: Boolean(
+      xmlValue(parent, 'artifactId') && !parentCoordinates.artifactId
+      || xmlValue(parent, 'groupId') && !parentCoordinates.groupId
+      || xmlValue(parent, 'version') && !parentCoordinates.version
+      || rawArtifact && !artifact
+      || rawGroup && !group,
+    ),
+    resolve,
   };
 }
 
@@ -312,7 +433,7 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
   const source = stripXmlComments(doc.text);
   if (/<!DOCTYPE|<!ENTITY/i.test(source)) throw new Error('包含不允许的 XML 实体或 DOCTYPE');
   const out: DependencyIdentity[] = [];
-  const project = mavenProjectCoordinates(source);
+  const project = mavenContext(source);
   if (project.artifact) {
     const own = identity('java', project.artifact, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
@@ -322,11 +443,10 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
     }
   }
   for (const match of source.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
-    const group = xmlValue(match[1], 'groupId');
-    const artifact = xmlValue(match[1], 'artifactId');
-    if (!artifact || /\$\{[^}]+\}/.test(artifact)) continue;
-    const resolvedGroup = group && !/\$\{[^}]+\}/.test(group) ? group : undefined;
-    const item = identity('java', resolvedGroup ? `${resolvedGroup}:${artifact}` : artifact, doc.relPath, 'manifest');
+    const group = project.resolve(xmlValue(match[1], 'groupId'));
+    const artifact = project.resolve(xmlValue(match[1], 'artifactId'));
+    if (!artifact) continue;
+    const item = identity('java', group ? `${group}:${artifact}` : artifact, doc.relPath, 'manifest');
     if (item) out.push(item);
   }
   return out;
@@ -335,10 +455,12 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
 function hasUnresolvedMavenCoordinates(doc: ManifestDocument): boolean {
   if (doc.basename !== 'pom.xml') return false;
   const source = stripXmlComments(doc.text);
+  const project = mavenContext(source);
+  if (project.unresolved) return true;
   for (const match of source.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
     const group = xmlValue(match[1], 'groupId');
     const artifact = xmlValue(match[1], 'artifactId');
-    if (/\$\{[^}]+\}/.test(group ?? '') || /\$\{[^}]+\}/.test(artifact ?? '')) return true;
+    if (artifact && !project.resolve(artifact) || group && !project.resolve(group)) return true;
   }
   return false;
 }
@@ -460,6 +582,113 @@ function hasUnsupportedGradleDeclarations(doc: ManifestDocument): boolean {
   return false;
 }
 
+function decodeGoEscape(source: string, cursor: number): { next: number; value: string } | null {
+  const escape = source[cursor];
+  const simple: Record<string, string> = {
+    a: '\x07', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\x0b',
+    '\\': '\\', "'": "'", '"': '"',
+  };
+  if (escape in simple) return { value: simple[escape], next: cursor + 1 };
+  if (/[0-7]/.test(escape ?? '')) {
+    const octal = source.slice(cursor, cursor + 3);
+    if (!/^[0-7]{3}$/.test(octal)) return null;
+    const codePoint = Number.parseInt(octal, 8);
+    return codePoint <= 0xff ? { value: String.fromCharCode(codePoint), next: cursor + 3 } : null;
+  }
+  const digits = escape === 'x' ? 2 : escape === 'u' ? 4 : escape === 'U' ? 8 : 0;
+  if (digits === 0) return null;
+  const hex = source.slice(cursor + 1, cursor + 1 + digits);
+  if (!new RegExp(`^[A-Fa-f0-9]{${digits}}$`).test(hex)) return null;
+  const codePoint = Number.parseInt(hex, 16);
+  if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return null;
+  return { value: String.fromCodePoint(codePoint), next: cursor + 1 + digits };
+}
+
+function goDirectiveTokens(rawLine: string): string[] | null {
+  const tokens: string[] = [];
+  let cursor = 0;
+  while (cursor < rawLine.length) {
+    while (/\s/.test(rawLine[cursor] ?? '')) cursor++;
+    if (cursor >= rawLine.length || rawLine.startsWith('//', cursor)) break;
+    if (rawLine.startsWith('=>', cursor)) {
+      tokens.push('=>');
+      cursor += 2;
+      continue;
+    }
+    if (rawLine[cursor] === '(' || rawLine[cursor] === ')') {
+      tokens.push(rawLine[cursor++]);
+      continue;
+    }
+    const quote = rawLine[cursor];
+    if (quote === '"' || quote === '`') {
+      cursor++;
+      let value = '';
+      let closed = false;
+      while (cursor < rawLine.length) {
+        const char = rawLine[cursor++];
+        if (char === quote) {
+          closed = true;
+          break;
+        }
+        if (quote === '"' && char === '\\') {
+          const decoded = decodeGoEscape(rawLine, cursor);
+          if (!decoded) return null;
+          value += decoded.value;
+          cursor = decoded.next;
+        } else {
+          value += char;
+        }
+      }
+      if (!closed) return null;
+      tokens.push(value);
+      continue;
+    }
+    const start = cursor;
+    while (cursor < rawLine.length
+      && !/\s|[()]/.test(rawLine[cursor])
+      && !rawLine.startsWith('=>', cursor)
+      && !rawLine.startsWith('//', cursor)) cursor++;
+    if (cursor === start) return null;
+    tokens.push(rawLine.slice(start, cursor));
+  }
+  return tokens;
+}
+
+function goWorkspaceMemberDirectories(doc: ManifestDocument): string[] {
+  if (doc.basename !== 'go.work') return [];
+  const members = new Set<string>();
+  let useBlock = false;
+  for (const rawLine of doc.text.split(/\r?\n/)) {
+    const tokens = goDirectiveTokens(rawLine) ?? [];
+    if (tokens[0] === 'use' && tokens[1] === '(') {
+      useBlock = true;
+      continue;
+    }
+    if (useBlock && tokens[0] === ')') {
+      useBlock = false;
+      continue;
+    }
+    const rawMember = useBlock ? tokens[0] : tokens[0] === 'use' ? tokens[1] : undefined;
+    if (!rawMember || rawMember.includes('\0')
+      || path.posix.isAbsolute(rawMember) || path.win32.isAbsolute(rawMember)) continue;
+    const member = path.posix.normalize(path.posix.join(
+      path.posix.dirname(doc.relPath), rawMember.replace(/\\/g, '/'),
+    ));
+    if (member === '..' || member.startsWith('../') || path.posix.isAbsolute(member)) continue;
+    members.add(member === '.' ? '' : member);
+  }
+  return [...members].sort();
+}
+
+function hasInvalidGoDirectives(doc: ManifestDocument): boolean {
+  return (doc.basename === 'go.mod' || doc.basename === 'go.work')
+    && doc.text.split(/\r?\n/).some((rawLine) => goDirectiveTokens(rawLine) === null);
+}
+
+function goWorkspaceMemberManifests(doc: ManifestDocument): string[] {
+  return goWorkspaceMemberDirectories(doc).map((directory) => path.posix.join(directory, 'go.mod'));
+}
+
 function parseGo(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   const module = /^\s*module\s+([^\s]+)\s*$/m.exec(doc.text)?.[1];
@@ -468,44 +697,23 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
     if (own) out.push(own);
   }
   const replacedLocal = new Set<string>();
-  const workspaceScopes: string[] = [];
+  const workspaceScopes = goWorkspaceMemberDirectories(doc);
   let replaceBlock = false;
-  let useBlock = false;
   for (const rawLine of doc.text.split(/\r?\n/)) {
-    const line = rawLine.replace(/\s+\/\/.*$/, '').trim();
-    if (doc.basename === 'go.work') {
-      if (/^use\s*\($/.test(line)) {
-        useBlock = true;
-        continue;
-      }
-      if (useBlock && /^\)$/.test(line)) {
-        useBlock = false;
-        continue;
-      }
-      const useExpression = useBlock ? line : line.replace(/^use\s+/, '');
-      if (useBlock || useExpression !== line) {
-        const rawMember = /^(?:"([^"]+)"|`([^`]+)`|(\S+))/.exec(useExpression)?.slice(1).find(Boolean);
-        if (rawMember && !path.posix.isAbsolute(rawMember) && !path.win32.isAbsolute(rawMember)) {
-          const member = path.posix.normalize(path.posix.join(path.posix.dirname(doc.relPath), rawMember.replace(/\\/g, '/')));
-          if (member !== '..' && !member.startsWith('../') && !path.posix.isAbsolute(member)) {
-            workspaceScopes.push(member === '.' ? '' : member);
-          }
-        }
-        continue;
-      }
-    }
-    if (/^replace\s*\($/.test(line)) {
+    const tokens = goDirectiveTokens(rawLine) ?? [];
+    if (tokens[0] === 'replace' && tokens[1] === '(') {
       replaceBlock = true;
       continue;
     }
-    if (replaceBlock && /^\)$/.test(line)) {
+    if (replaceBlock && tokens[0] === ')') {
       replaceBlock = false;
       continue;
     }
-    const expression = replaceBlock ? line : line.replace(/^replace\s+/, '');
-    if (!replaceBlock && expression === line) continue;
-    const match = /^([^\s]+)(?:\s+v[^\s]+)?\s*=>\s*([^\s]+)(?:\s+v[^\s]+)?$/.exec(expression);
-    if (match && localSpec(match[2])) replacedLocal.add(match[1]);
+    const expression = replaceBlock ? tokens : tokens[0] === 'replace' ? tokens.slice(1) : [];
+    const arrow = expression.indexOf('=>');
+    const oldModule = expression[0];
+    const target = arrow >= 1 ? expression[arrow + 1] : undefined;
+    if (oldModule && target && localSpec(target)) replacedLocal.add(oldModule);
   }
   if (doc.basename === 'go.work') {
     for (const name of replacedLocal) {
@@ -525,20 +733,19 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
   );
   let requireBlock = false;
   for (const rawLine of doc.text.split(/\r?\n/)) {
-    const line = rawLine.replace(/\s+\/\/.*$/, '').trim();
-    if (/^require\s*\($/.test(line)) {
+    const tokens = goDirectiveTokens(rawLine) ?? [];
+    if (tokens[0] === 'require' && tokens[1] === '(') {
       requireBlock = true;
       continue;
     }
-    if (requireBlock && /^\)$/.test(line)) {
+    if (requireBlock && tokens[0] === ')') {
       requireBlock = false;
       continue;
     }
-    const expression = requireBlock ? line : line.replace(/^require\s+/, '');
-    if (!requireBlock && expression === line) continue;
-    const match = /^([A-Za-z0-9][A-Za-z0-9._~-]*(?:\/[A-Za-z0-9._~-]+)*)\s+v[^\s]+$/.exec(expression);
-    if (!match) continue;
-    const item = identity('go', match[1], doc.relPath, 'manifest', replacedLocal.has(match[1]));
+    const expression = requireBlock ? tokens : tokens[0] === 'require' ? tokens.slice(1) : [];
+    const moduleName = expression[0];
+    if (!moduleName || !/^v[^\s]+$/.test(expression[1] ?? '')) continue;
+    const item = identity('go', moduleName, doc.relPath, 'manifest', replacedLocal.has(moduleName));
     if (item) out.push(withWorkspaceReference(item));
   }
   for (const match of doc.text.matchAll(/^#\s+([^\s]+)\s+v[^\s]+/gm)) {
@@ -1131,7 +1338,9 @@ export async function collectDependencyInventory(
         selected.push(included);
       }
       if (document.basename === 'pom.xml') {
-        for (const moduleManifest of mavenModuleManifests(document)) {
+        const moduleManifests = mavenModuleManifests(document);
+        moduleManifests.forEach((moduleManifest) => candidatePaths.add(moduleManifest));
+        for (const moduleManifest of moduleManifests) {
           if (selectedSet.has(moduleManifest)) continue;
           if (selected.length >= maxManifestFiles) {
             if (!limitReported) {
@@ -1148,8 +1357,29 @@ export async function collectDependencyInventory(
           selected.push(moduleManifest);
         }
       }
+      if (document.basename === 'go.work') {
+        const memberManifests = goWorkspaceMemberManifests(document);
+        memberManifests.forEach((memberManifest) => candidatePaths.add(memberManifest));
+        for (const memberManifest of memberManifests) {
+          if (selectedSet.has(memberManifest)) continue;
+          if (selected.length >= maxManifestFiles) {
+            if (!limitReported) {
+              diagnostics.push(diagnostic(
+                'analysis-limit-reached', undefined,
+                `依赖清单达到 ${maxManifestFiles} 个分析上限，部分 go.work 成员未分析。`,
+                '请缩小项目范围或减少 workspace 成员后重新扫描。',
+              ));
+              limitReported = true;
+            }
+            break;
+          }
+          selectedSet.add(memberManifest);
+          selected.push(memberManifest);
+        }
+      }
       if (hasUnsupportedGradleDeclarations(document)
         || hasUnresolvedMavenCoordinates(document)
+        || hasInvalidGoDirectives(document)
         || hasDynamicPep621Dependencies(document)) {
         diagnostics.push(diagnostic(
           'dynamic-manifest-partial', document.relPath,

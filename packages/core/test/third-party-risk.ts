@@ -52,10 +52,16 @@ try {
   await fs.writeFile(path.join(root, 'pom.xml'), `
     <project>
       <groupId>com.acme</groupId><artifactId>self-java</artifactId>
-      <modules><module>vendor/common</module></modules>
+      <modules>
+        <module>vendor/common</module>
+        <module>vendor/profile-common</module>
+        <module>empty-profile</module>
+      </modules>
       <dependencies>
         <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId></dependency>
         <dependency><groupId>com.acme</groupId><artifactId>common</artifactId></dependency>
+        <dependency><groupId>com.acme</groupId><artifactId>profile-common</artifactId></dependency>
+        <dependency><groupId>com.acme</groupId><artifactId>empty-profile</artifactId></dependency>
         <dependency><groupId>\${dynamic.group}</groupId><artifactId>dynamic-lib</artifactId></dependency>
       </dependencies>
     </project>
@@ -64,7 +70,47 @@ try {
   await fs.writeFile(path.join(root, 'vendor/common/pom.xml'), `
     <project>
       <parent><groupId>com.acme</groupId><artifactId>self-java</artifactId></parent>
-      <artifactId>common</artifactId>
+      <properties><module.name>common</module.name></properties>
+      <groupId>\${project.parent.groupId}</groupId>
+      <artifactId>\${module.name}</artifactId>
+    </project>
+  `);
+  await fs.mkdir(path.join(root, 'vendor/profile-common'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/profile-common/pom.xml'), `
+    <project>
+      <parent><groupId>com.acme</groupId><artifactId>self-java</artifactId></parent>
+      <properties><module.name>owned-module</module.name></properties>
+      <artifactId>\${module.name}</artifactId>
+      <profiles>
+        <profile>
+          <id>inactive-override</id>
+          <activation><activeByDefault>false</activeByDefault></activation>
+          <properties><module.name><![CDATA[profile-common]]></module.name></properties>
+        </profile>
+      </profiles>
+    </project>
+  `);
+  await fs.mkdir(path.join(root, 'empty-profile'), { recursive: true });
+  await fs.writeFile(path.join(root, 'empty-profile/pom.xml'), `
+    <project>
+      <parent><groupId>com.acme</groupId><artifactId>self-java</artifactId></parent>
+      <properties><module.name>empty-profile</module.name></properties>
+      <artifactId>\${module.name}</artifactId>
+      <profiles>
+        <profile>
+          <id>empty-override</id>
+          <properties><module.name/></properties>
+        </profile>
+      </profiles>
+    </project>
+  `);
+  await fs.mkdir(path.join(root, 'other-project'), { recursive: true });
+  await fs.writeFile(path.join(root, 'other-project/pom.xml'), `
+    <project>
+      <groupId>org.example</groupId><artifactId>other-project</artifactId>
+      <dependencies>
+        <dependency><groupId>org.other</groupId><artifactId>common</artifactId></dependency>
+      </dependencies>
     </project>
   `);
   await fs.mkdir(path.join(root, 'commented-maven'), { recursive: true });
@@ -98,19 +144,37 @@ try {
     require example.local/win-unc-owned v0.0.0
     require example.local/dot-owned v0.0.0
     require example.local/parent-owned v0.0.0
+    require example.local/quoted-owned v0.0.0
+    require example.local/go-owned v0.0.0
+    require example.local/go-space-owned v0.0.0
+    require example.local/go-unicode-owned v0.0.0
+    require example.local/go-hex-owned v0.0.0
+    require example.local/go-windows-owned v0.0.0
+    require example.local/go-quote-owned v0.0.0
+    require example.local/go-invalid-external v0.0.0
     replace example.local/internal => ./internal
     replace example.local/win-drive-owned => C:\\repo\\owned
     replace example.local/win-relative-owned => ..\\owned
     replace example.local/win-unc-owned => \\\\server\\share\\owned
     replace example.local/dot-owned => .
     replace example.local/parent-owned => ..
+    replace example.local/quoted-owned => "../owned dir"
     replace (
       example.local/block => ./block
     )
   `);
   await fs.writeFile(path.join(root, 'go.work'), `
     go 1.22
-    use ./go-workspace/app
+    use (
+      ./go-workspace/app
+      ./vendor/go-owned
+      "./vendor/go owned"
+      "./vendor/go\\u002descaped"
+      "./vendor/go\\x20hex"
+      ".\\\\vendor\\\\go-win"
+      "./vendor/go\\\"quoted"
+      "./vendor/go-invalid\\q-external"
+    )
     replace example.local/work-owned => ./go-workspace/owned
     replace example.local/work-dot-owned => .
   `);
@@ -125,6 +189,39 @@ try {
   await fs.writeFile(path.join(root, 'go-outsider/go.mod'), `
     module example.local/outsider
     require example.local/work-owned v1.0.0
+  `);
+  await fs.mkdir(path.join(root, 'invalid-go'), { recursive: true });
+  await fs.writeFile(path.join(root, 'invalid-go/go.mod'), `
+    module example.local/invalid-fixture
+    require "example.local/invalid\\q" v1.0.0
+  `);
+  await fs.mkdir(path.join(root, 'vendor/go-owned'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/go-owned/go.mod'), `
+    module example.local/go-owned
+  `);
+  await fs.mkdir(path.join(root, 'vendor/go owned'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/go owned/go.mod'), `
+    module example.local/go-space-owned
+  `);
+  await fs.mkdir(path.join(root, 'vendor/go-escaped'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/go-escaped/go.mod'), `
+    module example.local/go-unicode-owned
+  `);
+  await fs.mkdir(path.join(root, 'vendor/go hex'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/go hex/go.mod'), `
+    module example.local/go-hex-owned
+  `);
+  await fs.mkdir(path.join(root, 'vendor/go-win'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/go-win/go.mod'), `
+    module example.local/go-windows-owned
+  `);
+  await fs.mkdir(path.join(root, 'vendor/go"quoted'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/go"quoted/go.mod'), `
+    module example.local/go-quote-owned
+  `);
+  await fs.mkdir(path.join(root, 'vendor/go-invalid-external'), { recursive: true });
+  await fs.writeFile(path.join(root, 'vendor/go-invalid-external/go.mod'), `
+    module example.local/go-invalid-external
   `);
   await fs.writeFile(path.join(root, 'Cargo.toml'), `
     [package]
@@ -353,6 +450,9 @@ try {
     write('external/dynamic-lib/Dynamic.java', 'class Dynamic {}'),
     write('external/old-lib/Old.java', 'class Old {}'),
     write('vendor/common/src/Common.java', 'class Common {}'),
+    write('vendor/profile-common/src/ProfileCommon.java', 'class ProfileCommon {}'),
+    write('empty-profile/vendor/empty-profile/External.java', 'class External {}'),
+    write('other-project/vendor/common/Other.java', 'class Other {}'),
     write('third_party/github.com/acme/tool/tool.go', 'package tool'),
     write('vendor/example/example.go', 'package example'),
     write('vendor/blockdep/blockdep.go', 'package blockdep'),
@@ -364,6 +464,14 @@ try {
     write('third_party/example.local/win-unc-owned/owned.go', 'package owned'),
     write('third_party/example.local/dot-owned/owned.go', 'package owned'),
     write('third_party/example.local/parent-owned/owned.go', 'package owned'),
+    write('vendor/quoted-owned/owned.go', 'package owned'),
+    write('vendor/go-owned/owned.go', 'package owned'),
+    write('vendor/go owned/owned.go', 'package owned'),
+    write('vendor/go-escaped/owned.go', 'package owned'),
+    write('vendor/go hex/owned.go', 'package owned'),
+    write('vendor/go-win/owned.go', 'package owned'),
+    write('vendor/go"quoted/owned.go', 'package owned'),
+    write('vendor/go-invalid-external/external.go', 'package external'),
     write('go-workspace/app/vendor/work-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-dot-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-external/external.go', 'package external'),
@@ -448,7 +556,17 @@ try {
   const evidenceChanged = await analyzeThirdPartyRisks(root, files.map((file) => (
     file.relPath === changedLicenseFile.relPath ? changedLicenseFile : file
   )));
+  const fullSnapshot = await analyzeThirdPartyRisksWithSnapshot(root, files);
   const limitedSnapshot = await analyzeThirdPartyRisksWithSnapshot(root, files, { maxManifestFiles: 1 });
+  for (const memberManifest of [
+    'vendor/go-owned/go.mod', 'vendor/go owned/go.mod', 'vendor/go-escaped/go.mod',
+    'vendor/go hex/go.mod', 'vendor/go-win/go.mod', 'vendor/go"quoted/go.mod',
+  ]) {
+    assert.ok(fullSnapshot.manifestCandidateRelPaths.includes(memberManifest),
+      `go.work 显式成员 ${memberManifest} 必须进入完整候选清单快照`);
+  }
+  assert.ok(!fullSnapshot.manifestCandidateRelPaths.includes('vendor/go-invalid-external/go.mod'),
+    '含非法 Go 字符串转义的 use 项不能形成候选成员路径');
   assert.equal(limitedSnapshot.manifestCandidateRelPaths.length > 1, true);
   assert.equal(limitedSnapshot.manifestIdentities.length, limitedSnapshot.manifestCandidateRelPaths.length,
     '超过分析上限的候选清单也必须进入完整字节身份快照');
@@ -505,6 +623,16 @@ try {
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'pom.xml'),
     'Maven 坐标含未解析属性时必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'vendor/profile-common/pom.xml'),
+  'Maven profile 以 CDATA 重写坐标所用属性时必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'empty-profile/pom.xml'),
+  'Maven profile 以空元素重写坐标所用属性时必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'go.work'), 'go.work 非法字符串转义必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'invalid-go/go.mod'), 'go.mod 非法字符串转义必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'dynamic-python/pyproject.toml'), 'PEP 621 动态依赖字段必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'quoted-dynamic-python/pyproject.toml'), 'PEP 621 引号键 dynamic 必须报告部分分析');
@@ -540,6 +668,9 @@ try {
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
     'external/slf4j-api/Logger.java', 'external/debug-lib/Debug.java', 'external/legacy-core/Legacy.java',
+    'other-project/vendor/common/Other.java', 'vendor/profile-common/src/ProfileCommon.java',
+    'empty-profile/vendor/empty-profile/External.java',
+    'vendor/go-invalid-external/external.go',
     'rust-external/deps/workspace-member-local/lib.rs',
   ]) {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
@@ -565,6 +696,22 @@ try {
     'Go replace 到当前目录不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/parent-owned/owned.go'),
     'Go replace 到父目录不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/quoted-owned/owned.go'),
+    'Go replace 的引号本地路径不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/go-owned/owned.go'),
+    'go.work 必须跟随 vendor 下显式声明的本地成员');
+  assert.ok(!dependencyFiles.has('vendor/go owned/owned.go'),
+    'go.work 必须跟随带空格引号路径的本地成员');
+  assert.ok(!dependencyFiles.has('vendor/go-escaped/owned.go'),
+    'go.work 必须解码双引号路径中的 Unicode 转义');
+  assert.ok(!dependencyFiles.has('vendor/go hex/owned.go'),
+    'go.work 必须解码双引号路径中的十六进制转义');
+  assert.ok(!dependencyFiles.has('vendor/go-win/owned.go'),
+    'go.work 必须解码双引号路径中的 Windows 反斜杠');
+  assert.ok(!dependencyFiles.has('vendor/go"quoted/owned.go'),
+    'go.work 必须解码双引号路径中的引号转义');
+  assert.ok(dependencyFiles.has('vendor/go-invalid-external/external.go'),
+    'go.work 非法字符串转义不能把外部依赖误判为本地成员');
   assert.ok(!dependencyFiles.has('vendor/retract/retract.go'), 'Go retract 指令不能被误当作单段依赖');
   assert.ok(!dependencyFiles.has('vendor/other/other.go'), 'Go exclude 块条目不能被误当作 require 依赖');
   assert.ok(!dependencyFiles.has('go-workspace/app/vendor/work-owned/owned.go'), 'go.work 本地 replace 必须传播到 use 成员的 go.mod');
