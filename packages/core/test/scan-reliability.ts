@@ -116,6 +116,29 @@ write('enc/utf16le.ts', withBom([0xff, 0xfe], iconv.encode('const 名称 = "UTF-
 write('enc/utf16be.ts', withBom([0xfe, 0xff], iconv.encode('const 名称 = "UTF-16BE";\rconst value = 5;', 'utf16-be')));
 write('enc/utf16le-no-bom.ts', iconv.encode('const value = "UTF-16LE no BOM";\nconst next = 6;', 'utf16-le'));
 write('enc/utf16be-no-bom.ts', iconv.encode('const value = "UTF-16BE no BOM";\nconst next = 7;', 'utf16-be'));
+const utf16CjkHeavy = `// ${'中文源码'.repeat(30)}`;
+write('enc/utf16le-cjk-heavy-no-bom.java', iconv.encode(utf16CjkHeavy, 'utf16-le'));
+write('enc/utf16be-cjk-heavy-no-bom.java', iconv.encode(utf16CjkHeavy, 'utf16-be'));
+const utf16CjkOnly = '源程序软件著作权'.repeat(20);
+const utf16leCjkOnly = iconv.encode(utf16CjkOnly, 'utf16-le');
+const utf16beCjkOnly = iconv.encode(utf16CjkOnly, 'utf16-be');
+assert.equal(utf16leCjkOnly.includes(0), false, '纯中文 UTF-16LE 回归样本不能依赖 NUL 启发式');
+assert.equal(utf16beCjkOnly.includes(0), false, '纯中文 UTF-16BE 回归样本不能依赖 NUL 启发式');
+write('enc/utf16le-cjk-only-no-bom.java', utf16leCjkOnly);
+write('enc/utf16be-cjk-only-no-bom.java', utf16beCjkOnly);
+const utf16CjkWithLowByteZero = '这是一个测试程序用于代码抽取'.repeat(10);
+write('enc/utf16le-cjk-low-byte-zero.java', iconv.encode(utf16CjkWithLowByteZero, 'utf16-le'));
+write('enc/utf16be-cjk-low-byte-zero.java', iconv.encode(utf16CjkWithLowByteZero, 'utf16-be'));
+const utf16BytesValidAsUtf8 = '你好世界'.repeat(10);
+const utf16leValidUtf8Bytes = iconv.encode(utf16BytesValidAsUtf8, 'utf16-le');
+const utf16beValidUtf8Bytes = iconv.encode(utf16BytesValidAsUtf8, 'utf16-be');
+assert.doesNotThrow(() => new TextDecoder('utf-8', { fatal: true }).decode(utf16leValidUtf8Bytes),
+  'UTF-16LE 回归样本字节必须能通过 UTF-8 语法校验');
+assert.doesNotThrow(() => new TextDecoder('utf-8', { fatal: true }).decode(utf16beValidUtf8Bytes),
+  'UTF-16BE 回归样本字节必须能通过 UTF-8 语法校验');
+write('enc/utf16le-valid-utf8-bytes.java', utf16leValidUtf8Bytes);
+write('enc/utf16be-valid-utf8-bytes.java', utf16beValidUtf8Bytes);
+write('enc/utf8-even-cjk.java', '中文源码');
 write('enc/utf16le-no-bom.xml', iconv.encode(
   '<?xml version="1.0" encoding="UTF-16"?><root>有效</root>', 'utf16-le',
 ));
@@ -139,6 +162,9 @@ write('issues/malformed-shift-jis.py', Buffer.concat([
 ]));
 write('issues/ambiguous-gbk.java', iconv.encode('class A { String s = "中文"; }', 'gbk'));
 write('issues/ambiguous-gb18030.java', iconv.encode('class A { String s = "𠮷"; }', 'gb18030'));
+write('issues/ambiguous-gbk-cjk.java', iconv.encode('中文源代码软件著作权', 'gbk'));
+write('issues/ambiguous-big5-cjk.java', iconv.encode('中文原始碼軟體著作權', 'big5'));
+write('issues/ambiguous-shift-jis-cjk.java', iconv.encode('日本語ソースコード著作権', 'shift_jis'));
 write('issues/ambiguous-windows-874.java', Buffer.from('c0d2c9d2e4b7c2c0d2c9d2e4b7c2', 'hex'));
 write('issues/malformed-utf7.py', Buffer.from('# coding: utf-7\nvalue = 1\n+A', 'ascii'));
 write('issues/xml-utf16-ascii.xml', Buffer.from(
@@ -251,6 +277,24 @@ assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be.ts')?.encoding, 'UTF-16BE');
 assert.equal(byPath.get('enc/utf16le-no-bom.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be-no-bom.ts')?.encoding, 'UTF-16BE');
+assert.equal(byPath.get('enc/utf16le-cjk-heavy-no-bom.java')?.encoding, 'UTF-16LE',
+  '无 BOM、低 NUL 的 UTF-16LE 中文源码不能静默漏掉');
+assert.equal(byPath.get('enc/utf16be-cjk-heavy-no-bom.java')?.encoding, 'UTF-16BE',
+  '无 BOM、低 NUL 的 UTF-16BE 中文源码不能静默漏掉');
+assert.equal(byPath.get('enc/utf16le-cjk-only-no-bom.java')?.encoding, 'UTF-16LE',
+  '无 BOM、零 NUL 的 UTF-16LE 中文源码不能静默漏掉');
+assert.equal(byPath.get('enc/utf16be-cjk-only-no-bom.java')?.encoding, 'UTF-16BE',
+  '无 BOM、零 NUL 的 UTF-16BE 中文源码不能静默漏掉');
+assert.equal(byPath.get('enc/utf16le-cjk-low-byte-zero.java')?.encoding, 'UTF-16LE',
+  'CJK 码位低字节为零时不能误判 UTF-16LE 字节序');
+assert.equal(byPath.get('enc/utf16be-cjk-low-byte-zero.java')?.encoding, 'UTF-16BE',
+  'CJK 码位低字节为零时不能误判 UTF-16BE 字节序');
+assert.equal(byPath.get('enc/utf16le-valid-utf8-bytes.java')?.encoding, 'UTF-16LE',
+  'UTF-16LE 字节恰好符合 UTF-8 语法时不能静默按二进制跳过');
+assert.equal(byPath.get('enc/utf16be-valid-utf8-bytes.java')?.encoding, 'UTF-16BE',
+  'UTF-16BE 字节恰好符合 UTF-8 语法时不能静默按二进制跳过');
+assert.equal(byPath.get('enc/utf8-even-cjk.java')?.encoding, 'UTF-8',
+  '偶数字节 UTF-8 中文源码不能被弱 UTF-16 探测抢占');
 assert.equal(byPath.get('enc/utf16le-no-bom.xml')?.encoding, 'UTF-16LE',
   '无 BOM XML 的 UTF-16 声明与字节布局一致时必须允许');
 assert.equal(byPath.get('lines/lf.ts')?.rawLines, 3);
@@ -275,6 +319,9 @@ expectReason('issues/malformed-gb18030.py', 'decode-error');
 expectReason('issues/malformed-shift-jis.py', 'decode-error');
 expectReason('issues/ambiguous-gbk.java', 'decode-error');
 expectReason('issues/ambiguous-gb18030.java', 'decode-error');
+expectReason('issues/ambiguous-gbk-cjk.java', 'decode-error');
+expectReason('issues/ambiguous-big5-cjk.java', 'decode-error');
+expectReason('issues/ambiguous-shift-jis-cjk.java', 'decode-error');
 expectReason('issues/ambiguous-windows-874.java', 'decode-error');
 expectReason('issues/malformed-utf7.py', 'decode-error');
 expectReason('issues/xml-utf16-ascii.xml', 'decode-error');

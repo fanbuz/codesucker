@@ -335,7 +335,76 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
   return null;
 }
 
-function utf16WithoutBom(buf: Buffer): 'UTF-16LE' | 'UTF-16BE' | null {
+interface Utf16Candidate {
+  encoding: 'UTF-16LE' | 'UTF-16BE';
+  plausibility: TextPlausibility;
+}
+
+interface TextPlausibility {
+  cjkRatio: number;
+  bad: number;
+  score: number;
+}
+
+function inspectTextPlausibility(text: string): TextPlausibility | null {
+  let common = 0;
+  let neutral = 0;
+  let cjk = 0;
+  let bad = 0;
+  const characters = [...text];
+  for (const char of characters) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code === 9 || code === 10 || code === 12 || code === 13 || (code >= 32 && code <= 126)) {
+      common++;
+    } else if (/\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(char)) {
+      common++;
+      cjk++;
+    } else if (/\p{Script=Latin}|\p{Script=Cyrillic}|\p{Script=Greek}/u.test(char)) {
+      common++;
+    } else if (/\p{Cc}|\p{Cn}|\p{Co}/u.test(char)) {
+      bad++;
+    } else if (/\p{L}|\p{M}|\p{N}|\p{P}|\p{S}|\p{Z}/u.test(char)) {
+      neutral++;
+    } else {
+      bad++;
+    }
+  }
+  if (characters.length === 0) return null;
+  return {
+    cjkRatio: cjk / characters.length,
+    bad,
+    score: (common + neutral * 0.5 - bad * 2) / characters.length,
+  };
+}
+
+function inspectUtf16Candidate(
+  buf: Buffer, encoding: 'UTF-16LE' | 'UTF-16BE',
+): Utf16Candidate | null {
+  try {
+    const decoderEncoding = encoding === 'UTF-16LE' ? 'utf-16le' : 'utf-16be';
+    const text = new TextDecoder(decoderEncoding, { fatal: true }).decode(buf);
+    if (!iconv.encode(text, encoding).equals(buf) || looksBinary(buf, text, encoding)) return null;
+    const plausibility = inspectTextPlausibility(text);
+    return plausibility ? { encoding, plausibility } : null;
+  } catch {
+    return null;
+  }
+}
+
+function plausibleLegacyEncoding(buf: Buffer): string | null {
+  for (const encoding of ['GB18030', 'BIG5', 'SHIFT-JIS', 'EUC-JP', 'EUC-KR']) {
+    const text = iconv.decode(buf, encoding);
+    if (text.includes('\uFFFD') || looksBinary(buf, text, encoding)) continue;
+    if (!iconv.encode(text, encoding).equals(buf)) continue;
+    const candidate = inspectTextPlausibility(text);
+    if (candidate && candidate.bad === 0 && candidate.cjkRatio >= 0.25 && candidate.score >= 0.85) {
+      return encoding;
+    }
+  }
+  return null;
+}
+
+function utf16WithoutBom(buf: Buffer, allowWeak = false): 'UTF-16LE' | 'UTF-16BE' | null {
   if (buf.length < 4 || buf.length % 2 !== 0) return null;
   let leBreaks = 0;
   let beBreaks = 0;
@@ -348,10 +417,56 @@ function utf16WithoutBom(buf: Buffer): 'UTF-16LE' | 'UTF-16BE' | null {
     if ((buf[index] === 10 || buf[index] === 13) && buf[index + 1] === 0) leBreaks++;
     if (buf[index] === 0 && (buf[index + 1] === 10 || buf[index + 1] === 13)) beBreaks++;
   }
-  if (leBreaks > beBreaks && (leBreaks > 0 || oddNulls / pairs >= 0.3)) return 'UTF-16LE';
-  if (beBreaks > leBreaks && (beBreaks > 0 || evenNulls / pairs >= 0.3)) return 'UTF-16BE';
-  if (oddNulls / pairs >= 0.3 && evenNulls / pairs < 0.05) return 'UTF-16LE';
-  if (evenNulls / pairs >= 0.3 && oddNulls / pairs < 0.05) return 'UTF-16BE';
+  const stronglyAlignedEncoding = leBreaks > beBreaks
+    ? 'UTF-16LE'
+    : beBreaks > leBreaks
+      ? 'UTF-16BE'
+      : oddNulls / pairs >= 0.3 && evenNulls / pairs < 0.05
+        ? 'UTF-16LE'
+        : evenNulls / pairs >= 0.3 && oddNulls / pairs < 0.05
+          ? 'UTF-16BE'
+          : null;
+  if (stronglyAlignedEncoding) {
+    const preferred = inspectUtf16Candidate(buf, stronglyAlignedEncoding);
+    if (preferred && preferred.plausibility.bad === 0 && preferred.plausibility.score >= 0.75) {
+      return stronglyAlignedEncoding;
+    }
+    const alternativeEncoding = stronglyAlignedEncoding === 'UTF-16LE' ? 'UTF-16BE' : 'UTF-16LE';
+    const alternative = inspectUtf16Candidate(buf, alternativeEncoding);
+    if (alternative && alternative.plausibility.bad === 0 && alternative.plausibility.score >= 0.75) {
+      return alternativeEncoding;
+    }
+    throw new SourceDecodeError('decode-error', `疑似 ${stronglyAlignedEncoding} 字节无法安全解码`);
+  }
+
+  // 少量 NUL 可能只是 CJK 码位自身的高/低字节为零，不能据此决定字节序。
+  if (!allowWeak) return null;
+  // 极短的任意二进制很容易偶然组成几个可显示码位，没有足够文本证据判断字节序。
+  if (pairs < 8) return null;
+  const candidates = (['UTF-16LE', 'UTF-16BE'] as const)
+    .map((encoding) => inspectUtf16Candidate(buf, encoding))
+    .filter((candidate): candidate is Utf16Candidate => candidate !== null);
+  const plausible = candidates
+    .filter((candidate) => candidate.plausibility.bad === 0
+      && candidate.plausibility.cjkRatio >= 0.25
+      && candidate.plausibility.score >= 0.85)
+    .sort((left, right) => right.plausibility.score - left.plausibility.score);
+  const distinctUtf16 = plausible.length === 1
+    || (plausible[1] && plausible[0].plausibility.score - plausible[1].plausibility.score >= 0.12);
+  if (distinctUtf16) {
+    const legacyEncoding = plausibleLegacyEncoding(buf);
+    if (legacyEncoding) {
+      throw new SourceDecodeError(
+        'decode-error',
+        `文件编码无法安全判定：${plausible[0].encoding} 与 ${legacyEncoding} 均可解释当前字节`,
+      );
+    }
+    return plausible[0].encoding;
+  }
+  if (candidates.some((candidate) => candidate.plausibility.cjkRatio >= 0.25
+    && candidate.plausibility.score >= 0.7)) {
+    throw new SourceDecodeError('decode-error', '无 BOM UTF-16 字节序无法安全判定');
+  }
   return null;
 }
 
@@ -450,7 +565,17 @@ function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: stri
     }
     return { encoding: normalized, bomBytes: 0 };
   }
-  if (isValidUtf8(buf)) return { encoding: 'UTF-8', bomBytes: 0 };
+  if (isValidUtf8(buf)) {
+    const utf8Text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    if (!looksBinary(buf, utf8Text, 'UTF-8')) return { encoding: 'UTF-8', bomBytes: 0 };
+  }
+
+  // 非 ASCII 为主的 UTF-16 可能没有明显 NUL；仅在 UTF-8 不是可接受文本后做保守的双字节序校验。
+  const nonAsciiUtf16 = utf16WithoutBom(buf, true);
+  if (nonAsciiUtf16) {
+    assertXmlEncodingMatchesBytes(buf, extension, nonAsciiUtf16, 0);
+    return { encoding: nonAsciiUtf16, bomBytes: 0 };
+  }
 
   const detected = chardet.detect(buf);
   if (!detected) throw new SourceDecodeError('unsupported-encoding', '无法识别文件编码');
