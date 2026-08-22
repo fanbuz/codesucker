@@ -39,6 +39,10 @@ write('enc/declared-html.html', Buffer.concat([
   Buffer.from('<!-- old <head><meta charset="utf-8"> --><!doctype html><html><head><!-- old <meta charset="utf-8"> --><title>Legacy</title><meta name="viewport" content="width=device-width"><link rel="stylesheet"><meta charset="windows-1252"></head><body>', 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
 ]));
+write('enc/declared-html-window.html', Buffer.concat([
+  Buffer.from(`<!doctype html><html><head><title>${'x'.repeat(560)}</title><meta charset="windows-1252"></head><body>`, 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
+]));
 write('enc/utf8-meta-string.ts', 'const sample = "<meta charset=gbk>";\nconst 名称 = "仍是 UTF-8";');
 write('enc/utf8-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="charset=windows-1252"><meta charset="utf-8"></head><body>é</body></html>');
 write('enc/utf8-nested-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="<meta charset=windows-1252>"><meta charset="utf-8"></head><body>é</body></html>');
@@ -101,6 +105,7 @@ assert.equal(byPath.get('enc/big5-noncanonical.py')?.encoding, 'BIG5', '合法 B
 assert.equal(byPath.get('enc/declared-latin1.py')?.encoding, 'LATIN-1', '显式旧编码声明必须优先于 UTF-8 字节有效性');
 assert.equal(byPath.get('enc/utf8-charset-string.ts')?.encoding, 'UTF-8', '普通字符串中的 charset 不能伪装成编码声明');
 assert.equal(byPath.get('enc/declared-html.html')?.encoding, 'WINDOWS-1252', 'doctype/head 后的 HTML meta 编码声明必须生效');
+assert.equal(byPath.get('enc/declared-html-window.html')?.encoding, 'WINDOWS-1252', 'HTML 前 1024 字节内的 meta 编码声明必须生效');
 assert.equal(byPath.get('enc/utf8-meta-string.ts')?.encoding, 'UTF-8', '普通字符串中的 meta 标签不能伪装成编码声明');
 assert.equal(byPath.get('enc/utf8-meta-attribute.html')?.encoding, 'UTF-8', '普通 meta 属性值中的 charset 不能抢在真实 charset 属性前');
 assert.equal(byPath.get('enc/utf8-nested-meta-attribute.html')?.encoding, 'UTF-8', '属性值中的伪 meta 标签不能抢在真实 charset 属性前');

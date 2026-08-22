@@ -36,6 +36,7 @@ const ENTRY_PATTERNS = [
 ];
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const SOURCE_ENCODING_HEADER_BYTES = 1024;
 
 export interface FileCandidate {
   path: string;
@@ -194,7 +195,7 @@ function blankMarkup(value: string): string {
 }
 
 function declaredEncoding(buf: Buffer): string | null {
-  const header = buf.subarray(0, 512).toString('latin1');
+  const header = buf.subarray(0, SOURCE_ENCODING_HEADER_BYTES).toString('latin1');
   const lines = header.split(/\r\n|\r|\n/).slice(0, 2);
   for (const line of lines) {
     const comment = /^\s*(?:#|\/\/|\/\*+|\*|--|;).*?\b(?:coding\s*[:=]|charset\s*=)\s*["']?([A-Za-z0-9._-]+)/i.exec(line);
