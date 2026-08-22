@@ -167,11 +167,19 @@ try {
   globalThis.fetch = async () => { throw new Error('network access is forbidden in third-party analysis'); };
   const first = await analyzeThirdPartyRisks(root, files);
   const second = await analyzeThirdPartyRisks(root, [...files].reverse());
+  const addedDependencyFile = await write('vendor/left-pad/extra.js', 'module.exports = 2;');
+  const changed = await analyzeThirdPartyRisks(root, [...files, addedDependencyFile]);
   globalThis.fetch = originalFetch;
 
   assert.equal(first.rulesVersion, THIRD_PARTY_RULES_VERSION);
   assert.ok(first.summary.analyzedManifests >= 5, '五类生态清单都应参与离线分析');
   assert.deepEqual(first.findings.map((finding) => finding.id), second.findings.map((finding) => finding.id), '输入顺序不应改变稳定 finding ID');
+  const leftPadId = first.findings.find((finding) => finding.kind === 'dependency-source'
+    && finding.affected.relPaths.includes('vendor/left-pad/index.js'))?.id;
+  const changedLeftPadId = changed.findings.find((finding) => finding.kind === 'dependency-source'
+    && finding.affected.relPaths.includes('vendor/left-pad/extra.js'))?.id;
+  assert.ok(leftPadId && changedLeftPadId && leftPadId !== changedLeftPadId,
+    '受影响文件集合变化时 finding ID 必须失效，不能沿用旧的人工确认');
   assert.ok(first.diagnostics.some((item) => item.code === 'manifest-parse-failed' && item.file === 'broken/pom.xml'));
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'build.gradle.kts'),
     'Gradle 同时含可识别与动态声明时必须报告部分分析');

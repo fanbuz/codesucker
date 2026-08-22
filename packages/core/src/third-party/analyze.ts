@@ -106,12 +106,14 @@ function addFinding(map: Map<string, FindingAccumulator>, value: Omit<FindingAcc
 
 function findingId(item: FindingAccumulator): string {
   const primary = item.evidence[0];
+  const affectedRelPaths = [...item.relPaths].sort();
   return crypto.createHash('sha256').update([
     THIRD_PARTY_RULES_VERSION, item.ruleId, item.kind,
     primary?.ecosystem ?? '', primary?.packageName ?? '',
     primary?.licenseId ?? '', primary?.attributionSubject ?? '',
     primary?.location.file ?? '', primary?.location.line ?? 0,
     item.commonRoot ?? '',
+    affectedRelPaths.length, ...affectedRelPaths,
   ].join('\0')).digest('hex').slice(0, 24);
 }
 
