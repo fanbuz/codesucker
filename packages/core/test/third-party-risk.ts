@@ -684,6 +684,7 @@ other''']
       # old: ["fake-only"]
       "after-comment>=1",
       "owned-direct @ file:../owned-direct",
+      "python-owned>=1",
     ]
 
     [project."optional-dependencies"]
@@ -696,6 +697,9 @@ other''']
     [project.scripts]
     acme-cli = "mine.cli:main"
 
+    [tool.poetry]
+    name = "Self_Python"
+
     [tool.poetry.dependencies]
     python = ">=3.11"
     Flask = "^3.0"
@@ -703,6 +707,22 @@ other''']
 
     [tool.poetry.group."qa]prod".dependencies]
     bracket-group = "^1.0"
+  `);
+  await fs.mkdir(path.join(root, 'python-owned-app'), { recursive: true });
+  await fs.writeFile(path.join(root, 'python-owned-app/pyproject.toml'), `
+    [project]
+    "name" = "python-owned" # quoted key with a trailing comment is valid TOML
+  `);
+  await fs.mkdir(path.join(root, 'invalid-python-name'), { recursive: true });
+  await fs.writeFile(path.join(root, 'invalid-python-name/pyproject.toml'), `
+    [project]
+    name = "first-name"
+    "name" = "second-name"
+  `);
+  await fs.mkdir(path.join(root, 'dynamic-python-name'), { recursive: true });
+  await fs.writeFile(path.join(root, 'dynamic-python-name/pyproject.toml'), `
+    [project]
+    dynamic = ["name"]
   `);
   await fs.mkdir(path.join(root, 'dynamic-python'), { recursive: true });
   await fs.writeFile(path.join(root, 'dynamic-python/pyproject.toml'), `
@@ -847,6 +867,8 @@ other''']
     write('vendor/missing-egg/api.py', 'def unknown(): pass'),
     write('vendor/libs/tool.py', 'def local_editable(): pass'),
     write('vendor/direct-editable/tool.py', 'def local_direct_editable(): pass'),
+    write('python-owned-app/vendor/python-owned/tool.py', 'def owned_project(): pass'),
+    write('python-other/vendor/python-owned/tool.py', 'def external_project(): pass'),
     write('vendor/local-python/owned.py', 'def owned(): pass'),
     write('vendor/local-vcs/owned.py', 'def owned(): pass'),
     write('vendor/direct-local/owned.py', 'def owned(): pass'),
@@ -1050,8 +1072,14 @@ other''']
     && item.file === 'dynamic-python/pyproject.toml'), 'PEP 621 动态依赖字段必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'quoted-dynamic-python/pyproject.toml'), 'PEP 621 引号键 dynamic 必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'invalid-python-name/pyproject.toml'), '重复 Python 项目 name 不得建立本地身份且必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'dynamic-python-name/pyproject.toml'), '动态 Python 项目 name 不得建立本地身份且必须报告部分分析');
   assert.ok(!first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'literal-dynamic-python/pyproject.toml'), 'TOML 多行字符串里的 dynamic 文本不能形成部分分析诊断');
+  assert.ok(!first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'pyproject.toml'), 'PEP 621 与 Poetry 的等价规范名不能误报元数据冲突');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'invalid-requirements/requirements.txt'
     && item.message.includes('requirements include')), '无效 requirements include 必须给出准确的部分分析诊断');
@@ -1108,6 +1136,7 @@ other''']
     'rust-multiline-workspace/member/vendor/multiline-member/lib.rs',
     'rust-multiline-workspace/other/vendor/multiline-other/lib.rs',
     'rust-unclosed-workspace/member/vendor/unclosed-workspace/lib.rs',
+    'python-other/vendor/python-owned/tool.py',
   ]) {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
@@ -1219,6 +1248,8 @@ other''']
     '无点前缀的 editable 本地路径不能伪造成同名外部包依赖');
   assert.ok(!dependencyFiles.has('vendor/direct-editable/tool.py'),
     'editable PEP 508 本地 direct reference 不能判为外部依赖');
+  assert.ok(!dependencyFiles.has('python-owned-app/vendor/python-owned/tool.py'),
+    '嵌套 pyproject 的 quoted name 键必须形成本地身份并压制祖先同名外部依赖');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-path/owned.py'), 'Pipfile.lock path 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-file/owned.py'), 'Pipfile.lock file 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/poetry-local-directory/owned.py'), 'Poetry package.source 目录依赖不能默认判为第三方');

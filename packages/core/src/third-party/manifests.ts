@@ -1133,6 +1133,16 @@ function tomlStringValue(value: string): string | null {
   return parsed?.keyPath.length === 1 && parsed.value === 'true' ? parsed.keyPath[0] : null;
 }
 
+function tomlStringAssignmentValue(body: string, key: string): string | undefined {
+  const parsed = parseTomlAssignments(body);
+  if (!parsed.complete) return undefined;
+  const matches = parsed.assignments.filter((assignment) => (
+    assignment.keyPath.length === 1 && assignment.keyPath[0] === key
+  ));
+  if (matches.length !== 1) return undefined;
+  return tomlStringValue(matches[0].value) ?? undefined;
+}
+
 function cargoDependencySection(rawName: string): {
   tableDependency?: string;
   workspaceDefinition: boolean;
@@ -1945,6 +1955,45 @@ function pythonLockPackageIsLocal(packageBody: string, sourceBody = ''): boolean
   return /^(?:directory|file)$/i.test(sourceType ?? '') && localPathValue(sourceLocation);
 }
 
+function pythonPackageMetadata(doc: ManifestDocument): { incomplete: boolean; name?: string } {
+  if (doc.basename !== 'pyproject.toml') return { incomplete: false };
+  const sections = tomlSections(doc.text);
+  const projects = sections.filter((section) => tomlSectionHasExactPath(section, 'project'));
+  const poetry = sections.filter((section) => tomlSectionHasExactPath(section, 'tool', 'poetry'));
+  if (projects.length > 1 || poetry.length > 1) return { incomplete: true };
+  const readName = (section: TomlSection | undefined, required: boolean) => {
+    if (!section) return { incomplete: false };
+    const parsed = parseTomlAssignments(section.body);
+    if (!parsed.complete) return { incomplete: true };
+    const names = parsed.assignments.filter((assignment) => (
+      assignment.keyPath.length === 1 && assignment.keyPath[0] === 'name'
+    ));
+    if (names.length === 0) return { incomplete: required };
+    if (names.length > 1) return { incomplete: true };
+    const name = tomlStringValue(names[0].value);
+    return name ? { incomplete: false, name } : { incomplete: true };
+  };
+  const project = readName(projects[0], true);
+  const poetryProject = readName(poetry[0], false);
+  const dynamicName = projects[0]
+    ? tomlArrayAssignment(projects[0].body, 'dynamic').includes('name')
+    : false;
+  if (projects[0]) {
+    if (dynamicName || project.incomplete || !project.name) return { incomplete: true };
+    const conflict = poetryProject.name !== undefined
+      && normalizePackageName(poetryProject.name, 'python') !== normalizePackageName(project.name, 'python');
+    return {
+      incomplete: poetryProject.incomplete || conflict,
+      name: project.name,
+    };
+  }
+  return poetryProject;
+}
+
+function hasIncompletePythonPackageMetadata(doc: ManifestDocument): boolean {
+  return pythonPackageMetadata(doc).incomplete;
+}
+
 function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (doc.requirementFile) {
@@ -1977,7 +2026,7 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     for (let index = 0; index < sections.length; index++) {
       const section = sections[index];
       if (!tomlSectionHasPath(section, 'package')) continue;
-      const name = /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(section.body)?.[1];
+      const name = tomlStringAssignmentValue(section.body, 'name');
       let sourceBody = '';
       for (let next = index + 1; next < sections.length && !tomlSectionHasPath(sections[next], 'package'); next++) {
         if (tomlSectionHasPath(sections[next], 'package', 'source')) {
@@ -1990,17 +2039,15 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     }
     return out;
   }
+  const metadata = pythonPackageMetadata(doc);
+  if (metadata.name) {
+    const own = identity('python', metadata.name, doc.relPath, 'package-metadata', true);
+    if (own) out.push(own);
+  }
   for (const section of sections) {
     const sectionPath = tomlSectionKeyPath(section);
     const isProject = tomlSectionHasPath(section, 'project');
     const isPoetry = tomlSectionHasPath(section, 'tool', 'poetry');
-    if (isProject || isPoetry) {
-      const ownName = /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(section.body)?.[1];
-      if (ownName) {
-        const own = identity('python', ownName, doc.relPath, 'package-metadata', true);
-        if (own) out.push(own);
-      }
-    }
     if (isProject) {
       for (const spec of tomlArrayAssignment(section.body, 'dependencies')) {
         const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
@@ -2304,6 +2351,7 @@ export async function collectDependencyInventory(
         || hasIncompleteCargoLock(document)
         || hasIncompleteCargoPackage(document)
         || hasIncompletePythonRequirements(document)
+        || hasIncompletePythonPackageMetadata(document)
         || hasDynamicPep621Dependencies(document)) {
         diagnostics.push(diagnostic(
           'dynamic-manifest-partial', document.relPath,
