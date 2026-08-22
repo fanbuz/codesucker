@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { ThirdPartyRiskFinding, ThirdPartyRiskReport } from '@codesucker/core';
+import type {
+  ThirdPartyRiskAnalysis, ThirdPartyRiskFinding, ThirdPartyRiskReport,
+} from '@codesucker/core';
 import {
   assertThirdPartyManifestDiscoveryUnchanged, assertThirdPartyManifestSnapshotUnchanged,
-  assertThirdPartyRiskReportUnchanged, buildThirdPartyRiskSidecar,
+  assertThirdPartyRiskReportUnchanged, assertThirdPartyRiskScanBaselineUnchanged,
+  buildThirdPartyRiskSidecar,
   emptyThirdPartyRiskReport, sanitizeProjectConfigValues,
   trustedThirdPartyEvidenceRelPath, writeThirdPartyRiskSidecar,
 } from '../src/main/third-party-risk-sidecar.ts';
@@ -94,6 +97,32 @@ assert.throws(
   () => assertThirdPartyRiskReportUnchanged(riskReport, changedRiskReport),
   /依赖清单.*扫描后发生变化/,
   '导出前依赖清单复核变化必须要求重新扫描',
+);
+const refreshedAnalysis: ThirdPartyRiskAnalysis = {
+  report: riskReport,
+  manifestIdentities: manifestSnapshot,
+  manifestCandidateRelPaths: ['package.json'],
+};
+assert.doesNotThrow(
+  () => assertThirdPartyRiskScanBaselineUnchanged(
+    false,
+    emptyThirdPartyRiskReport(0, 'scan analysis failed'),
+    [],
+    [],
+    refreshedAnalysis,
+  ),
+  '扫描阶段已降级时，导出阶段成功刷新的风险结果不能阻断导出',
+);
+assert.throws(
+  () => assertThirdPartyRiskScanBaselineUnchanged(
+    true,
+    changedRiskReport,
+    manifestSnapshot,
+    ['package.json'],
+    refreshedAnalysis,
+  ),
+  /依赖清单.*扫描后发生变化/,
+  '扫描阶段分析成功时，导出前仍必须拒绝风险报告漂移',
 );
 const included = ['partial-a.ts', 'kept.ts', 'pending.ts'];
 const metadata = { appVersion: '0.5.0', generatedAt: '2026-08-22T00:00:00.000Z' };

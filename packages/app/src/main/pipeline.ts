@@ -33,7 +33,8 @@ import type {
 } from './workers/protocol';
 import {
   assertThirdPartyManifestDiscoveryUnchanged, assertThirdPartyManifestSnapshotUnchanged,
-  assertThirdPartyRiskReportUnchanged, emptyThirdPartyRiskReport,
+  assertThirdPartyRiskReportUnchanged, assertThirdPartyRiskScanBaselineUnchanged,
+  emptyThirdPartyRiskReport,
   sanitizeProjectConfigValues, trustedThirdPartyEvidenceRelPath,
   writeThirdPartyRiskSidecar,
   type ThirdPartyRiskPreference,
@@ -43,6 +44,7 @@ interface ScanSnapshot {
   rootSnapshot: ProjectRootSnapshot;
   byRel: Map<string, FileEntry>;
   thirdPartyRisk: ThirdPartyRiskReport;
+  thirdPartyRiskAnalysisComplete: boolean;
   thirdPartyManifestIdentities: ThirdPartyManifestIdentity[];
   thirdPartyManifestCandidateRelPaths: string[];
 }
@@ -266,6 +268,7 @@ async function scanWithWorkers(
     validateProjectRoot(rootSnapshot, request.root);
     report({ stage: 'analyzing-risks', completed: 0, total: 1 });
     let thirdPartyRisk: ThirdPartyRiskReport;
+    let thirdPartyRiskAnalysisComplete: boolean;
     let thirdPartyManifestIdentities: ThirdPartyManifestIdentity[];
     let thirdPartyManifestCandidateRelPaths: string[];
     try {
@@ -275,11 +278,13 @@ async function scanWithWorkers(
         files: result.files,
       }, job.signal) as ThirdPartyRiskAnalysis;
       thirdPartyRisk = analysis.report;
+      thirdPartyRiskAnalysisComplete = true;
       thirdPartyManifestIdentities = analysis.manifestIdentities;
       thirdPartyManifestCandidateRelPaths = analysis.manifestCandidateRelPaths;
     } catch (error) {
       if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
       thirdPartyRisk = emptyThirdPartyRiskReport(0, '本地分析任务发生内部错误');
+      thirdPartyRiskAnalysisComplete = false;
       thirdPartyManifestIdentities = [];
       thirdPartyManifestCandidateRelPaths = [];
     }
@@ -290,6 +295,7 @@ async function scanWithWorkers(
       rootSnapshot,
       byRel: new Map(result.files.map((file) => [file.relPath, file])),
       thirdPartyRisk,
+      thirdPartyRiskAnalysisComplete,
       thirdPartyManifestIdentities,
       thirdPartyManifestCandidateRelPaths,
     });
@@ -474,14 +480,12 @@ export function registerPipelineIpc() {
       await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
-      assertThirdPartyRiskReportUnchanged(scan.thirdPartyRisk, currentThirdPartyAnalysis.report);
-      assertThirdPartyManifestSnapshotUnchanged(
+      assertThirdPartyRiskScanBaselineUnchanged(
+        scan.thirdPartyRiskAnalysisComplete,
+        scan.thirdPartyRisk,
         scan.thirdPartyManifestIdentities,
-        currentThirdPartyAnalysis.manifestIdentities,
-      );
-      assertThirdPartyManifestDiscoveryUnchanged(
         scan.thirdPartyManifestCandidateRelPaths,
-        currentThirdPartyAnalysis.manifestCandidateRelPaths,
+        currentThirdPartyAnalysis,
       );
       report({ stage: 'analyzing-risks', completed: 1, total: 1 });
       const pages = result.selection.pages;

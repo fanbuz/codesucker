@@ -93,7 +93,17 @@ try {
     )
     require example.local/internal v0.0.0
     require example.local/block v0.0.0
+    require example.local/win-drive-owned v0.0.0
+    require example.local/win-relative-owned v0.0.0
+    require example.local/win-unc-owned v0.0.0
+    require example.local/dot-owned v0.0.0
+    require example.local/parent-owned v0.0.0
     replace example.local/internal => ./internal
+    replace example.local/win-drive-owned => C:\\repo\\owned
+    replace example.local/win-relative-owned => ..\\owned
+    replace example.local/win-unc-owned => \\\\server\\share\\owned
+    replace example.local/dot-owned => .
+    replace example.local/parent-owned => ..
     replace (
       example.local/block => ./block
     )
@@ -102,11 +112,13 @@ try {
     go 1.22
     use ./go-workspace/app
     replace example.local/work-owned => ./go-workspace/owned
+    replace example.local/work-dot-owned => .
   `);
   await fs.mkdir(path.join(root, 'go-workspace/app'), { recursive: true });
   await fs.writeFile(path.join(root, 'go-workspace/app/go.mod'), `
     module example.local/work-app
     require example.local/work-owned v0.0.0
+    require example.local/work-dot-owned v0.0.0
     require github.com/acme/work-external v1.0.0
   `);
   await fs.mkdir(path.join(root, 'go-outsider'), { recursive: true });
@@ -321,7 +333,13 @@ try {
     write('vendor/retract/retract.go', 'package retract'),
     write('vendor/other/other.go', 'package other'),
     write('third_party/example.local/block/tool.go', 'package block'),
+    write('third_party/example.local/win-drive-owned/owned.go', 'package owned'),
+    write('third_party/example.local/win-relative-owned/owned.go', 'package owned'),
+    write('third_party/example.local/win-unc-owned/owned.go', 'package owned'),
+    write('third_party/example.local/dot-owned/owned.go', 'package owned'),
+    write('third_party/example.local/parent-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-owned/owned.go', 'package owned'),
+    write('go-workspace/app/vendor/work-dot-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-external/external.go', 'package external'),
     write('go-outsider/vendor/work-owned/external.go', 'package external'),
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
@@ -495,9 +513,22 @@ try {
     '子项目 requirements include 的依赖作用域不能泄漏到兄弟项目');
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
+  for (const relPath of [
+    'third_party/example.local/win-drive-owned/owned.go',
+    'third_party/example.local/win-relative-owned/owned.go',
+    'third_party/example.local/win-unc-owned/owned.go',
+  ]) {
+    assert.ok(!dependencyFiles.has(relPath), `${relPath} 的 Windows 本地 replace 不能判为第三方依赖源码`);
+  }
+  assert.ok(!dependencyFiles.has('third_party/example.local/dot-owned/owned.go'),
+    'Go replace 到当前目录不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('third_party/example.local/parent-owned/owned.go'),
+    'Go replace 到父目录不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('vendor/retract/retract.go'), 'Go retract 指令不能被误当作单段依赖');
   assert.ok(!dependencyFiles.has('vendor/other/other.go'), 'Go exclude 块条目不能被误当作 require 依赖');
   assert.ok(!dependencyFiles.has('go-workspace/app/vendor/work-owned/owned.go'), 'go.work 本地 replace 必须传播到 use 成员的 go.mod');
+  assert.ok(!dependencyFiles.has('go-workspace/app/vendor/work-dot-owned/owned.go'),
+    'go.work replace 到当前目录必须传播到 use 成员的 go.mod');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/local-table/lib.rs'), 'Cargo table-form path 依赖不能判为第三方依赖源码');
   assert.ok(dependencyFiles.has('deps/table-form/lib.rs'), 'Cargo table-form 注释中的 path/package/workspace 不能改变外部依赖');

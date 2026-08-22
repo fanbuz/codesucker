@@ -197,7 +197,7 @@ function identity(
 
 function localSpec(spec: unknown): boolean {
   return typeof spec === 'string'
-    && /^(?:workspace:|file:|link:|\.\.?[\\/]|[A-Za-z]:[\\/]|[\\/]{2}|\/)/i.test(spec.trim());
+    && /^(?:workspace:|file:|link:|\.\.?(?:[\\/]|$)|[A-Za-z]:[\\/]|[\\/]{2}|\/)/i.test(spec.trim());
 }
 
 function nodePackageNameFromLockPath(pkgPath: string): string {
@@ -505,7 +505,7 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
     const expression = replaceBlock ? line : line.replace(/^replace\s+/, '');
     if (!replaceBlock && expression === line) continue;
     const match = /^([^\s]+)(?:\s+v[^\s]+)?\s*=>\s*([^\s]+)(?:\s+v[^\s]+)?$/.exec(expression);
-    if (match && /^(?:\.\.?\/|\/)/.test(match[2])) replacedLocal.add(match[1]);
+    if (match && localSpec(match[2])) replacedLocal.add(match[1]);
   }
   if (doc.basename === 'go.work') {
     for (const name of replacedLocal) {

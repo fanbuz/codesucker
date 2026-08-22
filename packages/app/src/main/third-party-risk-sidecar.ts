@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { THIRD_PARTY_RULES_VERSION } from '@codesucker/core';
 import type {
   ThirdPartyAnalysisDiagnostic, ThirdPartyConfidence, ThirdPartyEvidence,
-  ThirdPartyManifestIdentity, ThirdPartyRiskFinding, ThirdPartyRiskKind, ThirdPartyRiskReport,
+  ThirdPartyManifestIdentity, ThirdPartyRiskAnalysis, ThirdPartyRiskFinding,
+  ThirdPartyRiskKind, ThirdPartyRiskReport,
 } from '@codesucker/core';
 
 export type ThirdPartyFindingStatus = 'excluded' | 'partially-excluded' | 'kept-by-user' | 'pending';
@@ -140,6 +141,27 @@ export function assertThirdPartyManifestDiscoveryUnchanged(
   if (JSON.stringify(scanned) !== JSON.stringify(current)) {
     throw new Error('项目中的依赖清单集合在扫描后发生变化，请重新扫描项目');
   }
+}
+
+/**
+ * 扫描阶段分析成功时，导出前必须同时复核报告、清单内容与清单集合。
+ * 若扫描阶段已明确降级为提示，则以导出阶段成功完成的分析建立新基线，
+ * 避免把空降级报告误判为项目漂移；正式提交前仍会再次复核该新基线。
+ */
+export function assertThirdPartyRiskScanBaselineUnchanged(
+  analysisComplete: boolean,
+  scannedReport: ThirdPartyRiskReport,
+  scannedManifestIdentities: readonly ThirdPartyManifestIdentity[],
+  scannedManifestCandidateRelPaths: readonly string[],
+  current: ThirdPartyRiskAnalysis,
+): void {
+  if (!analysisComplete) return;
+  assertThirdPartyRiskReportUnchanged(scannedReport, current.report);
+  assertThirdPartyManifestSnapshotUnchanged(scannedManifestIdentities, current.manifestIdentities);
+  assertThirdPartyManifestDiscoveryUnchanged(
+    scannedManifestCandidateRelPaths,
+    current.manifestCandidateRelPaths,
+  );
 }
 
 export function sanitizeThirdPartyRiskPreference(
