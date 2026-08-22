@@ -192,9 +192,9 @@ export async function analyzeThirdPartyRisksWithSnapshot(
     selected, DEFAULT_EVIDENCE_CONCURRENCY,
     (entry) => inspectSourceHeader(entry, signal), signal,
   );
+  const headersByPath = new Map(selected.map((entry, index) => [entry.relPath, headers[index]]));
 
-  for (let index = 0; index < selected.length; index++) {
-    const entry = selected[index];
+  for (const entry of candidates) {
     signal?.throwIfAborted();
     const segments = entry.relPath.split('/');
     const vendorIndex = segments.findIndex((segment) => VENDOR_SEGMENTS.has(segment.toLocaleLowerCase()));
@@ -233,10 +233,10 @@ export async function analyzeThirdPartyRisksWithSnapshot(
     }
 
     const generatedPath = generatedByPath(entry.relPath);
-    const header = headers[index];
-    diagnostics.push(...header.diagnostics);
-    const generatedEvidence = header.evidence.filter((evidence) => evidence.source === 'generated-marker');
-    if (generatedPath || header.generated) {
+    const header = headersByPath.get(entry.relPath);
+    if (header) diagnostics.push(...header.diagnostics);
+    const generatedEvidence = header?.evidence.filter((evidence) => evidence.source === 'generated-marker') ?? [];
+    if (generatedPath || header?.generated) {
       const ruleId = generatedPath?.ruleId ?? generatedEvidence[0]?.ruleId ?? 'generated-marker';
       addFinding(findings, {
         key: `generated-source:${ruleId}:${entry.relPath}`, ruleId,
@@ -249,7 +249,7 @@ export async function analyzeThirdPartyRisksWithSnapshot(
         }],
       }, entry.relPath);
     }
-    for (const evidence of header.evidence.filter((item) => item.ruleId.startsWith('source-header-spdx') || item.ruleId === 'source-header-license-text')) {
+    for (const evidence of header?.evidence.filter((item) => item.ruleId.startsWith('source-header-spdx') || item.ruleId === 'source-header-license-text') ?? []) {
       addFinding(findings, {
         key: `license-declaration:${evidence.ruleId}:${entry.relPath}`, ruleId: evidence.ruleId,
         kind: 'license-declaration', confidence: evidence.licenseId ? 'high' : 'medium',
@@ -259,7 +259,7 @@ export async function analyzeThirdPartyRisksWithSnapshot(
         evidence: [evidence],
       }, entry.relPath);
     }
-    for (const evidence of header.evidence.filter((item) => item.ruleId === 'source-header-author' || item.ruleId === 'source-header-copyright')) {
+    for (const evidence of header?.evidence.filter((item) => item.ruleId === 'source-header-author' || item.ruleId === 'source-header-copyright') ?? []) {
       addFinding(findings, {
         key: `attribution-declaration:${evidence.ruleId}:${entry.relPath}:${evidence.attributionSubject ?? ''}`,
         ruleId: evidence.ruleId, kind: 'attribution-declaration', confidence: 'medium',

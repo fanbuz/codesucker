@@ -376,15 +376,23 @@ async function nodeWorkspaceMemberManifests(
 }
 
 async function discoverNodeWorkspaceCandidates(
-  rootReal: string, seeds: string[], signal?: AbortSignal,
+  rootReal: string, seeds: string[], maxSeedManifests: number, signal?: AbortSignal,
 ): Promise<{ diagnostics: ThirdPartyAnalysisDiagnostic[]; relPaths: string[] }> {
   const candidates = new Set(seeds.map(normalizeRel));
-  const queue = seeds.filter((relPath) => path.posix.basename(relPath) === 'package.json').sort();
+  const packageSeeds = seeds.filter((relPath) => path.posix.basename(relPath) === 'package.json')
+    .sort((left, right) => {
+      const depth = left.split('/').length - right.split('/').length;
+      return depth || left.localeCompare(right);
+    });
+  const seedQueue = [...packageSeeds];
+  const workspaceQueue: string[] = [];
+  const workspaceQueued = new Set<string>();
   const visited = new Set<string>();
   const diagnostics: ThirdPartyAnalysisDiagnostic[] = [];
-  while (queue.length > 0) {
+  const probeLimit = Math.max(0, maxSeedManifests);
+  while ((workspaceQueue.length > 0 || seedQueue.length > 0) && visited.size < probeLimit) {
     signal?.throwIfAborted();
-    const relPath = queue.shift()!;
+    const relPath = workspaceQueue.shift() ?? seedQueue.shift()!;
     if (visited.has(relPath)) continue;
     visited.add(relPath);
     const document = await readManifest(rootReal, relPath);
@@ -403,12 +411,21 @@ async function discoverNodeWorkspaceCandidates(
       ));
     }
     for (const memberManifest of workspace.relPaths) {
-      if (!candidates.has(memberManifest)) {
-        candidates.add(memberManifest);
-        queue.push(memberManifest);
+      candidates.add(memberManifest);
+      if (!visited.has(memberManifest) && !workspaceQueued.has(memberManifest)) {
+        workspaceQueue.push(memberManifest);
+        workspaceQueued.add(memberManifest);
       }
     }
-    queue.sort();
+    workspaceQueue.sort();
+  }
+  if (workspaceQueue.some((relPath) => !visited.has(relPath))
+    || seedQueue.some((relPath) => !visited.has(relPath))) {
+    diagnostics.push(diagnostic(
+      'analysis-limit-reached', undefined,
+      `Node workspace 探测达到 ${probeLimit} 个清单上限，剩余入口或嵌套成员未读取。`,
+      '请缩小项目范围或提高依赖清单分析上限后重新扫描。',
+    ));
   }
   return { diagnostics, relPaths: [...candidates].sort() };
 }
@@ -1073,6 +1090,12 @@ interface TomlSection {
   body: string;
 }
 
+function tomlQuoteRun(text: string, index: number, quote: string): number {
+  let end = index;
+  while (text[end] === quote) end++;
+  return end - index;
+}
+
 function maskTomlMultilineStrings(text: string): string {
   const characters = text.split('');
   let quote: "'" | '"' | "'''" | '"""' | undefined;
@@ -1081,12 +1104,17 @@ function maskTomlMultilineStrings(text: string): string {
     const char = text[index];
     const triple = text.slice(index, index + 3);
     if (quote === "'''" || quote === '"""') {
-      const closing = triple === quote;
-      for (let offset = 0; offset < (closing ? 3 : 1); offset++) {
+      const wasEscaped = escapedCharacter;
+      if (escapedCharacter) escapedCharacter = false;
+      else if (quote === '"""' && char === '\\') escapedCharacter = true;
+      const run = char === quote[0] && !wasEscaped ? tomlQuoteRun(text, index, quote[0]) : 0;
+      const closing = run >= 3;
+      const consumed = closing ? run : 1;
+      for (let offset = 0; offset < consumed; offset++) {
         if (characters[index + offset] !== '\r' && characters[index + offset] !== '\n') characters[index + offset] = ' ';
       }
       if (closing) {
-        index += 2;
+        index += consumed - 1;
         quote = undefined;
       }
       continue;
@@ -1136,12 +1164,15 @@ function stripTomlComments(text: string): string {
       continue;
     }
     if (quote === "'''" || quote === '\"\"\"') {
-      out += char;
-      if (triple === quote) {
-        out += text.slice(index + 1, index + 3);
-        index += 2;
+      const wasEscaped = escapedCharacter;
+      if (escapedCharacter) escapedCharacter = false;
+      else if (quote === '\"\"\"' && char === '\\') escapedCharacter = true;
+      const run = char === quote[0] && !wasEscaped ? tomlQuoteRun(text, index, quote[0]) : 0;
+      if (run >= 3) {
+        out += text.slice(index, index + run);
+        index += run - 1;
         quote = undefined;
-      }
+      } else out += char;
       continue;
     }
     if (quote) {
@@ -1167,7 +1198,42 @@ function stripTomlComments(text: string): string {
 }
 
 function quotedTomlValues(value: string): string[] {
-  return [...value.matchAll(/['"]([^'"]+)['"]/g)].map((match) => match[1]);
+  const out: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const triple = value.slice(index, index + 3);
+    const delimiter = triple === "'''" || triple === '"""'
+      ? triple
+      : value[index] === "'" || value[index] === '"'
+        ? value[index]
+        : undefined;
+    if (!delimiter) continue;
+    const start = index + delimiter.length;
+    let escaped = false;
+    for (let cursor = start; cursor < value.length; cursor++) {
+      const multiline = delimiter === "'''" || delimiter === '"""';
+      if (delimiter === '"' || delimiter === '"""') {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (value[cursor] === '\\') {
+          escaped = true;
+          continue;
+        }
+      }
+      const run = multiline && value[cursor] === delimiter[0]
+        ? tomlQuoteRun(value, cursor, delimiter[0])
+        : 0;
+      if ((!multiline && value.startsWith(delimiter, cursor)) || (multiline && run >= 3)) {
+        const retainedQuotes = multiline ? delimiter[0].repeat(Math.min(2, run - 3)) : '';
+        out.push(value.slice(start, cursor) + retainedQuotes);
+        const consumed = multiline ? run : delimiter.length;
+        index = cursor + consumed - 1;
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 function tomlArrayAssignment(body: string, key: string): string[] {
@@ -1184,8 +1250,12 @@ function tomlArrayAssignment(body: string, key: string): string[] {
     const char = source[index];
     const triple = source.slice(index, index + 3);
     if (quote === "'''" || quote === '\"\"\"') {
-      if (triple === quote) {
-        index += 2;
+      const wasEscaped = escapedCharacter;
+      if (escapedCharacter) escapedCharacter = false;
+      else if (quote === '\"\"\"' && char === '\\') escapedCharacter = true;
+      const run = char === quote[0] && !wasEscaped ? tomlQuoteRun(source, index, quote[0]) : 0;
+      if (run >= 3) {
+        index += run - 1;
         quote = undefined;
       }
       continue;
@@ -1456,7 +1526,7 @@ export async function collectDependencyInventory(
     ignore: IGNORE_DIRS.filter((item) => !item.includes('vendor')),
   });
   const nodeWorkspaceDiscovery = await discoverNodeWorkspaceCandidates(
-    rootReal, [...regular, ...goVendor].map(normalizeRel), signal,
+    rootReal, [...regular, ...goVendor].map(normalizeRel), maxManifestFiles, signal,
   );
   const candidatePaths = new Set(nodeWorkspaceDiscovery.relPaths);
   const initialCandidates = [...candidatePaths].sort();

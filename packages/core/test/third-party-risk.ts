@@ -433,6 +433,14 @@ try {
     name = "self-python"
     dependencies = [
       "httpx>=0.27",
+      "marker-first; python_version < '3.12'",
+      "marker-second>=1",
+      '''literal-marker; python_version < '3.12'''' ,
+      'literal-after>=1',
+      """basic-marker; implementation_name == "cpython"""" ,
+      "basic-after>=1",
+      """basic-five; note == """"" ,
+      "basic-five-after>=1",
       "extra-only[security]>=1",
       # old: ["fake-only"]
       "after-comment>=1",
@@ -586,6 +594,10 @@ try {
     write('vendor/uv-local-directory/owned.py', 'def owned(): pass'),
     write('vendor/uv-local-file/owned.py', 'def owned(): pass'),
     write('vendor/uv-external/library.py', 'def external(): pass'),
+    write('vendor/marker-second/library.py', 'def marker(): pass'),
+    write('vendor/literal-after/library.py', 'def literal_marker(): pass'),
+    write('vendor/basic-after/library.py', 'def basic_marker(): pass'),
+    write('vendor/basic-five-after/library.py', 'def basic_five_marker(): pass'),
     write('third_party/bar/index.js', 'module.exports = true;'),
     write('third_party/@scope/deep/index.js', 'module.exports = true;'),
     write('third_party/@legacy/v1-nested/index.js', 'module.exports = true;'),
@@ -620,6 +632,7 @@ try {
   )));
   const fullSnapshot = await analyzeThirdPartyRisksWithSnapshot(root, files);
   const limitedSnapshot = await analyzeThirdPartyRisksWithSnapshot(root, files, { maxManifestFiles: 1 });
+  const pathLimited = await analyzeThirdPartyRisks(root, files, { maxEvidenceFiles: 1 });
   for (const memberManifest of [
     'vendor/go-owned/go.mod', 'vendor/go owned/go.mod', 'vendor/go-escaped/go.mod',
     'vendor/go hex/go.mod', 'vendor/go-win/go.mod', 'vendor/go"quoted/go.mod',
@@ -631,12 +644,14 @@ try {
     '含非法 Go 字符串转义的 use 项不能形成候选成员路径');
   for (const memberManifest of [
     'vendor/node-owned/package.json',
-    'vendor/node-owned/node-nested-owned/package.json',
     'vendor/range-1/package.json',
   ]) {
     assert.ok(limitedSnapshot.manifestCandidateRelPaths.includes(memberManifest),
       `显式 Node workspace 成员 ${memberManifest} 必须在分析上限外进入完整候选清单快照`);
   }
+  assert.ok(fullSnapshot.manifestCandidateRelPaths.includes(
+    'vendor/node-owned/node-nested-owned/package.json',
+  ), '清单上限充足时必须递归发现嵌套 Node workspace 成员');
   assert.ok(!fullSnapshot.manifestCandidateRelPaths.includes('vendor/node-external/package.json'),
     'Node workspace 排除 glob 不能形成本地成员候选');
   assert.ok(limitedSnapshot.manifestCandidateRelPaths.includes('node-glob-root/packages/owned/package.json'),
@@ -647,6 +662,11 @@ try {
   assert.equal(limitedSnapshot.manifestCandidateRelPaths.length > 1, true);
   assert.equal(limitedSnapshot.manifestIdentities.length, limitedSnapshot.manifestCandidateRelPaths.length,
     '超过分析上限的候选清单也必须进入完整字节身份快照');
+  assert.ok(limitedSnapshot.report.diagnostics.some((item) => item.code === 'analysis-limit-reached'
+    && item.message.includes('Node workspace 探测')), 'Node workspace 入口探测必须受清单上限约束并报告未读取范围');
+  const pathLimitedFiles = new Set(pathLimited.findings.flatMap((finding) => finding.affected.relPaths));
+  assert.ok(pathLimitedFiles.has('vendor/left-pad/index.js'), '文件头上限外的 vendor 路径规则仍必须执行');
+  assert.ok(pathLimitedFiles.has('src/client.generated.ts'), '文件头上限外的 generated 路径规则仍必须执行');
   const beyondLimit = limitedSnapshot.manifestCandidateRelPaths.find((relPath) => (
     relPath !== limitedSnapshot.manifestCandidateRelPaths[0]
   ));
@@ -759,6 +779,8 @@ try {
     'vendor/quoted-extra/api.py', 'vendor/quoted-group/api.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
+    'vendor/marker-second/library.py', 'vendor/literal-after/library.py',
+    'vendor/basic-after/library.py', 'vendor/basic-five-after/library.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
     'external/slf4j-api/Logger.java', 'external/debug-lib/Debug.java', 'external/legacy-core/Legacy.java',
     'other-project/vendor/common/Other.java', 'vendor/profile-common/src/ProfileCommon.java',
