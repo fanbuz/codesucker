@@ -87,6 +87,22 @@ try {
       example.local/block => ./block
     )
   `);
+  await fs.writeFile(path.join(root, 'go.work'), `
+    go 1.22
+    use ./go-workspace/app
+    replace example.local/work-owned => ./go-workspace/owned
+  `);
+  await fs.mkdir(path.join(root, 'go-workspace/app'), { recursive: true });
+  await fs.writeFile(path.join(root, 'go-workspace/app/go.mod'), `
+    module example.local/work-app
+    require example.local/work-owned v0.0.0
+    require github.com/acme/work-external v1.0.0
+  `);
+  await fs.mkdir(path.join(root, 'go-outsider'), { recursive: true });
+  await fs.writeFile(path.join(root, 'go-outsider/go.mod'), `
+    module example.local/outsider
+    require example.local/work-owned v1.0.0
+  `);
   await fs.writeFile(path.join(root, 'Cargo.toml'), `
     [package]
     name = "self-rust"
@@ -236,6 +252,9 @@ try {
     write('vendor/common/src/Common.java', 'class Common {}'),
     write('third_party/github.com/acme/tool/tool.go', 'package tool'),
     write('third_party/example.local/block/tool.go', 'package block'),
+    write('go-workspace/app/vendor/work-owned/owned.go', 'package owned'),
+    write('go-workspace/app/vendor/work-external/external.go', 'package external'),
+    write('go-outsider/vendor/work-owned/external.go', 'package external'),
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
     write('deps/table-form/lib.rs', 'pub fn table() {}'),
     write('deps/local-table/lib.rs', 'pub fn owned() {}'),
@@ -325,7 +344,9 @@ try {
     .flatMap((finding) => finding.affected.relPaths));
   for (const relPath of [
     'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
-    'third_party/github.com/acme/tool/tool.go', 'deps/serde/lib.rs', 'deps/table-form/lib.rs',
+    'third_party/github.com/acme/tool/tool.go', 'go-workspace/app/vendor/work-external/external.go',
+    'go-outsider/vendor/work-owned/external.go',
+    'deps/serde/lib.rs', 'deps/table-form/lib.rs',
     'deps/lock-external/lib.rs', 'vendor/lock-collision/lib.rs', 'vendor/sparse-dep/lib.rs',
     'deps/target-table/lib.rs', 'vendors/requests/api.py', 'vendor/httpx/client.py',
     'vendor/extra-only/security.py', 'vendor/after-comment/client.py',
@@ -340,6 +361,7 @@ try {
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('go-workspace/app/vendor/work-owned/owned.go'), 'go.work 本地 replace 必须传播到 use 成员的 go.mod');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/local-table/lib.rs'), 'Cargo table-form path 依赖不能判为第三方依赖源码');
   assert.ok(dependencyFiles.has('deps/table-form/lib.rs'), 'Cargo table-form 注释中的 path/package/workspace 不能改变外部依赖');

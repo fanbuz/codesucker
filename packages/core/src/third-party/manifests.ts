@@ -34,6 +34,7 @@ export interface DependencyIdentity {
   local: boolean;
   workspaceRole?: 'definition' | 'reference';
   workspaceKey?: string;
+  workspaceScopes?: string[];
 }
 
 export interface DependencyInventory {
@@ -386,9 +387,32 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
     if (own) out.push(own);
   }
   const replacedLocal = new Set<string>();
+  const workspaceScopes: string[] = [];
   let replaceBlock = false;
+  let useBlock = false;
   for (const rawLine of doc.text.split(/\r?\n/)) {
     const line = rawLine.replace(/\s+\/\/.*$/, '').trim();
+    if (doc.basename === 'go.work') {
+      if (/^use\s*\($/.test(line)) {
+        useBlock = true;
+        continue;
+      }
+      if (useBlock && /^\)$/.test(line)) {
+        useBlock = false;
+        continue;
+      }
+      const useExpression = useBlock ? line : line.replace(/^use\s+/, '');
+      if (useBlock || useExpression !== line) {
+        const rawMember = /^(?:"([^"]+)"|`([^`]+)`|(\S+))/.exec(useExpression)?.slice(1).find(Boolean);
+        if (rawMember && !path.posix.isAbsolute(rawMember) && !path.win32.isAbsolute(rawMember)) {
+          const member = path.posix.normalize(path.posix.join(path.posix.dirname(doc.relPath), rawMember.replace(/\\/g, '/')));
+          if (member !== '..' && !member.startsWith('../') && !path.posix.isAbsolute(member)) {
+            workspaceScopes.push(member === '.' ? '' : member);
+          }
+        }
+        continue;
+      }
+    }
     if (/^replace\s*\($/.test(line)) {
       replaceBlock = true;
       continue;
@@ -402,13 +426,29 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
     const match = /^([^\s]+)(?:\s+v[^\s]+)?\s*=>\s*([^\s]+)(?:\s+v[^\s]+)?$/.exec(expression);
     if (match && /^(?:\.\.?\/|\/)/.test(match[2])) replacedLocal.add(match[1]);
   }
+  if (doc.basename === 'go.work') {
+    for (const name of replacedLocal) {
+      const item = identity('go', name, doc.relPath, 'manifest', true);
+      if (item) out.push({
+        ...item,
+        workspaceRole: 'definition',
+        workspaceKey: item.normalizedName,
+        workspaceScopes: [...new Set(workspaceScopes)].sort(),
+      });
+    }
+  }
+  const withWorkspaceReference = (item: DependencyIdentity): DependencyIdentity => (
+    doc.basename === 'go.mod' && !item.local
+      ? { ...item, workspaceRole: 'reference', workspaceKey: item.normalizedName }
+      : item
+  );
   for (const match of doc.text.matchAll(/^\s*([\w.~-]+\/[\w./~-]+)\s+v[^\s]+(?:\s+\/\/.*)?$/gm)) {
     const item = identity('go', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', replacedLocal.has(match[1]));
-    if (item) out.push(item);
+    if (item) out.push(withWorkspaceReference(item));
   }
   for (const match of doc.text.matchAll(/^\s*require\s+([\w.~-]+\/[\w./~-]+)\s+v[^\s]+(?:\s+\/\/.*)?$/gm)) {
     const item = identity('go', match[1], doc.relPath, 'manifest', replacedLocal.has(match[1]));
-    if (item) out.push(item);
+    if (item) out.push(withWorkspaceReference(item));
   }
   for (const match of doc.text.matchAll(/^#\s+([^\s]+)\s+v[^\s]+/gm)) {
     const item = identity('go', match[1], doc.relPath, 'lockfile', replacedLocal.has(match[1]));
@@ -711,13 +751,16 @@ function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
         if (definition.ecosystem !== item.ecosystem
           || (definition.workspaceKey ?? definition.normalizedName) !== (item.workspaceKey ?? item.normalizedName)) return false;
         const workspaceDir = path.posix.dirname(definition.sourceFile);
+        if (definition.workspaceScopes) {
+          return definition.workspaceScopes.includes(referenceDir === '.' ? '' : referenceDir);
+        }
         const rel = path.posix.relative(workspaceDir, referenceDir);
         return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel));
       });
       return relatedDefinition ? { ...item, local: true } : item;
     })
     .filter((item) => {
-      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.workspaceKey ?? ''}\0${item.sourceFile}\0${item.source}\0${item.local}`;
+      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.workspaceKey ?? ''}\0${item.workspaceScopes?.join('\0') ?? ''}\0${item.sourceFile}\0${item.source}\0${item.local}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

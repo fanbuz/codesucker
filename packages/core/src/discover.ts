@@ -122,10 +122,104 @@ function isValidUtf8(buf: Buffer): boolean {
   }
 }
 
+interface HtmlOpeningTag {
+  end: number;
+  index: number;
+  name: string;
+  raw: string;
+}
+
+function htmlOpeningTags(text: string): HtmlOpeningTag[] {
+  const out: HtmlOpeningTag[] = [];
+  for (const match of text.matchAll(/<([A-Za-z][A-Za-z0-9:-]*)\b/g)) {
+    const index = match.index ?? 0;
+    let quote: "'" | '"' | undefined;
+    let end = -1;
+    for (let cursor = index + match[0].length; cursor < text.length; cursor++) {
+      const char = text[cursor];
+      if (quote) {
+        if (char === quote) quote = undefined;
+      } else if (char === "'" || char === '"') quote = char;
+      else if (char === '>') {
+        end = cursor + 1;
+        break;
+      }
+    }
+    if (end > index) out.push({ index, end, name: match[1].toLocaleLowerCase(), raw: text.slice(index, end) });
+  }
+  return out;
+}
+
+function htmlAttributes(tag: HtmlOpeningTag): Map<string, string> {
+  const attributes = new Map<string, string>();
+  let cursor = 1 + tag.name.length;
+  while (cursor < tag.raw.length - 1) {
+    while (/\s|\//.test(tag.raw[cursor] ?? '')) cursor++;
+    const nameStart = cursor;
+    while (cursor < tag.raw.length - 1 && !/[\s=/>]/.test(tag.raw[cursor])) cursor++;
+    if (cursor === nameStart) break;
+    const name = tag.raw.slice(nameStart, cursor).toLocaleLowerCase();
+    while (/\s/.test(tag.raw[cursor] ?? '')) cursor++;
+    let value = '';
+    if (tag.raw[cursor] === '=') {
+      cursor++;
+      while (/\s/.test(tag.raw[cursor] ?? '')) cursor++;
+      const quote = tag.raw[cursor] === "'" || tag.raw[cursor] === '"' ? tag.raw[cursor++] : undefined;
+      const valueStart = cursor;
+      if (quote) {
+        while (cursor < tag.raw.length - 1 && tag.raw[cursor] !== quote) cursor++;
+        value = tag.raw.slice(valueStart, cursor);
+        if (tag.raw[cursor] === quote) cursor++;
+      } else {
+        while (cursor < tag.raw.length - 1 && !/[\s>]/.test(tag.raw[cursor])) cursor++;
+        value = tag.raw.slice(valueStart, cursor);
+      }
+    }
+    attributes.set(name, value);
+  }
+  return attributes;
+}
+
+function htmlMetaEncoding(tag: HtmlOpeningTag): string | null {
+  if (tag.name !== 'meta') return null;
+  const attributes = htmlAttributes(tag);
+  const charset = attributes.get('charset')?.trim();
+  if (charset && /^[A-Za-z0-9._-]+$/.test(charset)) return charset;
+  if (attributes.get('http-equiv')?.trim().toLocaleLowerCase() !== 'content-type') return null;
+  return /(?:^|;)\s*charset\s*=\s*([A-Za-z0-9._-]+)/i.exec(attributes.get('content') ?? '')?.[1] ?? null;
+}
+
+function blankMarkup(value: string): string {
+  return value.replace(/[^\r\n]/g, ' ');
+}
+
 function declaredEncoding(buf: Buffer): string | null {
   const header = buf.subarray(0, 512).toString('latin1');
-  const match = header.match(/(?:coding\s*[:=]|charset\s*=)\s*["']?([A-Za-z0-9._-]+)/i);
-  return match?.[1] ?? null;
+  const lines = header.split(/\r\n|\r|\n/).slice(0, 2);
+  for (const line of lines) {
+    const comment = /^\s*(?:#|\/\/|\/\*+|\*|--|;).*?\b(?:coding\s*[:=]|charset\s*=)\s*["']?([A-Za-z0-9._-]+)/i.exec(line);
+    if (comment) return comment[1];
+  }
+  const leading = /^\s*(?:<\?xml\b[^>]*\bencoding\s*=|@charset\s+)\s*["']?([A-Za-z0-9._-]+)/i.exec(header);
+  if (leading) return leading[1];
+  const htmlHeader = header.replace(/<!--[\s\S]*?-->/g, blankMarkup);
+  const tags = htmlOpeningTags(htmlHeader);
+  for (const meta of tags.filter((tag) => tag.name === 'meta')) {
+    const encoding = htmlMetaEncoding(meta);
+    if (!encoding) continue;
+    const prefix = htmlHeader.slice(0, meta.index);
+    const head = tags.filter((tag) => tag.name === 'head' && tag.index < meta.index).at(-1);
+    const prolog = head ? prefix.slice(0, head.index) : prefix;
+    if (!/^\s*(?:(?:<!doctype\b[^>]*>|<html\b[^>]*>)\s*)*$/i.test(prolog)) continue;
+    if (!head) return encoding;
+    let headPrefix = prefix.slice(head.end);
+    headPrefix = headPrefix.replace(/<title\b[^>]*>[\s\S]*?<\/title\s*>/gi, blankMarkup);
+    const allowedTags = htmlOpeningTags(headPrefix).filter((tag) => ['base', 'link', 'meta'].includes(tag.name));
+    const characters = headPrefix.split('');
+    for (const tag of allowedTags) characters.fill(' ', tag.index, tag.end);
+    if (characters.join('').trim().length === 0) return encoding;
+  }
+  return null;
 }
 
 function utf16WithoutBom(buf: Buffer): 'UTF-16LE' | 'UTF-16BE' | null {
@@ -165,10 +259,10 @@ function detectSourceEncoding(buf: Buffer): { encoding: string; bomBytes: number
   // 无 BOM 的 UTF-16 ASCII 区段同时也是合法 UTF-8 字节；必须先看 NUL 对齐与换行特征。
   const utf16 = utf16WithoutBom(buf);
   if (utf16) return { encoding: utf16, bomBytes: 0 };
-  if (isValidUtf8(buf)) return { encoding: 'UTF-8', bomBytes: 0 };
 
   const declared = declaredEncoding(buf);
   if (declared) return { encoding: normalizeDetectedEncoding(declared), bomBytes: 0 };
+  if (isValidUtf8(buf)) return { encoding: 'UTF-8', bomBytes: 0 };
 
   const detected = chardet.detect(buf);
   if (!detected) throw new SourceDecodeError('unsupported-encoding', '无法识别文件编码');

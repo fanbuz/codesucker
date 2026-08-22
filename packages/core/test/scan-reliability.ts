@@ -31,6 +31,17 @@ write('enc/shift-jis-noncanonical.py', Buffer.concat([
 write('enc/big5-noncanonical.py', Buffer.concat([
   Buffer.from('# -*- coding: big5 -*-\nvalue = "', 'ascii'), Buffer.from([0x8e, 0x69]), Buffer.from('"', 'ascii'),
 ]));
+write('enc/declared-latin1.py', Buffer.concat([
+  Buffer.from('# coding: latin-1\nvalue = "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"', 'ascii'),
+]));
+write('enc/utf8-charset-string.ts', 'const sample = "charset=gbk";\nconst 名称 = "仍是 UTF-8";');
+write('enc/declared-html.html', Buffer.concat([
+  Buffer.from('<!-- old <head><meta charset="utf-8"> --><!doctype html><html><head><!-- old <meta charset="utf-8"> --><title>Legacy</title><meta name="viewport" content="width=device-width"><link rel="stylesheet"><meta charset="windows-1252"></head><body>', 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
+]));
+write('enc/utf8-meta-string.ts', 'const sample = "<meta charset=gbk>";\nconst 名称 = "仍是 UTF-8";');
+write('enc/utf8-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="charset=windows-1252"><meta charset="utf-8"></head><body>é</body></html>');
+write('enc/utf8-nested-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="<meta charset=windows-1252>"><meta charset="utf-8"></head><body>é</body></html>');
 write('enc/utf16le.ts', withBom([0xff, 0xfe], iconv.encode('const 名称 = "UTF-16LE";\r\nconst value = 4;', 'utf16-le')));
 write('enc/utf16be.ts', withBom([0xfe, 0xff], iconv.encode('const 名称 = "UTF-16BE";\rconst value = 5;', 'utf16-be')));
 write('enc/utf16le-no-bom.ts', iconv.encode('const value = "UTF-16LE no BOM";\nconst next = 6;', 'utf16-le'));
@@ -87,6 +98,12 @@ assert.equal(byPath.get('enc/gb18030.py')?.encoding, 'GB18030');
 assert.equal(byPath.get('enc/gbk-noncanonical.py')?.encoding, 'GBK', '合法 GBK 重复映射不能误报解码失败');
 assert.equal(byPath.get('enc/shift-jis-noncanonical.py')?.encoding, 'SHIFT-JIS', '合法 Shift-JIS 扩展映射不能误报解码失败');
 assert.equal(byPath.get('enc/big5-noncanonical.py')?.encoding, 'BIG5', '合法 Big5 重复映射不能误报解码失败');
+assert.equal(byPath.get('enc/declared-latin1.py')?.encoding, 'LATIN-1', '显式旧编码声明必须优先于 UTF-8 字节有效性');
+assert.equal(byPath.get('enc/utf8-charset-string.ts')?.encoding, 'UTF-8', '普通字符串中的 charset 不能伪装成编码声明');
+assert.equal(byPath.get('enc/declared-html.html')?.encoding, 'WINDOWS-1252', 'doctype/head 后的 HTML meta 编码声明必须生效');
+assert.equal(byPath.get('enc/utf8-meta-string.ts')?.encoding, 'UTF-8', '普通字符串中的 meta 标签不能伪装成编码声明');
+assert.equal(byPath.get('enc/utf8-meta-attribute.html')?.encoding, 'UTF-8', '普通 meta 属性值中的 charset 不能抢在真实 charset 属性前');
+assert.equal(byPath.get('enc/utf8-nested-meta-attribute.html')?.encoding, 'UTF-8', '属性值中的伪 meta 标签不能抢在真实 charset 属性前');
 assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be.ts')?.encoding, 'UTF-16BE');
 assert.equal(byPath.get('enc/utf16le-no-bom.ts')?.encoding, 'UTF-16LE');
@@ -151,6 +168,10 @@ assert.match(fs.readFileSync(utf16Export, 'utf8'), /UTF-16BE/);
 
 const gb18030 = processFiles([byPath.get('enc/gb18030.py')!], config);
 assert.match(gb18030.cleaned[0].lines.join('\n'), /𠮷/, 'GB18030 四字节字符不能按 GBK 解码损坏');
+const latin1 = processFiles([byPath.get('enc/declared-latin1.py')!], config);
+assert.match(latin1.cleaned[0].lines.join('\n'), /Ã©/, '显式 latin-1 源码必须按声明保留原始字符语义');
+const declaredHtml = processFiles([byPath.get('enc/declared-html.html')!], config);
+assert.match(declaredHtml.cleaned[0].lines.join('\n'), /Ã©/, 'HTML meta 声明必须优先于 UTF-8 字节有效性');
 
 const missingCandidate: FileCandidate = {
   path: path.join(root, 'missing.ts'),

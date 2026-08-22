@@ -53,13 +53,24 @@ function manifestScopeDepth(sourceFile: string, relPath: string): number {
   return scope === '.' ? 0 : scope.split('/').filter(Boolean).length;
 }
 
+function dependencyScopeDepth(dependency: DependencyIdentity, relPath: string): number {
+  if (!dependency.workspaceScopes) return manifestScopeDepth(dependency.sourceFile, relPath);
+  const normalized = normalizeRel(relPath);
+  const depths = dependency.workspaceScopes.map((scope) => {
+    const rel = path.posix.relative(scope || '.', normalized);
+    if (rel === '..' || rel.startsWith('../') || path.posix.isAbsolute(rel)) return -1;
+    return scope ? scope.split('/').filter(Boolean).length : 0;
+  });
+  return Math.max(-1, ...depths);
+}
+
 function matchDependency(
   relPath: string, relSegments: string[], dependencies: DependencyIdentity[],
 ): DependencyIdentity | undefined {
   const lower = relSegments.map((segment) => segment.toLocaleLowerCase());
   const matches = dependencies.map((dependency) => ({
     dependency,
-    depth: manifestScopeDepth(dependency.sourceFile, relPath),
+    depth: dependencyScopeDepth(dependency, relPath),
     nameMatches: dependencyTokens(dependency).some((token) => {
       const tokenSegments = token.split('/');
       return lower.some((segment, index) => tokenSegments.every((part, offset) => lower[index + offset] === part));
