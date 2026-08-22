@@ -110,6 +110,32 @@ try {
     [target.'cfg(unix)'.dev-dependencies.target-table]
     version = "1"
   `);
+  await fs.writeFile(path.join(root, 'Cargo.lock'), `
+    version = 3
+
+    [[package]]
+    name = "lock-external"
+    version = "1.0.0"
+    source = "registry+https://github.com/rust-lang/crates.io-index"
+
+    [[package]]
+    name = "lock-owned-only"
+    version = "0.1.0"
+
+    [[package]]
+    name = "lock-collision"
+    version = "0.1.0"
+
+    [[package]]
+    name = "lock-collision"
+    version = "1.0.0"
+    source = "registry+https://github.com/rust-lang/crates.io-index"
+
+    [[package]]
+    name = "sparse-dep"
+    version = "1.0.0"
+    source = "sparse+https://index.crates.io/"
+  `);
   await fs.mkdir(path.join(root, 'rust-workspace/member'), { recursive: true });
   await fs.writeFile(path.join(root, 'rust-workspace/Cargo.toml'), `
     [workspace.dependencies]
@@ -214,6 +240,10 @@ try {
     write('deps/table-form/lib.rs', 'pub fn table() {}'),
     write('deps/local-table/lib.rs', 'pub fn owned() {}'),
     write('deps/target-table/lib.rs', 'pub fn target() {}'),
+    write('deps/lock-external/lib.rs', 'pub fn external() {}'),
+    write('vendor/lock-owned-only/lib.rs', 'pub fn owned() {}'),
+    write('vendor/lock-collision/lib.rs', 'pub fn external() {}'),
+    write('vendor/sparse-dep/lib.rs', 'pub fn external() {}'),
     write('deps/workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/deps/workspace-member-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/member/vendor/workspace-alias/lib.rs', 'pub fn owned() {}'),
@@ -296,6 +326,7 @@ try {
   for (const relPath of [
     'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
     'third_party/github.com/acme/tool/tool.go', 'deps/serde/lib.rs', 'deps/table-form/lib.rs',
+    'deps/lock-external/lib.rs', 'vendor/lock-collision/lib.rs', 'vendor/sparse-dep/lib.rs',
     'deps/target-table/lib.rs', 'vendors/requests/api.py', 'vendor/httpx/client.py',
     'vendor/extra-only/security.py', 'vendor/after-comment/client.py',
     'vendor/pipenv-external/library.py',
@@ -312,6 +343,8 @@ try {
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/local-table/lib.rs'), 'Cargo table-form path 依赖不能判为第三方依赖源码');
   assert.ok(dependencyFiles.has('deps/table-form/lib.rs'), 'Cargo table-form 注释中的 path/package/workspace 不能改变外部依赖');
+  assert.ok(!dependencyFiles.has('vendor/lock-owned-only/lib.rs'), 'Cargo.lock 仅有无 source 的 workspace/path 包不能判为第三方');
+  assert.ok(dependencyFiles.has('vendor/lock-collision/lib.rs'), 'Cargo.lock 同名本地与 registry 包不能让本地条目遮蔽外部证据');
   assert.ok(!dependencyFiles.has('rust-workspace/deps/workspace-member-local/lib.rs'),
     '兄弟工程的同名外部依赖不能覆盖当前 Cargo workspace 的本地声明');
   assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/workspace-alias/lib.rs'),

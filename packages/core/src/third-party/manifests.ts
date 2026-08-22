@@ -420,8 +420,20 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
 function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (doc.basename === 'Cargo.lock') {
-    for (const match of doc.text.matchAll(/^name\s*=\s*['"]([^'"]+)['"]\s*$/gm)) {
-      const item = identity('rust', match[1], doc.relPath, 'lockfile');
+    const externalSource = (source: string | undefined): boolean => /^(?:registry|sparse|git)\+/.test(source ?? '');
+    const packages = tomlSections(doc.text).filter((section) => section.name === 'package').map((section) => {
+      const body = stripTomlComments(section.body);
+      return {
+        name: /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(body)?.[1],
+        source: /^\s*source\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(body)?.[1],
+      };
+    });
+    const externalNames = new Set(packages.filter((item) => externalSource(item.source))
+      .map((item) => normalizePackageName(item.name ?? '', 'rust')));
+    for (const entry of packages) {
+      const local = !externalSource(entry.source);
+      if (local && externalNames.has(normalizePackageName(entry.name ?? '', 'rust'))) continue;
+      const item = identity('rust', entry.name ?? '', doc.relPath, 'lockfile', local);
       if (item) out.push(item);
     }
     return out;
