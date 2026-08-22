@@ -130,7 +130,15 @@ try {
     [package]
     name = "self-rust"
     [dependencies]
-    serde = "1"
+    "serde" = "1"
+    dotted-external.version = "1"
+    "quoted-segment-external".version = "1"
+    "literal.dot" = "1"
+    dotted-local.path = "crates/dotted-local"
+    'dotted-local-quoted'.path = "crates/dotted-local-quoted"
+    dotted-renamed.version = "1"
+    dotted-renamed.package = "dotted-actual"
+    # commented-external.version = "1"
     local-crate = { path = "crates/local" }
     workspace-local = { workspace = true }
 
@@ -146,7 +154,19 @@ try {
     [dependencies.local-table]
     path = "crates/local-table"
 
+    [dependencies . "escaped\\u002dtable"]
+    version = "1"
+
+    [dependencies . 'space-table']
+    version = "1"
+
+    [dependencies . "literal.table"]
+    version = "1"
+
     [target.'cfg(unix)'.dev-dependencies.target-table]
+    version = "1"
+
+    [target . 'cfg(unix)' . dev-dependencies . "target\\u002descaped"]
     version = "1"
   `);
   await fs.writeFile(path.join(root, 'Cargo.lock'), `
@@ -178,15 +198,21 @@ try {
   await fs.mkdir(path.join(root, 'rust-workspace/member'), { recursive: true });
   await fs.writeFile(path.join(root, 'rust-workspace/Cargo.toml'), `
     [workspace.dependencies]
-    workspace-member-local = { path = "crates/workspace-member-local" }
-    workspace-alias = { package = "workspace-actual", path = "crates/workspace-actual" }
+    'workspace-member-local'.path = "crates/workspace-member-local"
+    "workspace-alias" = { package = "workspace-actual", path = "crates/workspace-actual" }
+
+    [workspace . dependencies . "table-workspace-local"]
+    path = "crates/table-workspace-local"
   `);
   await fs.writeFile(path.join(root, 'rust-workspace/member/Cargo.toml'), `
     [package]
     name = "workspace-member"
     [dependencies]
-    workspace-member-local = { workspace = true }
-    workspace-alias = { workspace = true }
+    "workspace-member-local".workspace = true
+    "workspace-alias" = { workspace = true }
+
+    [dependencies . "table-workspace-local"]
+    workspace = true
   `);
   await fs.mkdir(path.join(root, 'rust-external'), { recursive: true });
   await fs.writeFile(path.join(root, 'rust-external/Cargo.toml'), `
@@ -343,6 +369,17 @@ try {
     write('go-workspace/app/vendor/work-external/external.go', 'package external'),
     write('go-outsider/vendor/work-owned/external.go', 'package external'),
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
+    write('deps/dotted-external/lib.rs', 'pub fn external() {}'),
+    write('deps/quoted-segment-external/lib.rs', 'pub fn external() {}'),
+    write('deps/literal.dot/lib.rs', 'pub fn external() {}'),
+    write('deps/dotted-local/lib.rs', 'pub fn owned() {}'),
+    write('deps/dotted-local-quoted/lib.rs', 'pub fn owned() {}'),
+    write('deps/dotted-actual/lib.rs', 'pub fn external() {}'),
+    write('deps/commented-external/lib.rs', 'pub fn owned() {}'),
+    write('deps/escaped-table/lib.rs', 'pub fn external() {}'),
+    write('deps/space-table/lib.rs', 'pub fn external() {}'),
+    write('deps/literal.table/lib.rs', 'pub fn external() {}'),
+    write('deps/target-escaped/lib.rs', 'pub fn external() {}'),
     write('deps/table-form/lib.rs', 'pub fn table() {}'),
     write('deps/local-table/lib.rs', 'pub fn owned() {}'),
     write('deps/target-table/lib.rs', 'pub fn target() {}'),
@@ -353,6 +390,7 @@ try {
     write('deps/workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/deps/workspace-member-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/member/vendor/workspace-alias/lib.rs', 'pub fn owned() {}'),
+    write('rust-workspace/member/vendor/table-workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-external/deps/workspace-member-local/lib.rs', 'pub fn external() {}'),
     write('vendors/requests/api.py', 'def get(): pass'),
     write('vendor/nested-requirement/api.py', 'def nested(): pass'),
@@ -488,7 +526,10 @@ try {
     'third_party/github.com/acme/tool/tool.go', 'vendor/example/example.go', 'vendor/blockdep/blockdep.go',
     'go-workspace/app/vendor/work-external/external.go',
     'go-outsider/vendor/work-owned/external.go',
-    'deps/serde/lib.rs', 'deps/table-form/lib.rs',
+    'deps/serde/lib.rs', 'deps/dotted-external/lib.rs', 'deps/quoted-segment-external/lib.rs',
+    'deps/literal.dot/lib.rs', 'deps/dotted-actual/lib.rs', 'deps/escaped-table/lib.rs',
+    'deps/space-table/lib.rs', 'deps/literal.table/lib.rs', 'deps/target-escaped/lib.rs',
+    'deps/table-form/lib.rs',
     'deps/lock-external/lib.rs', 'vendor/lock-collision/lib.rs', 'vendor/sparse-dep/lib.rs',
     'deps/target-table/lib.rs', 'vendors/requests/api.py', 'vendor/httpx/client.py',
     'vendor/nested-requirement/api.py', 'vendor/deep-requirement/api.py',
@@ -531,6 +572,9 @@ try {
     'go.work replace 到当前目录必须传播到 use 成员的 go.mod');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/local-table/lib.rs'), 'Cargo table-form path 依赖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('deps/dotted-local/lib.rs'), 'Cargo bare dotted path 依赖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('deps/dotted-local-quoted/lib.rs'), 'Cargo quoted dotted path 依赖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('deps/commented-external/lib.rs'), 'Cargo 注释中的 dotted key 不能形成依赖证据');
   assert.ok(dependencyFiles.has('deps/table-form/lib.rs'), 'Cargo table-form 注释中的 path/package/workspace 不能改变外部依赖');
   assert.ok(!dependencyFiles.has('vendor/lock-owned-only/lib.rs'), 'Cargo.lock 仅有无 source 的 workspace/path 包不能判为第三方');
   assert.ok(dependencyFiles.has('vendor/lock-collision/lib.rs'), 'Cargo.lock 同名本地与 registry 包不能让本地条目遮蔽外部证据');
@@ -538,6 +582,8 @@ try {
     '兄弟工程的同名外部依赖不能覆盖当前 Cargo workspace 的本地声明');
   assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/workspace-alias/lib.rs'),
     'Cargo workspace 重命名依赖必须按别名传播本地属性');
+  assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/table-workspace-local/lib.rs'),
+    'Cargo workspace table-form 本地依赖必须传播到成员 table-form 引用');
   assert.ok(!dependencyFiles.has('vendor/acme-cli/owned.py'), 'project.scripts 不能误当 Python 依赖');
   assert.ok(!dependencyFiles.has('vendor/local-tool/owned.py'), 'Poetry path 依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/owned-direct/owned.py'), 'PEP 508 file 直接引用不能默认判为第三方');

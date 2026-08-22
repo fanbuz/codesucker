@@ -548,6 +548,93 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
   return out;
 }
 
+interface TomlKeyAssignment {
+  keyPath: string[];
+  value: string;
+}
+
+function parseTomlKeyAssignment(line: string): TomlKeyAssignment | null {
+  const keyPath: string[] = [];
+  let cursor = 0;
+  const skipWhitespace = () => {
+    while (line[cursor] === ' ' || line[cursor] === '\t') cursor++;
+  };
+  skipWhitespace();
+  while (cursor < line.length) {
+    let segment = '';
+    const quote = line[cursor] === '"' || line[cursor] === "'" ? line[cursor++] : undefined;
+    if (quote) {
+      let closed = false;
+      while (cursor < line.length) {
+        const char = line[cursor++];
+        if (char === quote) {
+          closed = true;
+          break;
+        }
+        if (quote === '"' && char === '\\') {
+          const escape = line[cursor++];
+          const simpleEscapes: Record<string, string> = {
+            b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\',
+          };
+          if (escape in simpleEscapes) {
+            segment += simpleEscapes[escape];
+            continue;
+          }
+          if (escape !== 'u' && escape !== 'U') return null;
+          const digits = escape === 'u' ? 4 : 8;
+          const hex = line.slice(cursor, cursor + digits);
+          if (!new RegExp(`^[A-Fa-f0-9]{${digits}}$`).test(hex)) return null;
+          const codePoint = Number.parseInt(hex, 16);
+          if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return null;
+          segment += String.fromCodePoint(codePoint);
+          cursor += digits;
+          continue;
+        }
+        if (char === '\r' || char === '\n') return null;
+        segment += char;
+      }
+      if (!closed) return null;
+    } else {
+      const bare = /^[A-Za-z0-9_-]+/.exec(line.slice(cursor));
+      if (!bare) return null;
+      segment = bare[0];
+      cursor += segment.length;
+    }
+    keyPath.push(segment);
+    skipWhitespace();
+    if (line[cursor] === '.') {
+      cursor++;
+      skipWhitespace();
+      continue;
+    }
+    if (line[cursor] !== '=') return null;
+    const value = line.slice(cursor + 1).trim();
+    return value ? { keyPath, value } : null;
+  }
+  return null;
+}
+
+function cargoDependencySection(rawName: string): {
+  tableDependency?: string;
+  workspaceDefinition: boolean;
+} | null {
+  const keyPath = parseTomlKeyAssignment(`${rawName} = true`)?.keyPath;
+  if (!keyPath) return null;
+  let dependencyIndex = -1;
+  let workspaceDefinition = false;
+  if (keyPath[0] === 'workspace' && keyPath[1] === 'dependencies') {
+    dependencyIndex = 1;
+    workspaceDefinition = true;
+  } else if (/^(?:dev-|build-)?dependencies$/.test(keyPath[0] ?? '')) {
+    dependencyIndex = 0;
+  } else if (keyPath[0] === 'target'
+    && /^(?:dev-|build-)?dependencies$/.test(keyPath[2] ?? '')) {
+    dependencyIndex = 2;
+  }
+  if (dependencyIndex < 0 || keyPath.length > dependencyIndex + 2) return null;
+  return { workspaceDefinition, tableDependency: keyPath[dependencyIndex + 1] };
+}
+
 function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (doc.basename === 'Cargo.lock') {
@@ -592,18 +679,29 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
     });
   };
   for (const section of tomlSections(doc.text)) {
-    const match = /^(workspace\.dependencies|(?:target\..+\.)?(?:dev-|build-)?dependencies)(?:\.(.+))?$/.exec(section.name);
-    if (!match) continue;
-    const workspaceDefinition = match[1] === 'workspace.dependencies';
-    const tableDependency = match[2]?.trim().replace(/^(['"])(.*)\1$/, '$2');
+    const context = cargoDependencySection(section.rawName);
+    if (!context) continue;
+    const { tableDependency, workspaceDefinition } = context;
     const sectionBody = stripTomlComments(section.body);
     if (tableDependency) {
       addDependency(tableDependency, sectionBody, workspaceDefinition);
       continue;
     }
+    const dottedAssignments = new Map<string, string[]>();
     for (const line of sectionBody.split(/\r?\n/)) {
-      const assignment = /^\s*([\w.-]+)\s*=\s*(.+)$/.exec(line);
-      if (assignment) addDependency(assignment[1], assignment[2], workspaceDefinition);
+      const assignment = parseTomlKeyAssignment(line);
+      if (!assignment) continue;
+      const [key, ...details] = assignment.keyPath;
+      if (details.length === 0) {
+        addDependency(key, assignment.value, workspaceDefinition);
+        continue;
+      }
+      const values = dottedAssignments.get(key) ?? [];
+      values.push(`${details.join('.')} = ${assignment.value}`);
+      dottedAssignments.set(key, values);
+    }
+    for (const [key, values] of dottedAssignments) {
+      addDependency(key, values.join('\n'), workspaceDefinition);
     }
   }
   return out;
@@ -623,6 +721,7 @@ function pythonLocalSpec(spec: string): boolean {
 
 interface TomlSection {
   name: string;
+  rawName: string;
   body: string;
 }
 
@@ -668,6 +767,7 @@ function tomlSections(text: string): TomlSection[] {
   const headers = [...structure.matchAll(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*$/gm)];
   return headers.map((header, index) => ({
     name: header[1].trim().toLocaleLowerCase(),
+    rawName: header[1].trim(),
     body: text.slice((header.index ?? 0) + header[0].length, headers[index + 1]?.index ?? text.length),
   }));
 }
