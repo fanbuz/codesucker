@@ -340,8 +340,21 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
     if (own) out.push(own);
   }
   const replacedLocal = new Set<string>();
-  for (const match of doc.text.matchAll(/^\s*replace\s+([^\s]+)(?:\s+v[^\s]+)?\s*=>\s*([^\s]+).*$/gm)) {
-    if (/^(?:\.\.?\/|\/)/.test(match[2])) replacedLocal.add(match[1]);
+  let replaceBlock = false;
+  for (const rawLine of doc.text.split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+\/\/.*$/, '').trim();
+    if (/^replace\s*\($/.test(line)) {
+      replaceBlock = true;
+      continue;
+    }
+    if (replaceBlock && /^\)$/.test(line)) {
+      replaceBlock = false;
+      continue;
+    }
+    const expression = replaceBlock ? line : line.replace(/^replace\s+/, '');
+    if (!replaceBlock && expression === line) continue;
+    const match = /^([^\s]+)(?:\s+v[^\s]+)?\s*=>\s*([^\s]+)(?:\s+v[^\s]+)?$/.exec(expression);
+    if (match && /^(?:\.\.?\/|\/)/.test(match[2])) replacedLocal.add(match[1]);
   }
   for (const match of doc.text.matchAll(/^\s*([\w.~-]+\/[\w./~-]+)\s+v[^\s]+(?:\s+\/\/.*)?$/gm)) {
     const item = identity('go', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', replacedLocal.has(match[1]));
@@ -373,7 +386,7 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
     const own = identity('rust', packageName, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
   }
-  for (const section of doc.text.matchAll(/\[(?:target\.[^\]]+\.)?(?:dev-|build-)?dependencies\]([\s\S]*?)(?=\n\[|$)/g)) {
+  for (const section of doc.text.matchAll(/\[(?:workspace\.|(?:target\.[^\]]+\.)?)(?:dev-|build-)?dependencies\]([\s\S]*?)(?=\n\[|$)/g)) {
     for (const line of section[1].split(/\r?\n/)) {
       const match = /^\s*([\w.-]+)\s*=\s*(.+)$/.exec(line);
       if (!match) continue;

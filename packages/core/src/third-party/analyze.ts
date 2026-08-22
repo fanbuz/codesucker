@@ -86,7 +86,9 @@ function findingId(item: FindingAccumulator): string {
   return crypto.createHash('sha256').update([
     THIRD_PARTY_RULES_VERSION, item.ruleId, item.kind,
     primary?.ecosystem ?? '', primary?.packageName ?? '',
-    primary?.location.file ?? '', item.commonRoot ?? '',
+    primary?.licenseId ?? '', primary?.attributionSubject ?? '',
+    primary?.location.file ?? '', primary?.location.line ?? 0,
+    item.commonRoot ?? '',
   ].join('\0')).digest('hex').slice(0, 24);
 }
 
