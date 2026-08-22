@@ -91,6 +91,22 @@ async function main() {
     '取消发布完成回滚后不能遗留备份目录');
   await discardExportStagingDirectory(cancelledPublish.stage);
 
+  const staleEvidence = await createStage();
+  let asyncEvidenceChecked = false;
+  await assert.rejects(
+    commitStagedExportFiles(staleEvidence.stage, outDir, staleEvidence.files, {
+      beforeCommit: async () => {
+        await Promise.resolve();
+        asyncEvidenceChecked = true;
+        throw new Error('source or manifest changed');
+      },
+    }),
+    /source or manifest changed/,
+  );
+  assert.equal(asyncEvidenceChecked, true, '成组发布必须等待异步源码与清单身份复核');
+  assertOldFiles();
+  await discardExportStagingDirectory(staleEvidence.stage);
+
   const committedStage = await createStage();
   const committed = await commitStagedExportFiles(committedStage.stage, outDir, committedStage.files);
   assert.deepEqual(committed.map((item) => path.basename(item)), names);

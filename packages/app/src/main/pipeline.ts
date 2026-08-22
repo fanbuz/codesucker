@@ -487,6 +487,36 @@ export function registerPipelineIpc() {
         scan.thirdPartyManifestCandidateRelPaths,
         currentThirdPartyAnalysis,
       );
+      const assertExportEvidenceCurrent = async () => {
+        job.assertCurrent();
+        requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+        validateProjectRoot(scan.rootSnapshot, request.payload.root);
+        await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+        let finalThirdPartyAnalysis: ThirdPartyRiskAnalysis;
+        try {
+          finalThirdPartyAnalysis = await workerResources.pipeline.run({
+            type: 'analyze-risks-with-snapshot',
+            root: scan.rootSnapshot.realPath,
+            files: scannedEntries,
+          }, job.signal) as ThirdPartyRiskAnalysis;
+        } catch (error) {
+          if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+          throw new Error('无法最终复核第三方代码风险，请重新扫描项目后再导出');
+        }
+        await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+        job.assertCurrent();
+        requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+        validateProjectRoot(scan.rootSnapshot, request.payload.root);
+        assertThirdPartyRiskReportUnchanged(currentThirdPartyAnalysis.report, finalThirdPartyAnalysis.report);
+        assertThirdPartyManifestSnapshotUnchanged(
+          currentThirdPartyAnalysis.manifestIdentities,
+          finalThirdPartyAnalysis.manifestIdentities,
+        );
+        assertThirdPartyManifestDiscoveryUnchanged(
+          currentThirdPartyAnalysis.manifestCandidateRelPaths,
+          finalThirdPartyAnalysis.manifestCandidateRelPaths,
+        );
+      };
       report({ stage: 'analyzing-risks', completed: 1, total: 1 });
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
@@ -543,36 +573,6 @@ export function registerPipelineIpc() {
         app.getVersion(),
         {
           signal: job.signal,
-          beforeCommit: async () => {
-            job.assertCurrent();
-            requireCurrentScan(request.payload.root, request.payload.scanSessionId);
-            validateProjectRoot(scan.rootSnapshot, request.payload.root);
-            await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
-            let finalThirdPartyAnalysis: ThirdPartyRiskAnalysis;
-            try {
-              finalThirdPartyAnalysis = await workerResources.pipeline.run({
-                type: 'analyze-risks-with-snapshot',
-                root: scan.rootSnapshot.realPath,
-                files: scannedEntries,
-              }, job.signal) as ThirdPartyRiskAnalysis;
-            } catch (error) {
-              if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
-              throw new Error('无法最终复核第三方代码风险，请重新扫描项目后再导出');
-            }
-            await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
-            job.assertCurrent();
-            requireCurrentScan(request.payload.root, request.payload.scanSessionId);
-            validateProjectRoot(scan.rootSnapshot, request.payload.root);
-            assertThirdPartyRiskReportUnchanged(currentThirdPartyAnalysis.report, finalThirdPartyAnalysis.report);
-            assertThirdPartyManifestSnapshotUnchanged(
-              currentThirdPartyAnalysis.manifestIdentities,
-              finalThirdPartyAnalysis.manifestIdentities,
-            );
-            assertThirdPartyManifestDiscoveryUnchanged(
-              currentThirdPartyAnalysis.manifestCandidateRelPaths,
-              finalThirdPartyAnalysis.manifestCandidateRelPaths,
-            );
-          },
         },
       );
       job.assertCurrent();
@@ -582,6 +582,7 @@ export function registerPipelineIpc() {
         .filter((item): item is string => typeof item === 'string');
       const committedPaths = await commitStagedExportFiles(stagingDir, request.payload.outDir, stagedPaths, {
         signal: job.signal,
+        beforeCommit: assertExportEvidenceCurrent,
         assertCurrent: () => {
           job.assertCurrent();
           requireCurrentScan(request.payload.root, request.payload.scanSessionId);

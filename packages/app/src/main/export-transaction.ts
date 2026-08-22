@@ -16,6 +16,8 @@ type ExportMutationPhase = 'backup' | 'publish' | 'restore';
 export interface ExportCommitOptions {
   signal?: AbortSignal;
   assertCurrent?: () => void;
+  /** 在任何备份或发布操作前执行一次完整证据复核。 */
+  beforeCommit?: () => void | Promise<void>;
   /** 仅供故障注入测试；生产调用不应设置。 */
   beforeMutation?: (phase: ExportMutationPhase, file: string) => void | Promise<void>;
   /** 仅供取消时序测试；生产调用不应设置。 */
@@ -53,6 +55,9 @@ export async function commitStagedExportFiles(
     return { stagedPath: resolvedStagedPath, finalPath, name };
   }));
 
+  options.signal?.throwIfAborted();
+  await options.beforeCommit?.();
+  options.signal?.throwIfAborted();
   const backupDir = await fs.promises.mkdtemp(path.join(resolvedOutDir, '.codesucker-export-backup-'));
   const backups: Array<{ finalPath: string; backupPath: string }> = [];
   const published: string[] = [];
