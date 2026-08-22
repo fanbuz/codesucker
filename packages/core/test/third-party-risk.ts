@@ -714,6 +714,7 @@ other''']
     [tool.poetry.dependencies]
     python = ">=3.11"
     Flask = "^3.0"
+    "poetry-\\u0065scaped-only" = "^1.0"
     local-tool = { path = "./local-tool" }
 
     [tool.poetry.group."qa]prod".dependencies]
@@ -893,6 +894,7 @@ other''']
     write('vendor/quoted-extra/api.py', 'def quoted(): pass'),
     write('vendor/quoted-group/api.py', 'def group(): pass'),
     write('vendor/escaped-group/api.py', 'def escaped_group(): pass'),
+    write('vendor/poetry-escaped-only/api.py', 'def poetry_escaped(): pass'),
     write('vendor/win-drive-owned/index.js', 'module.exports = true;'),
     write('vendor/win-unc-owned/index.js', 'module.exports = true;'),
     write('vendor/win-relative-owned/index.js', 'module.exports = true;'),
@@ -1126,6 +1128,7 @@ other''']
     'vendor/vcs-owned-four/api.py', 'vendor/direct-vcs/api.py',
     'vendor/quoted-extra/api.py', 'vendor/quoted-group/api.py',
     'vendor/escaped-group/api.py',
+    'vendor/poetry-escaped-only/api.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'vendor/marker-second/library.py', 'vendor/literal-after/library.py',
@@ -1278,6 +1281,11 @@ other''']
     && finding.affected.relPaths.includes('third_party/@legacy/v1-nested/index.js')
     && finding.evidence.some((evidence) => evidence.packageName === '@legacy/v1-nested')),
   'package-lock v1 的 nested scoped 包必须保留精确包名证据');
+  assert.ok(first.findings.some((finding) => finding.kind === 'dependency-source'
+    && finding.affected.relPaths.includes('vendor/poetry-escaped-only/api.py')
+    && finding.evidence.some((evidence) => evidence.packageName === 'poetry-escaped-only'
+      && evidence.location.file === 'pyproject.toml')),
+  'Poetry 转义依赖键必须由 pyproject.toml 形成精确清单证据');
   assert.ok(!dependencyFiles.has('third_party/@legacy/v1-local/owned.js'), 'package-lock v1 的本地 resolved 依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('external/commented/Fake.java'), 'Gradle 行注释中的声明不能形成依赖证据');
   assert.ok(!dependencyFiles.has('external/block-commented/Fake.java'), 'Gradle 块注释中的声明不能形成依赖证据');

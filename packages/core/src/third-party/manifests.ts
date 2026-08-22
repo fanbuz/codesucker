@@ -2082,10 +2082,12 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
       && ((sectionPath.length === 3 && ['dependencies', 'dev-dependencies'].includes(sectionPath[2]))
         || (sectionPath.length === 5 && sectionPath[2] === 'group' && sectionPath[4] === 'dependencies'));
     if (isPoetryDependencies) {
-      for (const match of section.body.matchAll(/^\s*['"]?([A-Za-z0-9][A-Za-z0-9._-]*)['"]?\s*=\s*(.+)$/gm)) {
-        if (match[1].toLocaleLowerCase() === 'python') continue;
-        const local = /\bpath\s*=|^(?:['"])?(?:\.\.?\/|\/|file:)/.test(match[2].trim());
-        const item = pythonDependency(match[1], doc, local);
+      for (const assignment of parseTomlAssignments(section.body).assignments) {
+        if (assignment.keyPath.length !== 1) continue;
+        const name = assignment.keyPath[0];
+        if (name.toLocaleLowerCase() === 'python') continue;
+        const local = /\bpath\s*=|^(?:['"])?(?:\.\.?\/|\/|file:)/.test(assignment.value.trim());
+        const item = pythonDependency(name, doc, local);
         if (item) out.push(item);
       }
     }
