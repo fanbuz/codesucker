@@ -448,6 +448,24 @@ function pythonDependency(
   return name ? identity('python', name, doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', local) : null;
 }
 
+function localPathValue(value: unknown): boolean {
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  const normalized = value.trim();
+  return localSpec(normalized)
+    || /^[A-Za-z]:[\\/]/.test(normalized)
+    || !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized);
+}
+
+function pythonLockPackageIsLocal(packageBody: string, sourceBody = ''): boolean {
+  if (/^\s*path\s*=/m.test(packageBody)) return true;
+  const inlineSource = /^\s*source\s*=\s*\{([\s\S]*?)\}\s*$/m.exec(packageBody)?.[1] ?? '';
+  const inlinePath = /\b(?:directory|file|editable|path|virtual)\s*=\s*['"]([^'"]+)['"]/i.exec(inlineSource)?.[1];
+  if (localPathValue(inlinePath)) return true;
+  const sourceType = /^\s*type\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(sourceBody)?.[1];
+  const sourceLocation = /^\s*(?:url|path)\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(sourceBody)?.[1];
+  return /^(?:directory|file)$/i.test(sourceType ?? '') && localPathValue(sourceLocation);
+}
+
 function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (/^requirements/i.test(doc.basename)) {
@@ -478,9 +496,15 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   }
   const sections = tomlSections(doc.text);
   if (doc.basename === 'poetry.lock' || doc.basename === 'uv.lock') {
-    for (const section of sections.filter((item) => item.name === 'package')) {
+    for (let index = 0; index < sections.length; index++) {
+      const section = sections[index];
+      if (section.name !== 'package') continue;
       const name = /^\s*name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(section.body)?.[1];
-      const local = /^\s*(?:source|path)\s*=\s*.*(?:editable|path)\s*=/m.test(section.body);
+      let sourceBody = '';
+      for (let next = index + 1; next < sections.length && sections[next].name !== 'package'; next++) {
+        if (sections[next].name === 'package.source') sourceBody = sections[next].body;
+      }
+      const local = pythonLockPackageIsLocal(section.body, sourceBody);
       const item = pythonDependency(name, doc, local);
       if (item) out.push(item);
     }

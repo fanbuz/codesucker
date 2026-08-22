@@ -100,6 +100,33 @@ try {
       'pipenv-external': { version: '==1.0.0' },
     },
   }));
+  await fs.writeFile(path.join(root, 'poetry.lock'), `
+    [[package]]
+    name = "poetry-local-directory"
+    version = "0.1.0"
+    [package.dependencies]
+    typing-extensions = "*"
+    [package.source]
+    type = "directory"
+    url = "../poetry-local-directory"
+
+    [[package]]
+    name = "poetry-external"
+    version = "1.0.0"
+  `);
+  await fs.writeFile(path.join(root, 'uv.lock'), `
+    [[package]]
+    name = "uv-local-directory"
+    source = { directory = "../uv-local-directory" }
+
+    [[package]]
+    name = "uv-local-file"
+    source = { file = "../uv-local-file.whl" }
+
+    [[package]]
+    name = "uv-external"
+    source = { registry = "https://pypi.org/simple" }
+  `);
   await fs.writeFile(path.join(root, 'pyproject.toml'), `
     [project]
     name = "self-python"
@@ -145,6 +172,11 @@ try {
     write('vendor/pipenv-local-path/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-local-file/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-external/library.py', 'def external(): pass'),
+    write('vendor/poetry-local-directory/owned.py', 'def owned(): pass'),
+    write('vendor/poetry-external/library.py', 'def external(): pass'),
+    write('vendor/uv-local-directory/owned.py', 'def owned(): pass'),
+    write('vendor/uv-local-file/owned.py', 'def owned(): pass'),
+    write('vendor/uv-external/library.py', 'def external(): pass'),
     write('third_party/bar/index.js', 'module.exports = true;'),
     write('third_party/@scope/deep/index.js', 'module.exports = true;'),
     write('third_party/@legacy/v1-nested/index.js', 'module.exports = true;'),
@@ -192,6 +224,7 @@ try {
     'third_party/github.com/acme/tool/tool.go', 'deps/serde/lib.rs', 'vendors/requests/api.py',
     'vendor/httpx/client.py',
     'vendor/pipenv-external/library.py',
+    'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
     'external/slf4j-api/Logger.java', 'external/debug-lib/Debug.java', 'external/legacy-core/Legacy.java',
     'rust-external/deps/workspace-member-local/lib.rs',
@@ -209,6 +242,9 @@ try {
   assert.ok(!dependencyFiles.has('vendor/optional-owned/owned.py'), 'PEP 508 optional 本地引用不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-path/owned.py'), 'Pipfile.lock path 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-file/owned.py'), 'Pipfile.lock file 本地依赖不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/poetry-local-directory/owned.py'), 'Poetry package.source 目录依赖不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/uv-local-directory/owned.py'), 'uv 行内 directory 来源不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/uv-local-file/owned.py'), 'uv 行内 file 来源不能默认判为第三方');
   assert.ok(dependencyFiles.has('vendor/left-pad/index.js'), '无关子项目的同名 package metadata 不能覆盖根项目外部依赖');
   assert.ok(first.findings.some((finding) => finding.kind === 'dependency-source'
     && finding.affected.relPaths.includes('third_party/@legacy/v1-nested/index.js')
