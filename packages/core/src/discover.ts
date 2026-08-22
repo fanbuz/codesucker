@@ -195,13 +195,17 @@ function htmlMetaEncoding(tag: HtmlOpeningTag): string | null {
   return /(?:^|;)\s*charset\s*=\s*([A-Za-z0-9._-]+)/i.exec(attributes.get('content') ?? '')?.[1] ?? null;
 }
 
-const WEB_UTF16_LABELS = new Set([
-  'csunicode', 'iso-10646-ucs-2', 'ucs-2', 'unicode', 'unicodefeff',
-  'unicodefffe', 'utf-16', 'utf-16be', 'utf-16le',
-]);
-
 function normalizeWebDeclaredEncoding(encoding: string | null): string | null {
-  return WEB_UTF16_LABELS.has(encoding?.trim().toLocaleLowerCase() ?? '') ? 'UTF-8' : encoding;
+  const label = encoding?.trim().toLocaleLowerCase();
+  if (!label) return null;
+  try {
+    const canonical = new TextDecoder(label).encoding.toLocaleLowerCase();
+    if (canonical === 'utf-16le' || canonical === 'utf-16be') return 'UTF-8';
+    if (canonical === 'x-user-defined') return 'WINDOWS-1252';
+    return canonical;
+  } catch {
+    return null;
+  }
 }
 
 function blankHtmlEncodingNoise(text: string): string {
@@ -324,8 +328,8 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
       if (head && meta.index < head.end) continue;
       if (body && body.index < meta.index) continue;
       if (headClose && (headClose.index ?? 0) < meta.index) continue;
-      const encoding = htmlMetaEncoding(meta);
-      if (encoding) return normalizeWebDeclaredEncoding(encoding);
+      const encoding = normalizeWebDeclaredEncoding(htmlMetaEncoding(meta));
+      if (encoding) return encoding;
     }
   }
   return null;
@@ -361,6 +365,14 @@ function normalizeDetectedEncoding(encoding: string): string {
   return normalized;
 }
 
+function normalizeXmlDeclaredEncoding(encoding: string): string {
+  const normalized = normalizeDetectedEncoding(encoding);
+  if (/^(?:UTF-?16|UCS-?2|ISO-10646-UCS-2|CSUNICODE|UNICODE)$/.test(normalized)) return 'UTF-16';
+  if (normalized === 'UNICODEFEFF') return 'UTF-16LE';
+  if (normalized === 'UNICODEFFFE') return 'UTF-16BE';
+  return normalized;
+}
+
 function isAmbiguousSingleByteGuess(buf: Buffer, encoding: string): boolean {
   if (buf.includes(0)) return false;
   const structuredEncodings = new Set([
@@ -385,7 +397,7 @@ function assertXmlEncodingMatchesBytes(
     : iconv.decode(content, byteEncoding));
   const declared = xmlDeclaredEncoding(header);
   if (!declared) return;
-  const normalized = normalizeDetectedEncoding(declared);
+  const normalized = normalizeXmlDeclaredEncoding(declared);
   const matches = normalized === byteEncoding
     || (normalized === 'UTF-16' && byteEncoding.startsWith('UTF-16'));
   if (!matches) {
@@ -429,8 +441,11 @@ function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: stri
 
   const declared = declaredEncoding(buf, extension);
   if (declared) {
-    const normalized = normalizeDetectedEncoding(declared);
-    if (normalizeExtension(extension ?? '') === 'xml' && normalized.startsWith('UTF-16')) {
+    const ext = normalizeExtension(extension ?? '');
+    const normalized = ext === 'xml'
+      ? normalizeXmlDeclaredEncoding(declared)
+      : normalizeDetectedEncoding(declared);
+    if (ext === 'xml' && normalized.startsWith('UTF-16')) {
       throw new SourceDecodeError('decode-error', 'XML UTF-16 编码声明与实际字节布局不符');
     }
     return { encoding: normalized, bomBytes: 0 };

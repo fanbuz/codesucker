@@ -188,6 +188,7 @@ try {
     require example.local/go-windows-owned v0.0.0
     require example.local/go-quote-owned v0.0.0
     require example.local/go-invalid-external v0.0.0
+    require example.local/go-absolute-owned v0.0.0
     replace example.local/internal => ./internal
     replace example.local/win-drive-owned => C:\\repo\\owned
     replace example.local/win-relative-owned => ..\\owned
@@ -199,10 +200,13 @@ try {
       example.local/block => ./block
     )
   `);
+  const absoluteGoMember = path.join(root, 'vendor', 'go-absolute-owned');
+  const outsideGoMember = path.join(os.tmpdir(), 'codesucker-go-outside-member');
   await fs.writeFile(path.join(root, 'go.work'), `
     go 1.22
     use (
       ./go-workspace/app
+      ${JSON.stringify(absoluteGoMember)}
       ./vendor/go-owned
       "./vendor/go owned"
       "./vendor/go\\u002descaped"
@@ -214,6 +218,10 @@ try {
     replace example.local/work-owned => ./go-workspace/owned
     replace example.local/work-dot-owned => .
   `);
+  await fs.mkdir(absoluteGoMember, { recursive: true });
+  await fs.writeFile(path.join(absoluteGoMember, 'go.mod'), 'module example.local/go-absolute-owned\n');
+  await fs.mkdir(path.join(root, 'outside-go-work'), { recursive: true });
+  await fs.writeFile(path.join(root, 'outside-go-work/go.work'), `go 1.22\nuse ${JSON.stringify(outsideGoMember)}\n`);
   await fs.mkdir(path.join(root, 'go-workspace/app'), { recursive: true });
   await fs.writeFile(path.join(root, 'go-workspace/app/go.mod'), `
     module example.local/work-app
@@ -537,6 +545,7 @@ try {
     write('vendor/go-win/owned.go', 'package owned'),
     write('vendor/go"quoted/owned.go', 'package owned'),
     write('vendor/go-invalid-external/external.go', 'package external'),
+    write('vendor/go-absolute-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-dot-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-external/external.go', 'package external'),
@@ -645,6 +654,7 @@ try {
   for (const memberManifest of [
     'vendor/go-owned/go.mod', 'vendor/go owned/go.mod', 'vendor/go-escaped/go.mod',
     'vendor/go hex/go.mod', 'vendor/go-win/go.mod', 'vendor/go"quoted/go.mod',
+    'vendor/go-absolute-owned/go.mod',
   ]) {
     assert.ok(fullSnapshot.manifestCandidateRelPaths.includes(memberManifest),
       `go.work 显式成员 ${memberManifest} 必须进入完整候选清单快照`);
@@ -736,6 +746,8 @@ try {
   'Maven profile 以空元素重写坐标所用属性时必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'go.work'), 'go.work 非法字符串转义必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'outside-go-work/go.work'), 'go.work 项目外绝对成员必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'invalid-go/go.mod'), 'go.mod 非法字符串转义必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
@@ -841,6 +853,8 @@ try {
     'go.work 必须解码双引号路径中的 Windows 反斜杠');
   assert.ok(!dependencyFiles.has('vendor/go"quoted/owned.go'),
     'go.work 必须解码双引号路径中的引号转义');
+  assert.ok(!dependencyFiles.has('vendor/go-absolute-owned/owned.go'),
+    'go.work 项目内绝对成员必须解析为本地模块');
   assert.ok(dependencyFiles.has('vendor/go-invalid-external/external.go'),
     'go.work 非法字符串转义不能把外部依赖误判为本地成员');
   assert.ok(!dependencyFiles.has('vendor/retract/retract.go'), 'Go retract 指令不能被误当作单段依赖');

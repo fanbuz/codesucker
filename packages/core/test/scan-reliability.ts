@@ -58,6 +58,10 @@ write('enc/declared-html.html', Buffer.concat([
   Buffer.from('<!-- old <head><meta charset="utf-8"> --><!doctype html><html><head><!-- old <meta charset="utf-8"> --><title>Legacy <script></title><meta name="viewport" content="width=device-width"><link rel="stylesheet"><meta charset="windows-1252"></head><body>', 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
 ]));
+write('enc/declared-html-iso-8859-1.html', Buffer.concat([
+  Buffer.from('<!doctype html><html><head><meta charset="iso-8859-1"></head><body>', 'ascii'),
+  Buffer.from([0x80]), Buffer.from('</body></html>', 'ascii'),
+]));
 write('enc/declared-html-window.html', Buffer.concat([
   Buffer.from(`<!doctype html><html><head><title>${'x'.repeat(560)}</title><meta charset="windows-1252"></head><body>`, 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
@@ -135,6 +139,9 @@ write('issues/malformed-utf7.py', Buffer.from('# coding: utf-7\nvalue = 1\n+A', 
 write('issues/xml-utf16-ascii.xml', Buffer.from(
   '<?xml version="1.0" encoding="UTF-16LE"?><root>ascii bytes</root>', 'ascii',
 ));
+write('issues/xml-ucs2-ascii.xml', Buffer.from(
+  '<?xml version="1.0" encoding="UCS-2"?><root>ascii bytes</root> ', 'ascii',
+));
 write('issues/xml-utf16-bom-conflict.xml', withBom(
   [0xff, 0xfe], iconv.encode(
     `<?xml version="1.0" ${' '.repeat(1100)}encoding="UTF-16BE"?><root>冲突</root>`, 'utf16-le',
@@ -202,6 +209,8 @@ assert.equal(byPath.get('enc/declared-long-first-line.py')?.encoding, 'LATIN-1',
   'Python 第二物理行 cookie 不能受 Web 编码探测窗口限制');
 assert.equal(byPath.get('enc/utf8-charset-string.ts')?.encoding, 'UTF-8', '普通字符串中的 charset 不能伪装成编码声明');
 assert.equal(byPath.get('enc/declared-html.html')?.encoding, 'WINDOWS-1252', 'doctype/head 后的 HTML meta 编码声明必须生效');
+assert.equal(byPath.get('enc/declared-html-iso-8859-1.html')?.encoding, 'WINDOWS-1252',
+  'HTML legacy ISO-8859-1 标签必须按 WHATWG 映射为 Windows-1252');
 assert.equal(byPath.get('enc/declared-html-window.html')?.encoding, 'WINDOWS-1252', 'HTML 前 1024 字节内的 meta 编码声明必须生效');
 assert.equal(byPath.get('enc/utf8-html-comment-cross-window.html')?.encoding, 'UTF-8', '跨越 1024 字节探测窗口的 HTML 注释不能让伪 meta 声明生效');
 assert.equal(byPath.get('enc/utf8-meta-string.ts')?.encoding, 'UTF-8', '普通字符串中的 meta 标签不能伪装成编码声明');
@@ -260,6 +269,7 @@ expectReason('issues/ambiguous-gb18030.java', 'decode-error');
 expectReason('issues/ambiguous-windows-874.java', 'decode-error');
 expectReason('issues/malformed-utf7.py', 'decode-error');
 expectReason('issues/xml-utf16-ascii.xml', 'decode-error');
+expectReason('issues/xml-ucs2-ascii.xml', 'decode-error');
 expectReason('issues/xml-utf16-bom-conflict.xml', 'decode-error');
 expectReason('issues/xml-utf8-bom-long-conflict.xml', 'decode-error');
 expectReason('issues/python-bom-cookie-conflict.py', 'decode-error');
@@ -318,6 +328,8 @@ for (const label of webUtf16Labels) {
 }
 const declaredHtml = processFiles([byPath.get('enc/declared-html.html')!], config);
 assert.match(declaredHtml.cleaned[0].lines.join('\n'), /Ã©/, 'HTML meta 声明必须优先于 UTF-8 字节有效性');
+const legacyHtml = processFiles([byPath.get('enc/declared-html-iso-8859-1.html')!], config);
+assert.match(legacyHtml.cleaned[0].lines.join('\n'), /€/, 'HTML ISO-8859-1 标签必须按 Windows-1252 保留 Web 字符语义');
 const declaredHtmlMetadata = processFiles([byPath.get('enc/declared-html-metadata.html')!], config);
 assert.match(declaredHtmlMetadata.cleaned[0].lines.join('\n'), /Ã©/, 'head metadata 后的 HTML meta 声明必须保持字符语义');
 

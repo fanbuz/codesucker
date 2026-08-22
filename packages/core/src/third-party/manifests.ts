@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import fg from 'fast-glob';
@@ -49,6 +50,7 @@ export interface DependencyInventory {
 }
 
 interface ManifestDocument {
+  rootReal: string;
   relPath: string;
   basename: string;
   text: string;
@@ -101,6 +103,7 @@ async function readManifest(
     }
     const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
     return {
+      rootReal,
       relPath: normalized,
       basename,
       text,
@@ -825,12 +828,18 @@ function goDirectiveTokens(rawLine: string): string[] | null {
   return tokens;
 }
 
-function goWorkspaceMemberDirectories(doc: ManifestDocument): string[] {
-  if (doc.basename !== 'go.work') return [];
+function goWorkspaceMembers(doc: ManifestDocument): { directories: string[]; incomplete: boolean } {
+  if (doc.basename !== 'go.work') return { directories: [], incomplete: false };
   const members = new Set<string>();
   let useBlock = false;
+  let incomplete = false;
   for (const rawLine of doc.text.split(/\r?\n/)) {
-    const tokens = goDirectiveTokens(rawLine) ?? [];
+    const parsed = goDirectiveTokens(rawLine);
+    if (parsed === null) {
+      incomplete = true;
+      continue;
+    }
+    const tokens = parsed;
     if (tokens[0] === 'use' && tokens[1] === '(') {
       useBlock = true;
       continue;
@@ -840,24 +849,52 @@ function goWorkspaceMemberDirectories(doc: ManifestDocument): string[] {
       continue;
     }
     const rawMember = useBlock ? tokens[0] : tokens[0] === 'use' ? tokens[1] : undefined;
-    if (!rawMember || rawMember.includes('\0')
-      || path.posix.isAbsolute(rawMember) || path.win32.isAbsolute(rawMember)) continue;
-    const member = path.posix.normalize(path.posix.join(
-      path.posix.dirname(doc.relPath), rawMember.replace(/\\/g, '/'),
-    ));
-    if (member === '..' || member.startsWith('../') || path.posix.isAbsolute(member)) continue;
+    if (!rawMember) continue;
+    if (rawMember.includes('\0')) {
+      incomplete = true;
+      continue;
+    }
+    const anyAbsolute = path.posix.isAbsolute(rawMember) || path.win32.isAbsolute(rawMember);
+    let member: string;
+    if (anyAbsolute) {
+      if (!path.isAbsolute(rawMember)) {
+        incomplete = true;
+        continue;
+      }
+      let absolute: string;
+      try {
+        absolute = realpathSync.native(path.resolve(rawMember));
+      } catch {
+        incomplete = true;
+        continue;
+      }
+      if (!insideRoot(doc.rootReal, absolute)) {
+        incomplete = true;
+        continue;
+      }
+      member = normalizeRel(path.relative(doc.rootReal, absolute));
+    } else {
+      member = path.posix.normalize(path.posix.join(
+        path.posix.dirname(doc.relPath), rawMember.replace(/\\/g, '/'),
+      ));
+    }
+    if (member === '..' || member.startsWith('../') || path.posix.isAbsolute(member)) {
+      incomplete = true;
+      continue;
+    }
     members.add(member === '.' ? '' : member);
   }
-  return [...members].sort();
+  return { directories: [...members].sort(), incomplete };
 }
 
 function hasInvalidGoDirectives(doc: ManifestDocument): boolean {
   return (doc.basename === 'go.mod' || doc.basename === 'go.work')
-    && doc.text.split(/\r?\n/).some((rawLine) => goDirectiveTokens(rawLine) === null);
+    && (doc.text.split(/\r?\n/).some((rawLine) => goDirectiveTokens(rawLine) === null)
+      || goWorkspaceMembers(doc).incomplete);
 }
 
 function goWorkspaceMemberManifests(doc: ManifestDocument): string[] {
-  return goWorkspaceMemberDirectories(doc).map((directory) => path.posix.join(directory, 'go.mod'));
+  return goWorkspaceMembers(doc).directories.map((directory) => path.posix.join(directory, 'go.mod'));
 }
 
 function parseGo(doc: ManifestDocument): DependencyIdentity[] {
@@ -869,7 +906,7 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
     if (own) out.push(own);
   }
   const replacedLocal = new Set<string>();
-  const workspaceScopes = goWorkspaceMemberDirectories(doc);
+  const workspaceScopes = goWorkspaceMembers(doc).directories;
   let replaceBlock = false;
   for (const rawLine of doc.text.split(/\r?\n/)) {
     const tokens = goDirectiveTokens(rawLine) ?? [];
