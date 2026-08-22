@@ -27,6 +27,23 @@ try {
       'left-pad': '^1.3.0', '@self/local': 'workspace:*', '/Users/private/customer': '^1.0.0',
     },
   }));
+  await fs.writeFile(path.join(root, 'package-lock.json'), JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'self-app' },
+      'node_modules/outer/node_modules/bar': { version: '1.0.0' },
+      'node_modules/outer/node_modules/@scope/deep': { version: '2.0.0' },
+    },
+    dependencies: {
+      outer: {
+        version: '1.0.0',
+        dependencies: {
+          '@legacy/v1-nested': { version: '3.0.0' },
+          '@legacy/v1-local': { version: '1.0.0', resolved: 'file:../local' },
+        },
+      },
+    },
+  }));
   await fs.writeFile(path.join(root, 'pom.xml'), `
     <project><artifactId>self-java</artifactId><dependencies><dependency>
       <groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId>
@@ -59,6 +76,16 @@ try {
     Flask = "^3.0"
     local-tool = { path = "./local-tool" }
   `);
+  await fs.writeFile(path.join(root, 'build.gradle.kts'), `
+    dependencies {
+      implementation("org.slf4j:slf4j-api:2.0.0")
+      debugImplementation("com.example:debug-lib:1.0.0")
+      compile 'legacy:legacy-core:1.0.0'
+      kapt(libs.logging)
+      // implementation("fake:commented:1.0")
+      /* testRuntimeOnly("fake:block-commented:1.0") */
+    }
+  `);
   await fs.mkdir(path.join(root, 'broken'), { recursive: true });
   await fs.writeFile(path.join(root, 'broken/pom.xml'), '<!DOCTYPE foo><project></project>');
 
@@ -69,6 +96,15 @@ try {
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
     write('vendors/requests/api.py', 'def get(): pass'),
     write('vendor/httpx/client.py', 'def request(): pass'),
+    write('third_party/bar/index.js', 'module.exports = true;'),
+    write('third_party/@scope/deep/index.js', 'module.exports = true;'),
+    write('third_party/@legacy/v1-nested/index.js', 'module.exports = true;'),
+    write('third_party/@legacy/v1-local/owned.js', 'module.exports = true;'),
+    write('external/slf4j-api/Logger.java', 'class Logger {}'),
+    write('external/debug-lib/Debug.java', 'class Debug {}'),
+    write('external/legacy-core/Legacy.java', 'class Legacy {}'),
+    write('external/commented/Fake.java', 'class Fake {}'),
+    write('external/block-commented/Fake.java', 'class Fake {}'),
     write('vendor/acme-cli/owned.py', 'def main(): pass'),
     write('vendor/local-tool/owned.py', 'def local(): pass'),
     write('vendor/local/src.ts', 'export const local = true;'),
@@ -87,6 +123,8 @@ try {
   assert.ok(first.summary.analyzedManifests >= 5, '五类生态清单都应参与离线分析');
   assert.deepEqual(first.findings.map((finding) => finding.id), second.findings.map((finding) => finding.id), '输入顺序不应改变稳定 finding ID');
   assert.ok(first.diagnostics.some((item) => item.code === 'manifest-parse-failed' && item.file === 'broken/pom.xml'));
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'build.gradle.kts'),
+    'Gradle 同时含可识别与动态声明时必须报告部分分析');
 
   const dependencyFiles = new Set(first.findings
     .filter((finding) => finding.kind === 'dependency-source')
@@ -95,12 +133,21 @@ try {
     'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java',
     'third_party/github.com/acme/tool/tool.go', 'deps/serde/lib.rs', 'vendors/requests/api.py',
     'vendor/httpx/client.py',
+    'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
+    'external/slf4j-api/Logger.java', 'external/debug-lib/Debug.java', 'external/legacy-core/Legacy.java',
   ]) {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('vendor/acme-cli/owned.py'), 'project.scripts 不能误当 Python 依赖');
   assert.ok(!dependencyFiles.has('vendor/local-tool/owned.py'), 'Poetry path 依赖不能默认判为第三方');
+  assert.ok(first.findings.some((finding) => finding.kind === 'dependency-source'
+    && finding.affected.relPaths.includes('third_party/@legacy/v1-nested/index.js')
+    && finding.evidence.some((evidence) => evidence.packageName === '@legacy/v1-nested')),
+  'package-lock v1 的 nested scoped 包必须保留精确包名证据');
+  assert.ok(!dependencyFiles.has('third_party/@legacy/v1-local/owned.js'), 'package-lock v1 的本地 resolved 依赖不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('external/commented/Fake.java'), 'Gradle 行注释中的声明不能形成依赖证据');
+  assert.ok(!dependencyFiles.has('external/block-commented/Fake.java'), 'Gradle 块注释中的声明不能形成依赖证据');
   assert.ok(first.findings.some((finding) => finding.kind === 'vendored-source' && finding.affected.relPaths.includes('vendor/local/src.ts')),
     '无法映射的 vendor 目录只能给出中置信提示');
   assert.ok(first.findings.some((finding) => finding.kind === 'license-declaration' && finding.affected.relPaths.includes('vendor/left-pad/index.js')));

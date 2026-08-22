@@ -116,6 +116,43 @@ function localSpec(spec: unknown): boolean {
   return typeof spec === 'string' && /^(?:workspace:|file:|link:|\.\.?\/|\/)/i.test(spec.trim());
 }
 
+function nodePackageNameFromLockPath(pkgPath: string): string {
+  const segments = normalizeRel(pkgPath).split('/').filter(Boolean);
+  const nodeModulesIndex = segments.lastIndexOf('node_modules');
+  if (nodeModulesIndex < 0) return pkgPath;
+  const first = segments[nodeModulesIndex + 1] ?? '';
+  if (first.startsWith('@')) {
+    const second = segments[nodeModulesIndex + 2] ?? '';
+    return second ? `${first}/${second}` : first;
+  }
+  return first;
+}
+
+function parseNodeDependencyTree(
+  dependencies: Record<string, unknown>, doc: ManifestDocument,
+): DependencyIdentity[] {
+  const out: DependencyIdentity[] = [];
+  const pending = [dependencies];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (const [name, metadata] of Object.entries(current)) {
+      const record = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? metadata as Record<string, unknown>
+        : undefined;
+      const item = identity(
+        'node', name, doc.relPath, 'lockfile',
+        record?.link === true || localSpec(record?.resolved),
+      );
+      if (item) out.push(item);
+      const nested = record?.dependencies;
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        pending.push(nested as Record<string, unknown>);
+      }
+    }
+  }
+  return out;
+}
+
 function parseNode(doc: ManifestDocument): DependencyIdentity[] {
   const parsed = JSON.parse(doc.text) as Record<string, unknown>;
   const out: DependencyIdentity[] = [];
@@ -138,7 +175,7 @@ function parseNode(doc: ManifestDocument): DependencyIdentity[] {
       for (const [pkgPath, metadata] of Object.entries(packages as Record<string, unknown>)) {
         if (!pkgPath || !metadata || typeof metadata !== 'object' || Array.isArray(metadata)) continue;
         const record = metadata as Record<string, unknown>;
-        const fallback = pkgPath.replace(/^node_modules\//, '');
+        const fallback = nodePackageNameFromLockPath(pkgPath);
         const name = typeof record.name === 'string' ? record.name : fallback;
         const item = identity('node', name, doc.relPath, 'lockfile', record.link === true || localSpec(record.resolved));
         if (item) out.push(item);
@@ -146,10 +183,7 @@ function parseNode(doc: ManifestDocument): DependencyIdentity[] {
     }
     const deps = parsed.dependencies;
     if (deps && typeof deps === 'object' && !Array.isArray(deps)) {
-      for (const name of Object.keys(deps as Record<string, unknown>)) {
-        const item = identity('node', name, doc.relPath, 'lockfile');
-        if (item) out.push(item);
-      }
+      out.push(...parseNodeDependencyTree(deps as Record<string, unknown>, doc));
     }
   }
   return out;
@@ -181,6 +215,72 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
   return out;
 }
 
+const GRADLE_DEPENDENCY_CONFIGURATION = '(?:api|implementation|compile|compileOnly|runtime|runtimeOnly|classpath|annotationProcessor|(?:kapt|ksp)[A-Za-z0-9_]*|[A-Za-z0-9_]+(?:Api|Implementation|Compile|CompileOnly|Runtime|RuntimeOnly|AnnotationProcessor))';
+
+function stripGradleComments(text: string): string {
+  let out = '';
+  let state: 'code' | 'single' | 'double' | 'triple-single' | 'triple-double' | 'line-comment' | 'block-comment' = 'code';
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const next = text[index + 1];
+    const triple = text.slice(index, index + 3);
+    if (state === 'line-comment') {
+      if (char === '\n' || char === '\r') {
+        state = 'code';
+        out += char;
+      } else out += ' ';
+      continue;
+    }
+    if (state === 'block-comment') {
+      if (char === '*' && next === '/') {
+        out += '  ';
+        index++;
+        state = 'code';
+      } else out += char === '\n' || char === '\r' ? char : ' ';
+      continue;
+    }
+    if (state === 'triple-single' || state === 'triple-double') {
+      const closing = state === 'triple-single' ? "'''" : '"""';
+      if (triple === closing) {
+        out += '   ';
+        index += 2;
+        state = 'code';
+      } else out += char === '\n' || char === '\r' ? char : ' ';
+      continue;
+    }
+    if (state === 'single' || state === 'double') {
+      out += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if ((state === 'single' && char === "'") || (state === 'double' && char === '"')) {
+        state = 'code';
+      }
+      continue;
+    }
+    if (char === '/' && next === '/') {
+      out += '  ';
+      index++;
+      state = 'line-comment';
+    } else if (char === '/' && next === '*') {
+      out += '  ';
+      index++;
+      state = 'block-comment';
+    } else if (triple === "'''" || triple === '"""') {
+      out += '   ';
+      index += 2;
+      state = triple === "'''" ? 'triple-single' : 'triple-double';
+    } else {
+      out += char;
+      if (char === "'") state = 'single';
+      else if (char === '"') state = 'double';
+    }
+  }
+  return out;
+}
+
 function parseGradle(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (doc.basename === 'gradle.lockfile') {
@@ -190,22 +290,46 @@ function parseGradle(doc: ManifestDocument): DependencyIdentity[] {
     }
     return out;
   }
-  for (const match of doc.text.matchAll(/\b(?:api|implementation|compileOnly|runtimeOnly|testImplementation|classpath)\s*(?:\(|\s)\s*['"]([^:'"]+):([^:'"]+):[^'"]+['"]/g)) {
+  const source = stripGradleComments(doc.text);
+  const literalDependency = new RegExp(`^\\s*${GRADLE_DEPENDENCY_CONFIGURATION}\\b\\s*(?:\\(\\s*)?['"]([^:'"]+):([^:'"]+):[^'"]+['"]`, 'gm');
+  for (const match of source.matchAll(literalDependency)) {
     const item = identity('java', `${match[1]}:${match[2]}`, doc.relPath, doc.lockfile ? 'lockfile' : 'manifest');
     if (item) out.push(item);
   }
-  for (const match of doc.text.matchAll(/\bproject\s*\(\s*['"]:([^'"]+)['"]\s*\)/g)) {
+  for (const match of source.matchAll(/\bproject\s*\(\s*['"]:([^'"]+)['"]\s*\)/g)) {
     const item = identity('java', match[1], doc.relPath, 'manifest', true);
     if (item) out.push(item);
   }
-  for (const match of doc.text.matchAll(/\binclude\s*(?:\(|\s)\s*['"]:([^'"]+)['"]/g)) {
-    const item = identity('java', match[1], doc.relPath, 'manifest', true);
-    if (item) out.push(item);
-  }
-  if (/\b(?:dependencies|include)\b/.test(doc.text) && out.length === 0) {
-    throw new Error('包含动态或暂不支持的 Gradle 声明');
+  for (const declaration of source.matchAll(/\binclude\s*(?:\(\s*)?([^\r\n]+)/g)) {
+    for (const match of declaration[1].matchAll(/['"]:([^'"]+)['"]/g)) {
+      const item = identity('java', match[1], doc.relPath, 'manifest', true);
+      if (item) out.push(item);
+    }
   }
   return out;
+}
+
+function hasUnsupportedGradleDeclarations(doc: ManifestDocument): boolean {
+  if (!/^(?:build|settings)\.gradle(?:\.kts)?$/.test(doc.basename)) return false;
+  const source = stripGradleComments(doc.text);
+  const dependency = new RegExp(`^\\s*${GRADLE_DEPENDENCY_CONFIGURATION}\\b\\s*(?:\\(\\s*)?`, 'gm');
+  for (const match of source.matchAll(dependency)) {
+    const value = source.slice((match.index ?? 0) + match[0].length);
+    if (/^['"][^:'"]+:[^:'"]+:[^'"]+['"]/.test(value)) continue;
+    if (/^project\s*\(\s*['"]:[^'"]+['"]\s*\)/.test(value)) continue;
+    return true;
+  }
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const includeMatch = /\binclude\s*(?:\(\s*)?(.+)$/.exec(line);
+    if (includeMatch) {
+      const remainder = includeMatch[1]
+        .replace(/['"]:[^'"]+['"]/g, '')
+        .replace(/[\s,)]+/g, '');
+      if (remainder.length > 0) return true;
+    }
+  }
+  return false;
 }
 
 function parseGo(doc: ManifestDocument): DependencyIdentity[] {
@@ -422,6 +546,13 @@ export async function collectDependencyInventory(
     try {
       dependencies.push(...parseManifest(document));
       analyzedManifests++;
+      if (hasUnsupportedGradleDeclarations(document)) {
+        diagnostics.push(diagnostic(
+          'dynamic-manifest-partial', document.relPath,
+          '依赖清单包含动态声明，只完成了保守分析。',
+          '请手工核验动态依赖对应的源码。',
+        ));
+      }
     } catch (error) {
       const dynamic = /dynamic|动态|暂不支持/i.test(error instanceof Error ? error.message : String(error));
       diagnostics.push(diagnostic(

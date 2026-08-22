@@ -36,8 +36,8 @@ function normalizeRel(value: string): string {
 }
 
 function dependencyTokens(item: DependencyIdentity): string[] {
-  const name = item.normalizedName.replace(/^@/, '');
-  const tokens = new Set([name]);
+  const name = item.normalizedName;
+  const tokens = new Set([name, name.replace(/^@/, '')]);
   for (const separator of [':', '/']) {
     const last = name.split(separator).filter(Boolean).pop();
     if (last) tokens.add(last);

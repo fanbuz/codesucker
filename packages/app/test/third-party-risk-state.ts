@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { ThirdPartyRiskFinding, ThirdPartyRiskReport } from '@codesucker/core';
 import {
   excludeThirdPartyFinding, keepThirdPartyFinding, restoreKeptFindingIds,
-  thirdPartyFindingStatus, thirdPartyStatusCounts,
+  thirdPartyFindingPage, thirdPartyFindingStatus, thirdPartyStatusCounts, thirdPartyStatusSummary,
 } from '../src/renderer/src/third-party-risk-state.ts';
 
 function finding(id: string, relPaths: string[]): ThirdPartyRiskFinding {
@@ -111,5 +111,24 @@ assert.deepEqual(thirdPartyStatusCounts(statusReport, statusFiles, ['kept']), {
   'kept-by-user': 1,
   pending: 1,
 });
+
+const manyFindings = Array.from({ length: 10_000 }, (_, index) => `finding-${index}`);
+const firstPage = thirdPartyFindingPage(manyFindings, 0);
+assert.equal(firstPage.items.length, 100, '风险面板单页最多渲染 100 项');
+assert.deepEqual(firstPage.items, manyFindings.slice(0, 100));
+assert.equal(firstPage.pageCount, 100);
+const lastPage = thirdPartyFindingPage(manyFindings, 999);
+assert.equal(lastPage.pageIndex, 99, '越界页码应收敛到最后一页');
+assert.deepEqual(lastPage.items, manyFindings.slice(9_900));
+assert.equal(thirdPartyFindingPage([], Number.NaN).items.length, 0);
+
+const largeStatusReport = report(Array.from({ length: 10_000 }, (_, index) => finding(`large-${index}`, [`file-${index}.ts`])));
+const largeStatusSummary = thirdPartyStatusSummary(
+  largeStatusReport,
+  Array.from({ length: 10_000 }, (_, index) => ({ relPath: `file-${index}.ts`, included: true })),
+  [],
+);
+assert.equal(largeStatusSummary.counts.pending, 10_000);
+assert.equal(largeStatusSummary.byFindingId.size, 10_000, '大报告状态计算应一次构建选择集合，不按 finding 重复扫描文件树');
 
 console.log('✅ third-party-risk-state 全部通过');

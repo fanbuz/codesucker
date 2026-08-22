@@ -207,6 +207,11 @@ input,button{font-family:inherit}
 .third-party-risk-card__locate{padding:3px 0;border:0;border-bottom:1px solid transparent;background:transparent;color:var(--accent);font-size:11px;white-space:nowrap;cursor:pointer}
 .third-party-risk-card__locate:hover{border-bottom-color:currentColor}
 .third-party-risk-card__actions button:focus-visible,.third-party-risk-diagnostics summary:focus-visible{border-radius:3px;outline:2px solid var(--accent);outline-offset:2px}
+.third-party-risk-pagination{display:flex;min-width:0;flex:none;align-items:center;justify-content:flex-end;gap:6px;color:var(--text3);font-size:11px}
+.third-party-risk-pagination span:first-child{margin-right:auto}
+.third-party-risk-pagination .btn-ghost{height:24px;padding:0 7px;font-size:11px}
+.third-party-risk-pagination button:disabled{opacity:.42;cursor:not-allowed}
+.third-party-risk-pagination button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .third-party-risk-diagnostics{min-width:0;flex:none;color:var(--text2);font-size:11px}
 .third-party-risk-diagnostics summary{width:max-content;max-width:100%;color:var(--orange);font-weight:600;cursor:pointer}
 .third-party-risk-diagnostics>div{max-height:70px;overflow:auto;margin-top:5px;padding:6px 8px;border-radius:6px;background:color-mix(in srgb,var(--panel) 72%,transparent)}

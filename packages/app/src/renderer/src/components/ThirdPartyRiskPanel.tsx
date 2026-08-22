@@ -1,7 +1,8 @@
+import { useEffect, useMemo, useState } from 'react';
 import type { ThirdPartyRiskFinding, ThirdPartyRiskReport } from '@codesucker/core';
 import type { FileRow } from '../store';
 import {
-  thirdPartyFindingStatus, thirdPartyStatusCounts, type ThirdPartyFindingStatus,
+  thirdPartyFindingPage, thirdPartyStatusSummary, type ThirdPartyFindingStatus,
 } from '../third-party-risk-state';
 
 const STATUS_COPY: Record<ThirdPartyFindingStatus, { label: string; className: string }> = {
@@ -12,6 +13,7 @@ const STATUS_COPY: Record<ThirdPartyFindingStatus, { label: string; className: s
 };
 
 const CONFIDENCE_COPY = { high: '证据高置信', medium: '证据中置信', low: '证据低置信' } as const;
+const DIAGNOSTIC_DISPLAY_LIMIT = 100;
 
 export function preferredThirdPartyEvidencePath(finding: ThirdPartyRiskFinding): string | null {
   return finding.evidence[0]?.location.file
@@ -28,8 +30,16 @@ export function ThirdPartyRiskPanel({ report, files, keptFindingIds, onExclude, 
   onKeep: (finding: ThirdPartyRiskFinding) => void;
   onReveal: (finding: ThirdPartyRiskFinding) => void;
 }) {
-  const counts = thirdPartyStatusCounts(report, files, keptFindingIds);
+  const [findingPageIndex, setFindingPageIndex] = useState(0);
+  useEffect(() => setFindingPageIndex(0), [report]);
+  const statusSummary = useMemo(
+    () => thirdPartyStatusSummary(report, files, keptFindingIds),
+    [report, files, keptFindingIds],
+  );
+  const counts = statusSummary.counts;
   const unresolved = counts.pending + counts['partially-excluded'];
+  const findingPage = thirdPartyFindingPage(report.findings, findingPageIndex);
+  const visibleDiagnostics = report.diagnostics.slice(0, DIAGNOSTIC_DISPLAY_LIMIT);
 
   return (
     <section className={`third-party-risk-panel${unresolved > 0 || report.diagnostics.length > 0 ? ' has-unresolved' : ''}`}
@@ -53,8 +63,8 @@ export function ThirdPartyRiskPanel({ report, files, keptFindingIds, onExclude, 
         </div>
       ) : (
         <div className="third-party-risk-list">
-          {report.findings.map((finding) => {
-            const status = thirdPartyFindingStatus(finding, files, keptFindingIds);
+          {findingPage.items.map((finding) => {
+            const status = statusSummary.byFindingId.get(finding.id) ?? 'pending';
             const statusCopy = STATUS_COPY[status];
             const evidencePath = preferredThirdPartyEvidencePath(finding);
             return (
@@ -87,15 +97,29 @@ export function ThirdPartyRiskPanel({ report, files, keptFindingIds, onExclude, 
         </div>
       )}
 
+      {report.findings.length > 0 && findingPage.pageCount > 1 && (
+        <nav className="third-party-risk-pagination" aria-label="第三方代码风险分页">
+          <span>显示 {findingPage.start + 1}–{findingPage.end} / {report.findings.length}</span>
+          <button type="button" className="btn-ghost" disabled={findingPage.pageIndex === 0}
+            onClick={() => setFindingPageIndex((page) => Math.max(0, page - 1))}>上一页</button>
+          <span>第 {findingPage.pageIndex + 1} / {findingPage.pageCount} 页</span>
+          <button type="button" className="btn-ghost" disabled={findingPage.pageIndex >= findingPage.pageCount - 1}
+            onClick={() => setFindingPageIndex((page) => Math.min(findingPage.pageCount - 1, page + 1))}>下一页</button>
+        </nav>
+      )}
+
       {report.diagnostics.length > 0 && (
         <details className="third-party-risk-diagnostics">
           <summary>{report.diagnostics.length} 项分析诊断</summary>
           <div>
-            {report.diagnostics.map((diagnostic, index) => (
+            {visibleDiagnostics.map((diagnostic, index) => (
               <p key={`${diagnostic.code}:${diagnostic.file ?? ''}:${index}`}>
                 {diagnostic.file ? `${diagnostic.file} · ` : ''}{diagnostic.message} {diagnostic.suggestion}
               </p>
             ))}
+            {report.diagnostics.length > visibleDiagnostics.length && (
+              <p>界面仅显示前 {visibleDiagnostics.length} 项，完整诊断会保留在导出的第三方代码风险摘要中。</p>
+            )}
           </div>
         </details>
       )}
