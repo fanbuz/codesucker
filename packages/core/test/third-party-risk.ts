@@ -351,6 +351,20 @@ try {
     version = "1.0.0"
     source = "sparse+https://index.crates.io/"
   `);
+  await fs.mkdir(path.join(root, '000-rust-ignored-workspace/vendor/ignored-owned'), { recursive: true });
+  await fs.writeFile(path.join(root, '000-rust-ignored-workspace/Cargo.toml'), `
+    [package]
+    name = "ignored-workspace-root"
+    [workspace]
+    members = ["vendor/ignored-owned"]
+    exclude = ["vendor/ignored-owned"]
+    [dependencies]
+    ignored-owned = "1"
+  `);
+  await fs.writeFile(path.join(root, '000-rust-ignored-workspace/vendor/ignored-owned/Cargo.toml'), `
+    [package]
+    "name" = "ignored-owned" # quoted key and trailing comment are valid TOML
+  `);
   await fs.mkdir(path.join(root, 'rust-workspace/member'), { recursive: true });
   await fs.writeFile(path.join(root, 'rust-workspace/Cargo.toml'), `
     [workspace.dependencies]
@@ -553,7 +567,7 @@ other''']
   for (const member of ['member', 'other']) {
     await fs.writeFile(path.join(root, `rust-multiline-workspace/${member}/Cargo.toml`), `
       [package]
-      name = "multiline-${member}"
+      name = "multiline-${member}-consumer"
       [dependencies]
       multiline-${member} = "1"
 
@@ -787,6 +801,7 @@ other''']
     write('vendor/sparse-dep/lib.rs', 'pub fn external() {}'),
     write('deps/workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/deps/workspace-member-local/lib.rs', 'pub fn owned() {}'),
+    write('000-rust-ignored-workspace/vendor/ignored-owned/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/member/vendor/workspace-alias/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/member/vendor/table-workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-external/deps/workspace-member-local/lib.rs', 'pub fn external() {}'),
@@ -913,6 +928,15 @@ other''']
   assert.ok(fullSnapshot.manifestCandidateRelPaths.includes(
     'vendor/node-owned/node-nested-owned/package.json',
   ), '清单上限充足时必须递归发现嵌套 Node workspace 成员');
+  assert.ok(fullSnapshot.manifestCandidateRelPaths.includes(
+    '000-rust-ignored-workspace/vendor/ignored-owned/Cargo.toml',
+  ), '默认忽略目录中的显式 Cargo workspace 成员必须进入候选清单快照');
+  assert.ok(limitedSnapshot.manifestCandidateRelPaths.includes(
+    '000-rust-ignored-workspace/vendor/ignored-owned/Cargo.toml',
+  ), '超过分析上限的显式 Cargo workspace 成员仍必须进入候选清单快照');
+  assert.ok(limitedSnapshot.manifestIdentities.some((item) => (
+    item.relPath === '000-rust-ignored-workspace/vendor/ignored-owned/Cargo.toml'
+  )), '超过分析上限的显式 Cargo workspace 成员仍必须进入完整字节身份快照');
   assert.ok(!fullSnapshot.manifestCandidateRelPaths.includes('vendor/node-external/package.json'),
     'Node workspace 排除 glob 不能形成本地成员候选');
   assert.ok(limitedSnapshot.manifestCandidateRelPaths.includes('node-glob-root/packages/owned/package.json'),
@@ -1146,6 +1170,8 @@ other''']
   assert.ok(dependencyFiles.has('vendor/lock-collision/lib.rs'), 'Cargo.lock 同名本地与 registry 包不能让本地条目遮蔽外部证据');
   assert.ok(!dependencyFiles.has('rust-workspace/deps/workspace-member-local/lib.rs'),
     '兄弟工程的同名外部依赖不能覆盖当前 Cargo workspace 的本地声明');
+  assert.ok(!dependencyFiles.has('000-rust-ignored-workspace/vendor/ignored-owned/lib.rs'),
+    'Cargo workspace 成员的引号 name 键必须形成本地身份并压制祖先同名外部依赖');
   assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/workspace-alias/lib.rs'),
     'Cargo workspace 重命名依赖必须按别名传播本地属性');
   assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/table-workspace-local/lib.rs'),

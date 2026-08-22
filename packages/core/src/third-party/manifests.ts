@@ -1322,9 +1322,7 @@ function cargoWorkspaceOverrideScopes(doc: ManifestDocument): {
   if (!workspace) return { memberScopes: [], incomplete: false };
   const base = path.posix.dirname(doc.relPath);
   const arrayStatus = { complete: true };
-  const excluded = new Set(tomlArrayAssignment(workspace.body, 'exclude', arrayStatus).map((member) => (
-    path.posix.normalize(path.posix.join(base, member.replace(/\\/g, '/')))
-  )));
+  tomlArrayAssignment(workspace.body, 'exclude', arrayStatus);
   const scopes = new Set<string>();
   if (sections.some((section) => tomlSectionHasExactPath(section, 'package'))) {
     scopes.add(base === '.' ? '' : base);
@@ -1343,14 +1341,18 @@ function cargoWorkspaceOverrideScopes(doc: ManifestDocument): {
       incomplete = true;
       continue;
     }
-    if (!excluded.has(resolved)) {
-      const scope = resolved === '.' ? '' : resolved;
-      scopes.add(scope);
-      memberScopes.add(scope);
-    }
+    const scope = resolved === '.' ? '' : resolved;
+    scopes.add(scope);
+    memberScopes.add(scope);
   }
   if (!arrayStatus.complete) incomplete = true;
   return { scopes: [...scopes].sort(), memberScopes: [...memberScopes].sort(), incomplete };
+}
+
+function cargoWorkspaceMemberManifests(doc: ManifestDocument): string[] {
+  return cargoWorkspaceOverrideScopes(doc).memberScopes.map((scope) => (
+    scope ? `${scope}/Cargo.toml` : 'Cargo.toml'
+  ));
 }
 
 function hasIncompleteCargoOverrides(doc: ManifestDocument): boolean {
@@ -1410,6 +1412,24 @@ function hasIncompleteCargoLock(doc: ManifestDocument): boolean {
   return doc.basename === 'Cargo.lock' && cargoLockPackages(doc).incomplete;
 }
 
+function cargoPackageMetadata(doc: ManifestDocument): { incomplete: boolean; name?: string } {
+  const sections = tomlSections(doc.text).filter((item) => tomlSectionHasExactPath(item, 'package'));
+  if (sections.length === 0) return { incomplete: false };
+  if (sections.length > 1) return { incomplete: true };
+  const parsed = parseTomlAssignments(sections[0].body);
+  if (!parsed.complete) return { incomplete: true };
+  const names = parsed.assignments.filter((assignment) => (
+    assignment.keyPath.length === 1 && assignment.keyPath[0] === 'name'
+  ));
+  if (names.length !== 1) return { incomplete: true };
+  const name = tomlStringValue(names[0].value);
+  return name ? { incomplete: false, name } : { incomplete: true };
+}
+
+function hasIncompleteCargoPackage(doc: ManifestDocument): boolean {
+  return doc.basename === 'Cargo.toml' && cargoPackageMetadata(doc).incomplete;
+}
+
 function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (doc.basename === 'Cargo.lock') {
@@ -1425,8 +1445,7 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
     }
     return out;
   }
-  const packageBlock = /\[package\]([\s\S]*?)(?=\r?\n\s*\[|$)/.exec(doc.text)?.[1] ?? '';
-  const packageName = /^name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(packageBlock)?.[1];
+  const packageName = cargoPackageMetadata(doc).name;
   if (packageName) {
     const own = identity('rust', packageName, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
@@ -2166,6 +2185,24 @@ export async function collectDependencyInventory(
             memberScopes: workspace.memberScopes,
           });
         }
+        const memberManifests = cargoWorkspaceMemberManifests(document);
+        memberManifests.forEach((memberManifest) => candidatePaths.add(memberManifest));
+        for (const memberManifest of memberManifests) {
+          if (selectedSet.has(memberManifest)) continue;
+          if (selected.length >= maxManifestFiles) {
+            if (!limitReported) {
+              diagnostics.push(diagnostic(
+                'analysis-limit-reached', undefined,
+                `依赖清单达到 ${maxManifestFiles} 个分析上限，部分 Cargo workspace 成员未分析。`,
+                '请缩小项目范围或减少 workspace 成员后重新扫描。',
+              ));
+              limitReported = true;
+            }
+            break;
+          }
+          selectedSet.add(memberManifest);
+          selected.push(memberManifest);
+        }
       }
       dependencies.push(...parseManifest(document));
       analyzedManifests++;
@@ -2246,6 +2283,7 @@ export async function collectDependencyInventory(
         || hasInvalidGoDirectives(document)
         || hasIncompleteCargoOverrides(document)
         || hasIncompleteCargoLock(document)
+        || hasIncompleteCargoPackage(document)
         || hasIncompletePythonRequirements(document)
         || hasDynamicPep621Dependencies(document)) {
         diagnostics.push(diagnostic(
