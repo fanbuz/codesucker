@@ -195,6 +195,15 @@ function htmlMetaEncoding(tag: HtmlOpeningTag): string | null {
   return /(?:^|;)\s*charset\s*=\s*([A-Za-z0-9._-]+)/i.exec(attributes.get('content') ?? '')?.[1] ?? null;
 }
 
+const WEB_UTF16_LABELS = new Set([
+  'csunicode', 'iso-10646-ucs-2', 'ucs-2', 'unicode', 'unicodefeff',
+  'unicodefffe', 'utf-16', 'utf-16be', 'utf-16le',
+]);
+
+function normalizeWebDeclaredEncoding(encoding: string | null): string | null {
+  return WEB_UTF16_LABELS.has(encoding?.trim().toLocaleLowerCase() ?? '') ? 'UTF-8' : encoding;
+}
+
 function blankHtmlEncodingNoise(text: string): string {
   const characters = text.split('');
   const blank = (start: number, end: number) => {
@@ -272,7 +281,7 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
   }
   if (ext === 'css' || ext === 'scss') {
     const encoding = /^@charset "([A-Za-z0-9._-]+)";/.exec(header)?.[1];
-    return /^utf-16(?:be|le)?$/i.test(encoding ?? '') ? 'UTF-8' : encoding ?? null;
+    return normalizeWebDeclaredEncoding(encoding ?? null);
   }
   if (ext === 'html' || ext === 'htm') {
     const htmlHeader = blankHtmlEncodingNoise(header);
@@ -285,7 +294,7 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
       if (body && body.index < meta.index) continue;
       if (headClose && (headClose.index ?? 0) < meta.index) continue;
       const encoding = htmlMetaEncoding(meta);
-      if (encoding) return encoding;
+      if (encoding) return normalizeWebDeclaredEncoding(encoding);
     }
   }
   return null;

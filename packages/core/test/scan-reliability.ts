@@ -47,6 +47,14 @@ write('enc/utf8-html-comment-cross-window.html', `<!doctype html><html><head><!-
 write('enc/utf8-meta-string.ts', 'const sample = "<meta charset=gbk>";\nconst 名称 = "仍是 UTF-8";');
 write('enc/utf8-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="charset=windows-1252"><meta charset="utf-8"></head><body>é</body></html>');
 write('enc/utf8-nested-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="<meta charset=windows-1252>"><meta charset="utf-8"></head><body>é</body></html>');
+const webUtf16Labels = [
+  'csunicode', 'iso-10646-ucs-2', 'ucs-2', 'unicode', 'unicodefeff',
+  'unicodefffe', 'utf-16', 'utf-16be', 'utf-16le',
+] as const;
+for (const label of webUtf16Labels) {
+  write(`enc/utf8-html-${label}.html`, `<!doctype html><html><head><meta charset="${label}"></head><body>é</body></html>`);
+}
+write('enc/utf8-html-http-equiv-ucs-2.html', '<!doctype html><html><head><meta http-equiv="content-type" content="text/html; charset=ucs-2"></head><body>é</body></html>');
 write('enc/utf8-magic-comment.js', '// This tool supports charset=windows-1252 and coding=utf-16.\nconst value = "é";');
 write('enc/utf8-late-python-cookie.py', 'value = "é"\n# coding: windows-1252');
 write('enc/declared-xml.xml', Buffer.concat([
@@ -61,6 +69,7 @@ write('enc/declared-css.css', Buffer.concat([
 write('enc/utf8-invalid-css-charset.css', ' \n@charset "windows-1252";\n.sample { content: "é"; }');
 write('enc/utf8-invalid-css-syntax.scss', "@charset  'windows-1252';\n.sample { content: 'é'; }");
 write('enc/utf8-css-utf16-label.css', '@charset "utf-16le";\n.sample { content: "é"; }');
+write('enc/utf8-css-utf16-alias.css', '@charset "unicodefffe";\n.sample { content: "é"; }');
 write('enc/declared-html-metadata.html', Buffer.concat([
   Buffer.from('<!doctype html><html><head><style>body { color: red; }</style><script>const fake = "<meta charset=utf-8>";</script><meta charset="windows-1252"></head><body>', 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
@@ -133,6 +142,10 @@ assert.equal(byPath.get('enc/utf8-html-comment-cross-window.html')?.encoding, 'U
 assert.equal(byPath.get('enc/utf8-meta-string.ts')?.encoding, 'UTF-8', '普通字符串中的 meta 标签不能伪装成编码声明');
 assert.equal(byPath.get('enc/utf8-meta-attribute.html')?.encoding, 'UTF-8', '普通 meta 属性值中的 charset 不能抢在真实 charset 属性前');
 assert.equal(byPath.get('enc/utf8-nested-meta-attribute.html')?.encoding, 'UTF-8', '属性值中的伪 meta 标签不能抢在真实 charset 属性前');
+for (const label of webUtf16Labels) {
+  assert.equal(byPath.get(`enc/utf8-html-${label}.html`)?.encoding, 'UTF-8', `HTML ${label} 声明必须按规范映射为 UTF-8`);
+}
+assert.equal(byPath.get('enc/utf8-html-http-equiv-ucs-2.html')?.encoding, 'UTF-8', 'HTML http-equiv 的 UTF-16 别名必须映射为 UTF-8');
 assert.equal(byPath.get('enc/utf8-magic-comment.js')?.encoding, 'UTF-8', '不支持 magic comment 的语言不能把普通编码说明当作声明');
 assert.equal(byPath.get('enc/utf8-late-python-cookie.py')?.encoding, 'UTF-8', '首行已有代码时第二行 Python cookie 不能作为声明');
 assert.equal(byPath.get('enc/declared-xml.xml')?.encoding, 'WINDOWS-1252', '位于字节零的 XML 编码声明必须生效');
@@ -142,6 +155,7 @@ assert.equal(byPath.get('enc/declared-css.css')?.encoding, 'WINDOWS-1252', '位�
 assert.equal(byPath.get('enc/utf8-invalid-css-charset.css')?.encoding, 'UTF-8', '前置空白后的 CSS @charset 无效，不能改变 UTF-8 解码');
 assert.equal(byPath.get('enc/utf8-invalid-css-syntax.scss')?.encoding, 'UTF-8', '非精确 CSS @charset 字节序列不能改变 UTF-8 解码');
 assert.equal(byPath.get('enc/utf8-css-utf16-label.css')?.encoding, 'UTF-8', 'CSS 的 UTF-16 声明必须按规范回退为 UTF-8');
+assert.equal(byPath.get('enc/utf8-css-utf16-alias.css')?.encoding, 'UTF-8', 'CSS 的 UTF-16 别名必须按规范回退为 UTF-8');
 assert.equal(byPath.get('enc/declared-html-metadata.html')?.encoding, 'WINDOWS-1252', 'style/script 等 head metadata 之后的真实 charset 必须生效');
 assert.equal(byPath.get('enc/declared-html-comment-attribute.html')?.encoding, 'WINDOWS-1252', 'HTML 属性值内的 comment opener 不能隐藏后续真实 charset');
 assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');
@@ -216,6 +230,10 @@ const invalidXmlDeclaration = processFiles([byPath.get('enc/utf8-invalid-xml-dec
 assert.match(invalidXmlDeclaration.cleaned[0].lines.join('\n'), /é/, '无效 XML 声明不能改变 UTF-8 字符语义');
 const xmlStylesheet = processFiles([byPath.get('enc/utf8-xml-stylesheet.xml')!], config);
 assert.match(xmlStylesheet.cleaned[0].lines.join('\n'), /é/, 'xml-stylesheet 处理指令不能改变 UTF-8 字符语义');
+for (const label of webUtf16Labels) {
+  const html = processFiles([byPath.get(`enc/utf8-html-${label}.html`)!], config);
+  assert.match(html.cleaned[0].lines.join('\n'), /é/, `HTML ${label} 声明不能破坏 UTF-8 字符语义`);
+}
 const declaredHtml = processFiles([byPath.get('enc/declared-html.html')!], config);
 assert.match(declaredHtml.cleaned[0].lines.join('\n'), /Ã©/, 'HTML meta 声明必须优先于 UTF-8 字节有效性');
 const declaredHtmlMetadata = processFiles([byPath.get('enc/declared-html-metadata.html')!], config);
