@@ -1,0 +1,360 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import fg from 'fast-glob';
+import type {
+  ThirdPartyAnalysisDiagnostic, ThirdPartyEcosystem, ThirdPartyEvidenceSource,
+} from './types.ts';
+
+const MANIFEST_MAX_BYTES = 8 * 1024 * 1024;
+const LOCKFILE_MAX_BYTES = 32 * 1024 * 1024;
+const DEFAULT_MAX_MANIFESTS = 512;
+const IGNORE_DIRS = [
+  '**/.git/**', '**/node_modules/**', '**/.gradle/**', '**/.idea/**',
+  '**/.next/**', '**/.nuxt/**', '**/dist/**', '**/build/**', '**/out/**',
+  '**/target/**', '**/.venv/**', '**/venv/**', '**/__pycache__/**',
+  '**/vendor/**', '**/vendors/**', '**/third_party/**', '**/third-party/**',
+];
+
+const MANIFEST_PATTERNS = [
+  '**/package.json', '**/package-lock.json',
+  '**/pom.xml', '**/build.gradle', '**/build.gradle.kts', '**/settings.gradle',
+  '**/settings.gradle.kts', '**/gradle.lockfile',
+  '**/go.mod', '**/go.work',
+  '**/Cargo.toml', '**/Cargo.lock',
+  '**/requirements*.txt', '**/pyproject.toml', '**/Pipfile.lock',
+  '**/poetry.lock', '**/uv.lock',
+];
+
+export interface DependencyIdentity {
+  ecosystem: ThirdPartyEcosystem;
+  name: string;
+  normalizedName: string;
+  sourceFile: string;
+  source: ThirdPartyEvidenceSource;
+  local: boolean;
+}
+
+export interface DependencyInventory {
+  dependencies: DependencyIdentity[];
+  diagnostics: ThirdPartyAnalysisDiagnostic[];
+  analyzedManifests: number;
+}
+
+interface ManifestDocument {
+  relPath: string;
+  basename: string;
+  text: string;
+  lockfile: boolean;
+}
+
+function normalizeRel(value: string): string {
+  return value.split(path.sep).join('/').replace(/^\.\//, '');
+}
+
+function insideRoot(rootReal: string, candidateReal: string): boolean {
+  const rel = path.relative(rootReal, candidateReal);
+  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
+}
+
+function diagnostic(
+  code: ThirdPartyAnalysisDiagnostic['code'], file: string | undefined,
+  message: string, suggestion: string,
+): ThirdPartyAnalysisDiagnostic {
+  return { code, ...(file ? { file } : {}), message, suggestion };
+}
+
+async function readManifest(rootReal: string, relPath: string): Promise<ManifestDocument | ThirdPartyAnalysisDiagnostic> {
+  const normalized = normalizeRel(relPath);
+  const absolute = path.resolve(rootReal, normalized);
+  try {
+    const real = await fs.realpath(absolute);
+    if (!insideRoot(rootReal, real)) {
+      return diagnostic('manifest-read-failed', normalized, '依赖清单指向项目目录之外，已跳过。', '请检查符号链接或将清单移入项目目录。');
+    }
+    const stats = await fs.stat(real);
+    const basename = path.basename(normalized);
+    const lockfile = /(?:lock|modules\.txt$)/i.test(basename);
+    const limit = lockfile ? LOCKFILE_MAX_BYTES : MANIFEST_MAX_BYTES;
+    if (!stats.isFile()) {
+      return diagnostic('manifest-read-failed', normalized, '依赖清单不是普通文件，已跳过。', '请检查项目中的同名路径。');
+    }
+    if (stats.size > limit) {
+      return diagnostic('manifest-too-large', normalized, `依赖清单超过 ${limit / 1024 / 1024} MiB 分析上限。`, '可精简锁文件后重新扫描，或手工核验第三方代码。');
+    }
+    const text = (await fs.readFile(real, 'utf8')).replace(/^\uFEFF/, '');
+    return { relPath: normalized, basename, text, lockfile };
+  } catch (error) {
+    return diagnostic('manifest-read-failed', normalized, '无法读取依赖清单。', error instanceof Error ? error.message : '请检查文件权限和编码。');
+  }
+}
+
+function normalizePackageName(name: string, ecosystem: ThirdPartyEcosystem): string {
+  const value = name.trim().replace(/^['"]|['"]$/g, '');
+  if (ecosystem === 'python') return value.toLocaleLowerCase().replace(/[._-]+/g, '-');
+  return value.toLocaleLowerCase();
+}
+
+function identity(
+  ecosystem: ThirdPartyEcosystem, name: string, sourceFile: string,
+  source: ThirdPartyEvidenceSource, local = false,
+): DependencyIdentity | null {
+  const cleaned = name.trim();
+  if (!cleaned) return null;
+  return { ecosystem, name: cleaned, normalizedName: normalizePackageName(cleaned, ecosystem), sourceFile, source, local };
+}
+
+function localSpec(spec: unknown): boolean {
+  return typeof spec === 'string' && /^(?:workspace:|file:|link:|\.\.?\/|\/)/i.test(spec.trim());
+}
+
+function parseNode(doc: ManifestDocument): DependencyIdentity[] {
+  const parsed = JSON.parse(doc.text) as Record<string, unknown>;
+  const out: DependencyIdentity[] = [];
+  if (doc.basename === 'package.json') {
+    if (typeof parsed.name === 'string') {
+      const own = identity('node', parsed.name, doc.relPath, 'package-metadata', true);
+      if (own) out.push(own);
+    }
+    for (const key of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+      const values = parsed[key];
+      if (!values || typeof values !== 'object' || Array.isArray(values)) continue;
+      for (const [name, spec] of Object.entries(values as Record<string, unknown>)) {
+        const item = identity('node', name, doc.relPath, 'manifest', localSpec(spec));
+        if (item) out.push(item);
+      }
+    }
+  } else {
+    const packages = parsed.packages;
+    if (packages && typeof packages === 'object' && !Array.isArray(packages)) {
+      for (const [pkgPath, metadata] of Object.entries(packages as Record<string, unknown>)) {
+        if (!pkgPath || !metadata || typeof metadata !== 'object' || Array.isArray(metadata)) continue;
+        const record = metadata as Record<string, unknown>;
+        const fallback = pkgPath.replace(/^node_modules\//, '');
+        const name = typeof record.name === 'string' ? record.name : fallback;
+        const item = identity('node', name, doc.relPath, 'lockfile', record.link === true || localSpec(record.resolved));
+        if (item) out.push(item);
+      }
+    }
+    const deps = parsed.dependencies;
+    if (deps && typeof deps === 'object' && !Array.isArray(deps)) {
+      for (const name of Object.keys(deps as Record<string, unknown>)) {
+        const item = identity('node', name, doc.relPath, 'lockfile');
+        if (item) out.push(item);
+      }
+    }
+  }
+  return out;
+}
+
+function xmlValue(block: string, tag: string): string | undefined {
+  return new RegExp(`<${tag}\\b[^>]*>([^<]+)</${tag}>`, 'i').exec(block)?.[1]?.trim();
+}
+
+function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
+  if (/<!DOCTYPE|<!ENTITY/i.test(doc.text)) throw new Error('包含不允许的 XML 实体或 DOCTYPE');
+  const out: DependencyIdentity[] = [];
+  const projectArtifact = xmlValue(doc.text.replace(/<dependencies\b[\s\S]*$/i, ''), 'artifactId');
+  if (projectArtifact) {
+    const own = identity('java', projectArtifact, doc.relPath, 'package-metadata', true);
+    if (own) out.push(own);
+  }
+  for (const match of doc.text.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
+    const group = xmlValue(match[1], 'groupId');
+    const artifact = xmlValue(match[1], 'artifactId');
+    if (!artifact) continue;
+    const item = identity('java', group ? `${group}:${artifact}` : artifact, doc.relPath, 'manifest');
+    if (item) out.push(item);
+  }
+  for (const match of doc.text.matchAll(/<module\b[^>]*>([^<]+)<\/module>/gi)) {
+    const item = identity('java', match[1], doc.relPath, 'manifest', true);
+    if (item) out.push(item);
+  }
+  return out;
+}
+
+function parseGradle(doc: ManifestDocument): DependencyIdentity[] {
+  const out: DependencyIdentity[] = [];
+  for (const match of doc.text.matchAll(/\b(?:api|implementation|compileOnly|runtimeOnly|testImplementation|classpath)\s*(?:\(|\s)\s*['"]([^:'"]+):([^:'"]+):[^'"]+['"]/g)) {
+    const item = identity('java', `${match[1]}:${match[2]}`, doc.relPath, doc.lockfile ? 'lockfile' : 'manifest');
+    if (item) out.push(item);
+  }
+  for (const match of doc.text.matchAll(/\bproject\s*\(\s*['"]:([^'"]+)['"]\s*\)/g)) {
+    const item = identity('java', match[1], doc.relPath, 'manifest', true);
+    if (item) out.push(item);
+  }
+  if (/\b(?:dependencies|include)\b/.test(doc.text) && out.length === 0) {
+    throw new Error('包含动态或暂不支持的 Gradle 声明');
+  }
+  return out;
+}
+
+function parseGo(doc: ManifestDocument): DependencyIdentity[] {
+  const out: DependencyIdentity[] = [];
+  const module = /^\s*module\s+([^\s]+)\s*$/m.exec(doc.text)?.[1];
+  if (module) {
+    const own = identity('go', module, doc.relPath, 'package-metadata', true);
+    if (own) out.push(own);
+  }
+  const replacedLocal = new Set<string>();
+  for (const match of doc.text.matchAll(/^\s*replace\s+([^\s]+)(?:\s+v[^\s]+)?\s*=>\s*([^\s]+).*$/gm)) {
+    if (/^(?:\.\.?\/|\/)/.test(match[2])) replacedLocal.add(match[1]);
+  }
+  for (const match of doc.text.matchAll(/^\s*([\w.~-]+\/[\w./~-]+)\s+v[^\s]+(?:\s+\/\/.*)?$/gm)) {
+    const item = identity('go', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', replacedLocal.has(match[1]));
+    if (item) out.push(item);
+  }
+  for (const match of doc.text.matchAll(/^\s*require\s+([\w.~-]+\/[\w./~-]+)\s+v[^\s]+(?:\s+\/\/.*)?$/gm)) {
+    const item = identity('go', match[1], doc.relPath, 'manifest', replacedLocal.has(match[1]));
+    if (item) out.push(item);
+  }
+  for (const match of doc.text.matchAll(/^#\s+([^\s]+)\s+v[^\s]+/gm)) {
+    const item = identity('go', match[1], doc.relPath, 'lockfile', replacedLocal.has(match[1]));
+    if (item) out.push(item);
+  }
+  return out;
+}
+
+function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
+  const out: DependencyIdentity[] = [];
+  if (doc.basename === 'Cargo.lock') {
+    for (const match of doc.text.matchAll(/^name\s*=\s*['"]([^'"]+)['"]\s*$/gm)) {
+      const item = identity('rust', match[1], doc.relPath, 'lockfile');
+      if (item) out.push(item);
+    }
+    return out;
+  }
+  const packageBlock = /\[package\]([\s\S]*?)(?=\n\[|$)/.exec(doc.text)?.[1] ?? '';
+  const packageName = /^name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(packageBlock)?.[1];
+  if (packageName) {
+    const own = identity('rust', packageName, doc.relPath, 'package-metadata', true);
+    if (own) out.push(own);
+  }
+  for (const section of doc.text.matchAll(/\[(?:target\.[^\]]+\.)?(?:dev-|build-)?dependencies\]([\s\S]*?)(?=\n\[|$)/g)) {
+    for (const line of section[1].split(/\r?\n/)) {
+      const match = /^\s*([\w.-]+)\s*=\s*(.+)$/.exec(line);
+      if (!match) continue;
+      const packageOverride = /\bpackage\s*=\s*['"]([^'"]+)['"]/.exec(match[2])?.[1];
+      const item = identity('rust', packageOverride ?? match[1], doc.relPath, 'manifest', /\bpath\s*=/.test(match[2]));
+      if (item) out.push(item);
+    }
+  }
+  return out;
+}
+
+function pythonName(spec: string): string | undefined {
+  const trimmed = spec.trim().replace(/^[-*]\s*/, '');
+  if (!trimmed || /^#/.test(trimmed) || /^(?:-e\s+)?(?:\.\.?\/|\/|file:|git\+)/i.test(trimmed)) return undefined;
+  return /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(trimmed)?.[1];
+}
+
+function parsePython(doc: ManifestDocument): DependencyIdentity[] {
+  const out: DependencyIdentity[] = [];
+  if (/^requirements/i.test(doc.basename)) {
+    for (const line of doc.text.split(/\r?\n/)) {
+      const name = pythonName(line);
+      if (!name) continue;
+      const item = identity('python', name, doc.relPath, 'manifest');
+      if (item) out.push(item);
+    }
+    return out;
+  }
+  if (doc.basename === 'Pipfile.lock') {
+    const parsed = JSON.parse(doc.text) as Record<string, unknown>;
+    for (const key of ['default', 'develop']) {
+      const values = parsed[key];
+      if (!values || typeof values !== 'object' || Array.isArray(values)) continue;
+      for (const name of Object.keys(values as Record<string, unknown>)) {
+        const item = identity('python', name, doc.relPath, 'lockfile');
+        if (item) out.push(item);
+      }
+    }
+    return out;
+  }
+  const projectName = /\[(?:project|tool\.poetry)\]([\s\S]*?)(?=\n\[|$)/.exec(doc.text)?.[1];
+  const ownName = projectName && /^name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(projectName)?.[1];
+  if (ownName) {
+    const own = identity('python', ownName, doc.relPath, 'package-metadata', true);
+    if (own) out.push(own);
+  }
+  for (const match of doc.text.matchAll(/^[ \t]*['"]?([A-Za-z0-9][A-Za-z0-9._-]*)['"]?\s*=\s*(.+)$/gm)) {
+    if (['name', 'version', 'description', 'python'].includes(match[1])) continue;
+    const local = /\bpath\s*=|^(?:['"])?(?:\.\.?\/|\/|file:)/.test(match[2].trim());
+    const item = identity('python', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', local);
+    if (item) out.push(item);
+  }
+  for (const match of doc.text.matchAll(/['"]([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?\s*(?:[<>=!~]|['"])/g)) {
+    const item = identity('python', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest');
+    if (item) out.push(item);
+  }
+  return out;
+}
+
+function parseManifest(doc: ManifestDocument): DependencyIdentity[] {
+  if (doc.basename === 'package.json' || doc.basename === 'package-lock.json') return parseNode(doc);
+  if (doc.basename === 'pom.xml') return parseMaven(doc);
+  if (/^(?:build|settings)\.gradle(?:\.kts)?$|^gradle\.lockfile$/.test(doc.basename)) return parseGradle(doc);
+  if (doc.basename === 'go.mod' || doc.basename === 'go.work' || doc.relPath.endsWith('/vendor/modules.txt')) return parseGo(doc);
+  if (doc.basename === 'Cargo.toml' || doc.basename === 'Cargo.lock') return parseCargo(doc);
+  return parsePython(doc);
+}
+
+function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
+  const localNames = new Set(items.filter((item) => item.local).map((item) => `${item.ecosystem}:${item.normalizedName}`));
+  const seen = new Set<string>();
+  return items
+    .map((item) => localNames.has(`${item.ecosystem}:${item.normalizedName}`) ? { ...item, local: true } : item)
+    .filter((item) => {
+      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.sourceFile}\0${item.source}\0${item.local}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => `${a.ecosystem}:${a.normalizedName}:${a.sourceFile}`.localeCompare(`${b.ecosystem}:${b.normalizedName}:${b.sourceFile}`));
+}
+
+export async function collectDependencyInventory(
+  root: string, maxManifestFiles = DEFAULT_MAX_MANIFESTS, signal?: AbortSignal,
+): Promise<DependencyInventory> {
+  const rootReal = await fs.realpath(root);
+  signal?.throwIfAborted();
+  const regular = await fg(MANIFEST_PATTERNS, {
+    cwd: rootReal, onlyFiles: true, dot: true, followSymbolicLinks: false, ignore: IGNORE_DIRS,
+  });
+  const goVendor = await fg('**/vendor/modules.txt', {
+    cwd: rootReal, onlyFiles: true, dot: true, followSymbolicLinks: false,
+    ignore: IGNORE_DIRS.filter((item) => !item.includes('vendor')),
+  });
+  const all = [...new Set([...regular, ...goVendor].map(normalizeRel))].sort();
+  const selected = all.slice(0, maxManifestFiles);
+  const diagnostics: ThirdPartyAnalysisDiagnostic[] = [];
+  if (all.length > selected.length) {
+    diagnostics.push(diagnostic(
+      'analysis-limit-reached', undefined,
+      `依赖清单共 ${all.length} 个，仅分析前 ${selected.length} 个。`,
+      '可缩小项目范围或减少重复的嵌套工程后重新扫描。',
+    ));
+  }
+  const dependencies: DependencyIdentity[] = [];
+  let analyzedManifests = 0;
+  for (const relPath of selected) {
+    signal?.throwIfAborted();
+    const document = await readManifest(rootReal, relPath);
+    if ('code' in document) {
+      diagnostics.push(document);
+      continue;
+    }
+    try {
+      dependencies.push(...parseManifest(document));
+      analyzedManifests++;
+    } catch (error) {
+      const dynamic = /dynamic|动态|暂不支持/i.test(error instanceof Error ? error.message : String(error));
+      diagnostics.push(diagnostic(
+        dynamic ? 'dynamic-manifest-partial' : 'manifest-parse-failed',
+        document.relPath,
+        dynamic ? '依赖清单包含动态声明，只完成了保守分析。' : '依赖清单格式异常，已跳过。',
+        dynamic ? '请手工核验动态依赖对应的源码。' : '请修复清单格式或手工核验第三方代码。',
+      ));
+    }
+  }
+  return { dependencies: dedupeDependencies(dependencies), diagnostics, analyzedManifests };
+}
