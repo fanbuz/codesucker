@@ -194,7 +194,7 @@ export function decodeSource(buf: Buffer): { text: string; encoding: string } {
     }
     let text = iconv.decode(content, decodeAs);
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-    if (decodeAs !== 'UTF-8' && !iconv.encode(text, decodeAs).equals(content)) {
+    if (decodeAs !== 'UTF-8' && text.includes('\uFFFD') && !iconv.encode(text, decodeAs).equals(content)) {
       throw new SourceDecodeError('decode-error', `${decodeAs} 字节序列无效或无法无损解码`);
     }
     return { text, encoding: detected.encoding };

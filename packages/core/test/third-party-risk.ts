@@ -64,6 +64,19 @@ try {
       <artifactId>common</artifactId>
     </project>
   `);
+  await fs.mkdir(path.join(root, 'commented-maven'), { recursive: true });
+  await fs.writeFile(path.join(root, 'commented-maven/pom.xml'), `
+    <project>
+      <groupId>com.acme</groupId><artifactId>commented-parent</artifactId>
+      <!--
+        migration note: old <!DOCTYPE project> was removed
+        <modules><module>ghost</module></modules>
+        <dependencies>
+          <dependency><groupId>\${old.group}</groupId><artifactId>old-lib</artifactId></dependency>
+        </dependencies>
+      -->
+    </project>
+  `);
   await fs.writeFile(path.join(root, 'go.mod'), `
     module example.local/self
     require github.com/acme/tool v1.2.3
@@ -87,6 +100,9 @@ try {
 
     [dependencies.table-form]
     version = "1"
+    # path = "old-local-copy"
+    # package = "old-package-name"
+    # workspace = true
 
     [dependencies.local-table]
     path = "crates/local-table"
@@ -154,7 +170,13 @@ try {
   await fs.writeFile(path.join(root, 'pyproject.toml'), `
     [project]
     name = "self-python"
-    dependencies = ["httpx>=0.27", "extra-only[security]>=1", "owned-direct @ file:../owned-direct"]
+    dependencies = [
+      "httpx>=0.27",
+      "extra-only[security]>=1",
+      # old: ["fake-only"]
+      "after-comment>=1",
+      "owned-direct @ file:../owned-direct",
+    ]
 
     [project.optional-dependencies]
     local = ["optional-owned @ file:../optional-owned"]
@@ -184,6 +206,7 @@ try {
     write('vendor/left-pad/index.js', '// SPDX-License-Identifier: MIT\nmodule.exports = value => value;'),
     write('external/commons-lang3/StringUtils.java', 'class StringUtils {}'),
     write('external/dynamic-lib/Dynamic.java', 'class Dynamic {}'),
+    write('external/old-lib/Old.java', 'class Old {}'),
     write('vendor/common/src/Common.java', 'class Common {}'),
     write('third_party/github.com/acme/tool/tool.go', 'package tool'),
     write('third_party/example.local/block/tool.go', 'package block'),
@@ -198,6 +221,8 @@ try {
     write('vendors/requests/api.py', 'def get(): pass'),
     write('vendor/httpx/client.py', 'def request(): pass'),
     write('vendor/extra-only/security.py', 'def verify(): pass'),
+    write('vendor/after-comment/client.py', 'def request(): pass'),
+    write('vendor/fake-only/fake.py', 'def fake(): pass'),
     write('vendor/owned-direct/owned.py', 'def owned(): pass'),
     write('vendor/optional-owned/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-local-path/owned.py', 'def owned(): pass'),
@@ -262,6 +287,8 @@ try {
     'Gradle 同时含可识别与动态声明时必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'pom.xml'),
     'Maven 坐标含未解析属性时必须报告部分分析');
+  assert.ok(!first.diagnostics.some((item) => item.file === 'commented-maven/pom.xml'
+    || item.file === 'commented-maven/ghost/pom.xml'), 'Maven XML 注释不能形成依赖或模块诊断');
 
   const dependencyFiles = new Set(first.findings
     .filter((finding) => finding.kind === 'dependency-source')
@@ -269,7 +296,8 @@ try {
   for (const relPath of [
     'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
     'third_party/github.com/acme/tool/tool.go', 'deps/serde/lib.rs', 'deps/table-form/lib.rs',
-    'deps/target-table/lib.rs', 'vendors/requests/api.py', 'vendor/httpx/client.py', 'vendor/extra-only/security.py',
+    'deps/target-table/lib.rs', 'vendors/requests/api.py', 'vendor/httpx/client.py',
+    'vendor/extra-only/security.py', 'vendor/after-comment/client.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
@@ -283,6 +311,7 @@ try {
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/local-table/lib.rs'), 'Cargo table-form path 依赖不能判为第三方依赖源码');
+  assert.ok(dependencyFiles.has('deps/table-form/lib.rs'), 'Cargo table-form 注释中的 path/package/workspace 不能改变外部依赖');
   assert.ok(!dependencyFiles.has('rust-workspace/deps/workspace-member-local/lib.rs'),
     '兄弟工程的同名外部依赖不能覆盖当前 Cargo workspace 的本地声明');
   assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/workspace-alias/lib.rs'),
@@ -296,6 +325,8 @@ try {
   assert.ok(!dependencyFiles.has('vendor/poetry-local-directory/owned.py'), 'Poetry package.source 目录依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/uv-local-directory/owned.py'), 'uv 行内 directory 来源不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/uv-local-file/owned.py'), 'uv 行内 file 来源不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/fake-only/fake.py'), 'TOML 注释中的 Python 依赖不能形成依赖证据');
+  assert.ok(!dependencyFiles.has('external/old-lib/Old.java'), 'Maven XML 注释中的依赖不能形成依赖证据');
   assert.ok(dependencyFiles.has('vendor/left-pad/index.js'), '无关子项目的同名 package metadata 不能覆盖根项目外部依赖');
   assert.ok(first.findings.some((finding) => finding.kind === 'dependency-source'
     && finding.affected.relPaths.includes('third_party/@legacy/v1-nested/index.js')

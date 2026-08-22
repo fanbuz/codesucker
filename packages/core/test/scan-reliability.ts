@@ -22,6 +22,15 @@ write('enc/utf8.ts', 'const 名称 = "UTF-8";\nconst value = 1;');
 write('enc/utf8-bom.ts', withBom([0xef, 0xbb, 0xbf], Buffer.from('const 名称 = "UTF-8 BOM";\nconst value = 2;', 'utf8')));
 write('enc/gbk.py', iconv.encode('# -*- coding: gbk -*-\n名称 = "中文编码"\n值 = 3', 'gbk'));
 write('enc/gb18030.py', iconv.encode('# -*- coding: gb18030 -*-\n名称 = "𠮷"\n值 = 30', 'gb18030'));
+write('enc/gbk-noncanonical.py', Buffer.concat([
+  Buffer.from('# -*- coding: gbk -*-\nvalue = "', 'ascii'), Buffer.from([0xa2, 0xe3]), Buffer.from('"', 'ascii'),
+]));
+write('enc/shift-jis-noncanonical.py', Buffer.concat([
+  Buffer.from('# -*- coding: shift_jis -*-\nvalue = "', 'ascii'), Buffer.from([0x87, 0x90]), Buffer.from('"', 'ascii'),
+]));
+write('enc/big5-noncanonical.py', Buffer.concat([
+  Buffer.from('# -*- coding: big5 -*-\nvalue = "', 'ascii'), Buffer.from([0x8e, 0x69]), Buffer.from('"', 'ascii'),
+]));
 write('enc/utf16le.ts', withBom([0xff, 0xfe], iconv.encode('const 名称 = "UTF-16LE";\r\nconst value = 4;', 'utf16-le')));
 write('enc/utf16be.ts', withBom([0xfe, 0xff], iconv.encode('const 名称 = "UTF-16BE";\rconst value = 5;', 'utf16-be')));
 write('enc/utf16le-no-bom.ts', iconv.encode('const value = "UTF-16LE no BOM";\nconst next = 6;', 'utf16-le'));
@@ -75,6 +84,9 @@ assert.equal(
 assert.equal(byPath.get('enc/utf8-bom.ts')?.encoding, 'UTF-8 BOM');
 assert.equal(byPath.get('enc/gbk.py')?.encoding, 'GBK');
 assert.equal(byPath.get('enc/gb18030.py')?.encoding, 'GB18030');
+assert.equal(byPath.get('enc/gbk-noncanonical.py')?.encoding, 'GBK', '合法 GBK 重复映射不能误报解码失败');
+assert.equal(byPath.get('enc/shift-jis-noncanonical.py')?.encoding, 'SHIFT-JIS', '合法 Shift-JIS 扩展映射不能误报解码失败');
+assert.equal(byPath.get('enc/big5-noncanonical.py')?.encoding, 'BIG5', '合法 Big5 重复映射不能误报解码失败');
 assert.equal(byPath.get('enc/utf16le.ts')?.encoding, 'UTF-16LE');
 assert.equal(byPath.get('enc/utf16be.ts')?.encoding, 'UTF-16BE');
 assert.equal(byPath.get('enc/utf16le-no-bom.ts')?.encoding, 'UTF-16LE');

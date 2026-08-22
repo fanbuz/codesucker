@@ -195,6 +195,10 @@ function xmlValue(block: string, tag: string): string | undefined {
   return new RegExp(`<${tag}\\b[^>]*>([^<]+)</${tag}>`, 'i').exec(block)?.[1]?.trim();
 }
 
+function stripXmlComments(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->/g, (comment) => comment.replace(/[^\r\n]/g, ' '));
+}
+
 function mavenProjectCoordinates(text: string): { artifact?: string; group?: string } {
   const parent = /<parent\b[^>]*>([\s\S]*?)<\/parent>/i.exec(text)?.[1] ?? '';
   const project = text
@@ -210,7 +214,8 @@ function mavenProjectCoordinates(text: string): { artifact?: string; group?: str
 function mavenModuleManifests(doc: ManifestDocument): string[] {
   const base = path.posix.dirname(doc.relPath);
   const out = new Set<string>();
-  for (const match of doc.text.matchAll(/<module\b[^>]*>([^<]+)<\/module>/gi)) {
+  const source = stripXmlComments(doc.text);
+  for (const match of source.matchAll(/<module\b[^>]*>([^<]+)<\/module>/gi)) {
     const modulePath = normalizeRel(match[1].trim().replace(/\\/g, '/'));
     if (!modulePath || modulePath.includes('\0') || path.posix.isAbsolute(modulePath)
       || path.win32.isAbsolute(modulePath)) continue;
@@ -222,9 +227,10 @@ function mavenModuleManifests(doc: ManifestDocument): string[] {
 }
 
 function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
-  if (/<!DOCTYPE|<!ENTITY/i.test(doc.text)) throw new Error('包含不允许的 XML 实体或 DOCTYPE');
+  const source = stripXmlComments(doc.text);
+  if (/<!DOCTYPE|<!ENTITY/i.test(source)) throw new Error('包含不允许的 XML 实体或 DOCTYPE');
   const out: DependencyIdentity[] = [];
-  const project = mavenProjectCoordinates(doc.text);
+  const project = mavenProjectCoordinates(source);
   if (project.artifact) {
     const own = identity('java', project.artifact, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
@@ -233,7 +239,7 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
       if (coordinate) out.push(coordinate);
     }
   }
-  for (const match of doc.text.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
+  for (const match of source.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
     const group = xmlValue(match[1], 'groupId');
     const artifact = xmlValue(match[1], 'artifactId');
     if (!artifact || /\$\{[^}]+\}/.test(artifact)) continue;
@@ -246,7 +252,8 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
 
 function hasUnresolvedMavenCoordinates(doc: ManifestDocument): boolean {
   if (doc.basename !== 'pom.xml') return false;
-  for (const match of doc.text.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
+  const source = stripXmlComments(doc.text);
+  for (const match of source.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
     const group = xmlValue(match[1], 'groupId');
     const artifact = xmlValue(match[1], 'artifactId');
     if (/\$\{[^}]+\}/.test(group ?? '') || /\$\{[^}]+\}/.test(artifact ?? '')) return true;
@@ -446,11 +453,12 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
     if (!match) continue;
     const workspaceDefinition = match[1] === 'workspace.dependencies';
     const tableDependency = match[2]?.trim().replace(/^(['"])(.*)\1$/, '$2');
+    const sectionBody = stripTomlComments(section.body);
     if (tableDependency) {
-      addDependency(tableDependency, section.body, workspaceDefinition);
+      addDependency(tableDependency, sectionBody, workspaceDefinition);
       continue;
     }
-    for (const line of section.body.split(/\r?\n/)) {
+    for (const line of sectionBody.split(/\r?\n/)) {
       const assignment = /^\s*([\w.-]+)\s*=\s*(.+)$/.exec(line);
       if (assignment) addDependency(assignment[1], assignment[2], workspaceDefinition);
     }
@@ -481,20 +489,67 @@ function tomlSections(text: string): TomlSection[] {
   }));
 }
 
+function stripTomlComments(text: string): string {
+  let out = '';
+  let quote: "'" | '"' | "'''" | '\"\"\"' | undefined;
+  let escapedCharacter = false;
+  let comment = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const triple = text.slice(index, index + 3);
+    if (comment) {
+      if (char === '\n' || char === '\r') {
+        comment = false;
+        out += char;
+      } else out += ' ';
+      continue;
+    }
+    if (quote === "'''" || quote === '\"\"\"') {
+      out += char;
+      if (triple === quote) {
+        out += text.slice(index + 1, index + 3);
+        index += 2;
+        quote = undefined;
+      }
+      continue;
+    }
+    if (quote) {
+      out += char;
+      if (escapedCharacter) escapedCharacter = false;
+      else if (quote === '"' && char === '\\') escapedCharacter = true;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (triple === "'''" || triple === '\"\"\"') {
+      out += triple;
+      index += 2;
+      quote = triple;
+    } else if (char === "'" || char === '"') {
+      out += char;
+      quote = char;
+    } else if (char === '#') {
+      out += ' ';
+      comment = true;
+    } else out += char;
+  }
+  return out;
+}
+
 function quotedTomlValues(value: string): string[] {
   return [...value.matchAll(/['"]([^'"]+)['"]/g)].map((match) => match[1]);
 }
 
 function tomlArrayAssignment(body: string, key: string): string[] {
+  const source = stripTomlComments(body);
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = new RegExp(`^\\s*${escaped}\\s*=\\s*\\[`, 'm').exec(body);
+  const match = new RegExp(`^\\s*${escaped}\\s*=\\s*\\[`, 'm').exec(source);
   if (!match) return [];
   const start = (match.index ?? 0) + match[0].length;
   let quote: "'" | '"' | "'''" | '\"\"\"' | undefined;
   let escapedCharacter = false;
-  for (let index = start; index < body.length; index++) {
-    const char = body[index];
-    const triple = body.slice(index, index + 3);
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    const triple = source.slice(index, index + 3);
     if (quote === "'''" || quote === '\"\"\"') {
       if (triple === quote) {
         index += 2;
@@ -514,7 +569,7 @@ function tomlArrayAssignment(body: string, key: string): string[] {
     } else if (char === "'" || char === '"') {
       quote = char;
     } else if (char === ']') {
-      return quotedTomlValues(body.slice(start, index));
+      return quotedTomlValues(source.slice(start, index));
     }
   }
   return [];
