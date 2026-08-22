@@ -34,6 +34,7 @@ try {
       'win-relative-owned': '..\\owned',
       'node-owned': '^1.0.0', 'node-nested-owned': '^1.0.0', 'node-external': '^1.0.0',
       'portal-owned': 'portal:./vendor/portal-owned',
+      'scoped-alias': 'npm:@scope/real@^1.0.0', 'plain-alias': 'npm:real-plain@latest',
     },
   }));
   await fs.writeFile(path.join(root, 'package-lock.json'), JSON.stringify({
@@ -591,6 +592,8 @@ try {
     write('vendor/win-unc-owned/index.js', 'module.exports = true;'),
     write('vendor/win-relative-owned/index.js', 'module.exports = true;'),
     write('vendor/portal-owned/index.js', 'module.exports = true;'),
+    write('vendor/@scope/real/index.js', 'module.exports = true;'),
+    write('vendor/real-plain/index.js', 'module.exports = true;'),
     write('vendor/pipenv-local-path/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-local-file/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-external/library.py', 'def external(): pass'),
@@ -766,6 +769,7 @@ try {
     .flatMap((finding) => finding.affected.relPaths));
   for (const relPath of [
     'vendor/left-pad/index.js', 'vendor/node-external/index.js',
+    'vendor/@scope/real/index.js', 'vendor/real-plain/index.js',
     'vendor/sibling/node-nested-owned/index.js',
     'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
     'third_party/github.com/acme/tool/tool.go', 'vendor/example/example.go', 'vendor/blockdep/blockdep.go',

@@ -200,6 +200,15 @@ function localSpec(spec: unknown): boolean {
     && /^(?:workspace:|file:|link:|portal:|\.\.?(?:[\\/]|$)|[A-Za-z]:[\\/]|[\\/]{2}|\/)/i.test(spec.trim());
 }
 
+function nodeAliasTarget(spec: unknown): string | null {
+  if (typeof spec !== 'string' || !/^npm:/i.test(spec.trim())) return null;
+  const target = spec.trim().slice(4);
+  const versionAt = target.startsWith('@')
+    ? target.indexOf('@', target.indexOf('/') + 1)
+    : target.indexOf('@');
+  return (versionAt >= 0 ? target.slice(0, versionAt) : target).trim() || null;
+}
+
 function nodePackageNameFromLockPath(pkgPath: string): string {
   const segments = normalizeRel(pkgPath).split('/').filter(Boolean);
   const nodeModulesIndex = segments.lastIndexOf('node_modules');
@@ -251,6 +260,11 @@ function parseNode(doc: ManifestDocument): DependencyIdentity[] {
       for (const [name, spec] of Object.entries(values as Record<string, unknown>)) {
         const item = identity('node', name, doc.relPath, 'manifest', localSpec(spec));
         if (item) out.push(item);
+        const aliasTarget = nodeAliasTarget(spec);
+        if (aliasTarget && normalizePackageName(aliasTarget, 'node') !== normalizePackageName(name, 'node')) {
+          const target = identity('node', aliasTarget, doc.relPath, 'manifest');
+          if (target) out.push(target);
+        }
       }
     }
   } else {
