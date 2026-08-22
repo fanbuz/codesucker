@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import iconv from 'iconv-lite';
 import {
   DEFAULT_EXTENSIONS, MAX_FILE_BYTES, defaultCleanOptions, discoverAsync, discoverDetailed,
@@ -57,6 +58,11 @@ assert.equal(sync.files.some((file) => file.relPath === 'rules/generated.ts'), f
 
 const byPath = new Map(sync.files.map((file) => [file.relPath, file]));
 assert.equal(byPath.get('enc/utf8.ts')?.encoding, 'UTF-8');
+assert.equal(
+  byPath.get('enc/utf8.ts')?.contentSha256,
+  createHash('sha256').update(fs.readFileSync(path.join(root, 'enc/utf8.ts'))).digest('hex'),
+  '扫描快照必须保存原始字节摘要供导出一致性校验',
+);
 assert.equal(byPath.get('enc/utf8-bom.ts')?.encoding, 'UTF-8 BOM');
 assert.equal(byPath.get('enc/gbk.py')?.encoding, 'GBK');
 assert.equal(byPath.get('enc/gb18030.py')?.encoding, 'GB18030');

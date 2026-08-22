@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   captureProjectRoot, resolveProjectEvidencePath, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
   validateScannedFilesUnchanged,
 } from '../src/main/project-file.ts';
 
+async function main() {
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codesucker-project-file-'));
 const root = path.join(sandbox, 'project');
 const outside = path.join(sandbox, 'outside.ts');
@@ -18,15 +20,24 @@ const rootSnapshot = captureProjectRoot(root);
 const scannedMain = fs.statSync(path.join(root, 'src', 'main.ts'));
 const scannedIdentity = [{
   relPath: 'src/main.ts', sizeBytes: scannedMain.size, mtimeMs: scannedMain.mtimeMs,
+  contentSha256: createHash('sha256').update(fs.readFileSync(path.join(root, 'src', 'main.ts'))).digest('hex'),
 }];
 
-validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity);
+await validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity);
 fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export const changed = true;');
-assert.throws(
-  () => validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity),
+await assert.rejects(
+  validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity),
   /扫描后发生变化.*src\/main\.ts/,
 );
 fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export {}');
+
+fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'changed!!');
+fs.utimesSync(path.join(root, 'src', 'main.ts'), scannedMain.atime, new Date(scannedIdentity[0].mtimeMs));
+await assert.rejects(
+  validateScannedFilesUnchanged(rootSnapshot, root, scannedIdentity),
+  /扫描后发生变化.*src\/main\.ts/,
+  '同长度且保留时间戳的内容替换也必须被摘要识别',
+);
 
 assert.equal(
   resolveProjectFile(rootSnapshot, root, 'src/main.ts'),
@@ -77,3 +88,9 @@ try {
 }
 
 console.log('✅ project file guard 全部通过');
+}
+
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -2,6 +2,7 @@ import fg, { type Entry } from 'fast-glob';
 import ignoreFactory from 'ignore';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import chardet from 'chardet';
 import iconv from 'iconv-lite';
 import type {
@@ -229,6 +230,10 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
 }
 
+function contentSha256(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
 function emptyFileOutcome(candidate: FileCandidate): Extract<ScanFileOutcome, { status: 'skipped' }> {
   return {
     status: 'skipped',
@@ -297,6 +302,7 @@ export async function scanFileCandidate(candidate: FileCandidate, signal?: Abort
     file: {
       ...candidate,
       rawLines: countTextLines(decoded.text),
+      contentSha256: contentSha256(buf),
       encoding: decoded.encoding,
       included: true,
     },
@@ -399,7 +405,13 @@ function scanFileCandidateSync(candidate: FileCandidate): ScanFileOutcome {
     }
     return {
       status: 'included',
-      file: { ...candidate, rawLines: countTextLines(decoded.text), encoding: decoded.encoding, included: true },
+      file: {
+        ...candidate,
+        rawLines: countTextLines(decoded.text),
+        contentSha256: contentSha256(buf),
+        encoding: decoded.encoding,
+        included: true,
+      },
     };
   } catch (error) {
     const reason = error instanceof SourceDecodeError ? error.reason : 'decode-error';

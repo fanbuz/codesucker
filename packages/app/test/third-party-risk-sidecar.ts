@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ThirdPartyRiskFinding, ThirdPartyRiskReport } from '@codesucker/core';
 import {
-  buildThirdPartyRiskSidecar, emptyThirdPartyRiskReport, sanitizeProjectConfigValues,
+  assertThirdPartyRiskReportUnchanged, buildThirdPartyRiskSidecar,
+  emptyThirdPartyRiskReport, sanitizeProjectConfigValues,
   trustedThirdPartyEvidenceRelPath, writeThirdPartyRiskSidecar,
 } from '../src/main/third-party-risk-sidecar.ts';
 
@@ -67,6 +68,14 @@ const findings = [
   finding('sha-like-id-unsafe-evidence', ['pending.ts'], `${absoluteSecret}/secret.ts`),
 ];
 const riskReport = report(findings);
+assert.doesNotThrow(() => assertThirdPartyRiskReportUnchanged(riskReport, structuredClone(riskReport)));
+const changedRiskReport = structuredClone(riskReport);
+changedRiskReport.summary.analyzedManifests++;
+assert.throws(
+  () => assertThirdPartyRiskReportUnchanged(riskReport, changedRiskReport),
+  /依赖清单.*扫描后发生变化/,
+  '导出前依赖清单复核变化必须要求重新扫描',
+);
 const included = ['partial-a.ts', 'kept.ts', 'pending.ts'];
 const metadata = { appVersion: '0.5.0', generatedAt: '2026-08-22T00:00:00.000Z' };
 const sidecar = buildThirdPartyRiskSidecar(riskReport, included, {

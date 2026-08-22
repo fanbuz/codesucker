@@ -115,6 +115,15 @@ export function emptyThirdPartyRiskReport(analyzedSourceFiles: number, message?:
   };
 }
 
+export function assertThirdPartyRiskReportUnchanged(
+  scanned: ThirdPartyRiskReport,
+  current: ThirdPartyRiskReport,
+): void {
+  if (JSON.stringify(scanned) !== JSON.stringify(current)) {
+    throw new Error('依赖清单或第三方风险证据在扫描后发生变化，请重新扫描项目');
+  }
+}
+
 export function sanitizeThirdPartyRiskPreference(
   report: ThirdPartyRiskReport,
   input: unknown,

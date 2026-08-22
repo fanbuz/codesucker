@@ -29,7 +29,8 @@ import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, RenderWorkerRequest,
 } from './workers/protocol';
 import {
-  emptyThirdPartyRiskReport, sanitizeProjectConfigValues, trustedThirdPartyEvidenceRelPath,
+  assertThirdPartyRiskReportUnchanged, emptyThirdPartyRiskReport,
+  sanitizeProjectConfigValues, trustedThirdPartyEvidenceRelPath,
   writeThirdPartyRiskSidecar,
   type ThirdPartyRiskPreference,
 } from './third-party-risk-sidecar';
@@ -378,14 +379,14 @@ export function registerPipelineIpc() {
     try {
       const entries = orderedEntries(request.payload);
       const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);
-      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const [result, preview] = await Promise.all([
         processWithWorkers(entries, request.payload, job, event.sender),
         previewWithWorker(entries[0], request.payload.clean, job),
       ]);
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
-      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const audit = result.errors.length > 0
         ? [{
             status: 'warn' as const,
@@ -436,10 +437,29 @@ export function registerPipelineIpc() {
       if (!request.payload.formats.docx && !request.payload.formats.txt) throw new Error('请至少选择一种输出格式');
       const entries = orderedEntries(request.payload);
       const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);
-      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
       const result = await processWithWorkers(entries, request.payload, job, event.sender);
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
-      validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, entries);
+      const scannedEntries = [...scan.byRel.values()];
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+      report({ stage: 'analyzing-risks', completed: 0, total: 1 });
+      let currentThirdPartyRisk: ThirdPartyRiskReport;
+      try {
+        currentThirdPartyRisk = await workerResources.pipeline.run({
+          type: 'analyze-risks',
+          root: scan.rootSnapshot.realPath,
+          files: scannedEntries,
+        }, job.signal) as ThirdPartyRiskReport;
+      } catch (error) {
+        if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+        throw new Error('无法复核第三方代码风险，请重新扫描项目后再导出');
+      }
+      await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
+      job.assertCurrent();
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      assertThirdPartyRiskReportUnchanged(scan.thirdPartyRisk, currentThirdPartyRisk);
+      report({ stage: 'analyzing-risks', completed: 1, total: 1 });
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
       const renderOptions = {
@@ -486,7 +506,7 @@ export function registerPipelineIpc() {
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       output.thirdPartyRiskSummary = await writeThirdPartyRiskSidecar(
-        scan.thirdPartyRisk,
+        currentThirdPartyRisk,
         result.selection.selectedRelPaths,
         request.payload.thirdPartyRisk,
         request.payload.outDir,

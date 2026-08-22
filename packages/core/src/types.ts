@@ -33,6 +33,8 @@ export interface FileEntry {
   sizeBytes: number;
   rawLines: number;
   mtimeMs: number;
+  /** 扫描时原始字节的 SHA-256，仅用于本地导出一致性校验。 */
+  contentSha256?: string;
   encoding: string;
   included: boolean;
   entryScore: number;

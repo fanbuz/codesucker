@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 
 function isPathInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
@@ -25,6 +26,7 @@ export interface ScannedFileIdentity {
   relPath: string;
   sizeBytes: number;
   mtimeMs: number;
+  contentSha256?: string;
 }
 
 export function captureProjectRoot(root: string): ProjectRootSnapshot {
@@ -68,20 +70,31 @@ export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: u
 }
 
 /** 导出使用扫描时的风险报告，因此源码元数据变化后必须先重新扫描。 */
-export function validateScannedFilesUnchanged(
+export async function validateScannedFilesUnchanged(
   snapshot: ProjectRootSnapshot,
   root: unknown,
   entries: readonly ScannedFileIdentity[],
-): void {
-  for (const entry of entries) {
-    try {
-      const file = resolveProjectFile(snapshot, root, entry.relPath);
-      const stat = fs.statSync(file);
-      if (stat.size !== entry.sizeBytes || stat.mtimeMs !== entry.mtimeMs) throw new Error('IDENTITY_CHANGED');
-    } catch {
-      throw new Error(`源码文件在扫描后发生变化，请重新扫描项目：${entry.relPath}`);
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) {
+      const entry = entries[next++];
+      try {
+        if (!/^[a-f0-9]{64}$/i.test(entry.contentSha256 ?? '')) throw new Error('MISSING_DIGEST');
+        const file = resolveProjectFile(snapshot, root, entry.relPath);
+        const buffer = await fs.promises.readFile(file);
+        const stat = await fs.promises.stat(file);
+        const digest = createHash('sha256').update(buffer).digest('hex');
+        if (stat.size !== entry.sizeBytes || stat.mtimeMs !== entry.mtimeMs || digest !== entry.contentSha256) {
+          throw new Error('IDENTITY_CHANGED');
+        }
+      } catch {
+        throw new Error(`源码文件在扫描后发生变化，请重新扫描项目：${entry.relPath}`);
+      }
     }
-  }
+  };
+  const concurrency = Math.min(8, entries.length);
+  await Promise.all(Array.from({ length: concurrency }, worker));
 }
 
 /** 定位风险证据，可接受项目内普通文件或目录，但拒绝符号链接越界。 */
