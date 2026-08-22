@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { THIRD_PARTY_RULES_VERSION } from '@codesucker/core';
 import type {
   ThirdPartyAnalysisDiagnostic, ThirdPartyConfidence, ThirdPartyEvidence,
-  ThirdPartyRiskFinding, ThirdPartyRiskKind, ThirdPartyRiskReport,
+  ThirdPartyManifestIdentity, ThirdPartyRiskFinding, ThirdPartyRiskKind, ThirdPartyRiskReport,
 } from '@codesucker/core';
 
 export type ThirdPartyFindingStatus = 'excluded' | 'partially-excluded' | 'kept-by-user' | 'pending';
@@ -17,7 +17,7 @@ export interface ThirdPartyRiskPreference {
 export interface ThirdPartyRiskWriteOptions {
   signal?: AbortSignal;
   /** 临时文件写完后、原子替换正式摘要前重新校验当前任务和扫描会话。 */
-  beforeCommit?: () => void;
+  beforeCommit?: () => void | Promise<void>;
 }
 
 interface SidecarEvidence {
@@ -121,6 +121,24 @@ export function assertThirdPartyRiskReportUnchanged(
 ): void {
   if (JSON.stringify(scanned) !== JSON.stringify(current)) {
     throw new Error('依赖清单或第三方风险证据在扫描后发生变化，请重新扫描项目');
+  }
+}
+
+export function assertThirdPartyManifestSnapshotUnchanged(
+  scanned: readonly ThirdPartyManifestIdentity[],
+  current: readonly ThirdPartyManifestIdentity[],
+): void {
+  if (JSON.stringify(scanned) !== JSON.stringify(current)) {
+    throw new Error('依赖清单文件在扫描后发生变化，请重新扫描项目');
+  }
+}
+
+export function assertThirdPartyManifestDiscoveryUnchanged(
+  scanned: readonly string[],
+  current: readonly string[],
+): void {
+  if (JSON.stringify(scanned) !== JSON.stringify(current)) {
+    throw new Error('项目中的依赖清单集合在扫描后发生变化，请重新扫描项目');
   }
 }
 
@@ -335,7 +353,8 @@ export async function writeThirdPartyRiskSidecar(
       encoding: 'utf8', signal: options.signal,
     });
     options.signal?.throwIfAborted();
-    options.beforeCommit?.();
+    await options.beforeCommit?.();
+    options.signal?.throwIfAborted();
     await fs.promises.rename(temporary, output);
     return output;
   } catch (error) {

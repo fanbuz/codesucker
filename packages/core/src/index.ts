@@ -9,11 +9,12 @@ export { select } from './select.ts';
 export { renderDocx, renderTxt, renderTxtAsync, type RenderOptions } from './render.ts';
 export { audit } from './audit.ts';
 export { CONFIG_SCHEMA_VERSION, RULES_VERSION, THIRD_PARTY_RULES_VERSION } from './version.ts';
-export { analyzeThirdPartyRisks } from './third-party/analyze.ts';
+export { analyzeThirdPartyRisks, analyzeThirdPartyRisksWithSnapshot } from './third-party/analyze.ts';
 export type {
   ThirdPartyAnalysisDiagnostic, ThirdPartyAnalysisDiagnosticCode, ThirdPartyAnalysisOptions,
   ThirdPartyConfidence, ThirdPartyEcosystem, ThirdPartyEvidence, ThirdPartyEvidenceSource,
-  ThirdPartyRecommendation, ThirdPartyRiskFinding, ThirdPartyRiskKind, ThirdPartyRiskReport,
+  ThirdPartyManifestIdentity, ThirdPartyRecommendation, ThirdPartyRiskAnalysis,
+  ThirdPartyRiskFinding, ThirdPartyRiskKind, ThirdPartyRiskReport,
 } from './third-party/types.ts';
 export { abortError, mapConcurrent, throwIfAborted } from './async.ts';
 export {

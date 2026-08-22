@@ -1,6 +1,6 @@
 import type {
   AnnotatedLine, CleanedFile, CleanOptions, FileCandidate, FileEntry, Page, RenderOptions,
-  ScanFileOutcome, ThirdPartyRiskReport,
+  ScanFileOutcome, ThirdPartyRiskAnalysis, ThirdPartyRiskReport,
 } from '@codesucker/core';
 
 export interface PreviewResult {
@@ -15,10 +15,11 @@ export interface PreviewResult {
 export type PipelineWorkerRequest =
   | { type: 'scan'; candidate: FileCandidate }
   | { type: 'analyze-risks'; root: string; files: FileEntry[] }
+  | { type: 'analyze-risks-with-snapshot'; root: string; files: FileEntry[] }
   | { type: 'clean'; entry: FileEntry; clean: CleanOptions }
   | { type: 'preview'; entry: FileEntry; clean: CleanOptions };
 
-export type PipelineWorkerResult = ScanFileOutcome | ThirdPartyRiskReport | CleanedFile | PreviewResult | null;
+export type PipelineWorkerResult = ScanFileOutcome | ThirdPartyRiskReport | ThirdPartyRiskAnalysis | CleanedFile | PreviewResult | null;
 
 export interface RenderWorkerRequest {
   pages: Page[];

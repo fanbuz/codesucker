@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  analyzeThirdPartyRisks, THIRD_PARTY_RULES_VERSION, type FileEntry,
+  analyzeThirdPartyRisks, analyzeThirdPartyRisksWithSnapshot,
+  THIRD_PARTY_RULES_VERSION, type FileEntry,
 } from '../src/index.ts';
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codesucker-third-party-'));
@@ -239,6 +240,31 @@ try {
     Flask = "^3.0"
     local-tool = { path = "./local-tool" }
   `);
+  await fs.mkdir(path.join(root, 'dynamic-python'), { recursive: true });
+  await fs.writeFile(path.join(root, 'dynamic-python/pyproject.toml'), `
+    [project]
+    name = "dynamic-python"
+    dynamic = [
+      "dependencies",
+      "optional-dependencies",
+    ]
+  `);
+  await fs.mkdir(path.join(root, 'quoted-dynamic-python'), { recursive: true });
+  await fs.writeFile(path.join(root, 'quoted-dynamic-python/pyproject.toml'), `
+    [project]
+    name = "quoted-dynamic-python"
+    "dynamic" = ["dependencies"]
+  `);
+  await fs.mkdir(path.join(root, 'literal-dynamic-python'), { recursive: true });
+  await fs.writeFile(path.join(root, 'literal-dynamic-python/pyproject.toml'), `
+    [project]
+    name = "literal-dynamic-python"
+    description = """
+    dynamic = ["dependencies"]
+    [project.optional-dependencies]
+    fake = ["fake-only"]
+    """
+  `);
   await fs.writeFile(path.join(root, 'build.gradle.kts'), `
     dependencies {
       implementation("org.slf4j:slf4j-api:2.0.0")
@@ -326,6 +352,40 @@ try {
   const evidenceChanged = await analyzeThirdPartyRisks(root, files.map((file) => (
     file.relPath === changedLicenseFile.relPath ? changedLicenseFile : file
   )));
+  const limitedSnapshot = await analyzeThirdPartyRisksWithSnapshot(root, files, { maxManifestFiles: 1 });
+  assert.equal(limitedSnapshot.manifestCandidateRelPaths.length > 1, true);
+  assert.equal(limitedSnapshot.manifestIdentities.length, limitedSnapshot.manifestCandidateRelPaths.length,
+    '超过分析上限的候选清单也必须进入完整字节身份快照');
+  const beyondLimit = limitedSnapshot.manifestCandidateRelPaths.find((relPath) => (
+    relPath !== limitedSnapshot.manifestCandidateRelPaths[0]
+  ));
+  assert.ok(beyondLimit);
+  const beforeBeyondIdentity = limitedSnapshot.manifestIdentities.find((item) => item.relPath === beyondLimit);
+  assert.ok(beforeBeyondIdentity);
+  const beyondAbsolute = path.join(root, beyondLimit);
+  const beyondBytes = await fs.readFile(beyondAbsolute);
+  const changedBeyondBytes = Buffer.from(beyondBytes);
+  changedBeyondBytes[changedBeyondBytes.length - 1] ^= 1;
+  await fs.writeFile(beyondAbsolute, changedBeyondBytes);
+  await fs.utimes(beyondAbsolute, new Date(beforeBeyondIdentity.mtimeMs), new Date(beforeBeyondIdentity.mtimeMs));
+  const changedLimitedSnapshot = await analyzeThirdPartyRisksWithSnapshot(root, files, { maxManifestFiles: 1 });
+  const afterBeyondIdentity = changedLimitedSnapshot.manifestIdentities.find((item) => item.relPath === beyondLimit);
+  assert.ok(afterBeyondIdentity);
+  assert.equal(afterBeyondIdentity.sizeBytes, beforeBeyondIdentity.sizeBytes);
+  assert.notEqual(afterBeyondIdentity.contentSha256, beforeBeyondIdentity.contentSha256,
+    '同大小且保留时间戳的超限清单内容变化也必须由 SHA-256 捕获');
+  await fs.writeFile(beyondAbsolute, beyondBytes);
+  await fs.mkdir(path.join(root, 'oversized-manifest'), { recursive: true });
+  const oversizedManifestPath = path.join(root, 'oversized-manifest/package.json');
+  await fs.writeFile(oversizedManifestPath, Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
+  const oversizedSnapshot = await analyzeThirdPartyRisksWithSnapshot(root, files);
+  assert.ok(oversizedSnapshot.report.diagnostics.some((item) => (
+    item.file === 'oversized-manifest/package.json' && item.code === 'manifest-too-large'
+  )));
+  assert.match(oversizedSnapshot.manifestIdentities.find((item) => (
+    item.relPath === 'oversized-manifest/package.json'
+  ))?.contentSha256 ?? '', /^[a-f0-9]{64}$/,
+  '超过解析大小上限但仍可读的清单也必须进入流式 SHA-256 快照');
   globalThis.fetch = originalFetch;
 
   assert.equal(first.rulesVersion, THIRD_PARTY_RULES_VERSION);
@@ -348,6 +408,12 @@ try {
     'Gradle 同时含可识别与动态声明时必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'pom.xml'),
     'Maven 坐标含未解析属性时必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'dynamic-python/pyproject.toml'), 'PEP 621 动态依赖字段必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'quoted-dynamic-python/pyproject.toml'), 'PEP 621 引号键 dynamic 必须报告部分分析');
+  assert.ok(!first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'literal-dynamic-python/pyproject.toml'), 'TOML 多行字符串里的 dynamic 文本不能形成部分分析诊断');
   assert.ok(!first.diagnostics.some((item) => item.file === 'commented-maven/pom.xml'
     || item.file === 'commented-maven/ghost/pom.xml'), 'Maven XML 注释不能形成依赖或模块诊断');
 

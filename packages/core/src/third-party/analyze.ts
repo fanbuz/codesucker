@@ -7,7 +7,7 @@ import { inspectSourceHeader } from './header-evidence.ts';
 import type {
   ThirdPartyAnalysisDiagnostic, ThirdPartyAnalysisOptions, ThirdPartyConfidence,
   ThirdPartyEvidence, ThirdPartyRecommendation, ThirdPartyRiskFinding,
-  ThirdPartyRiskKind, ThirdPartyRiskReport,
+  ThirdPartyRiskAnalysis, ThirdPartyRiskKind, ThirdPartyRiskReport,
 } from './types.ts';
 
 const DEFAULT_MAX_EVIDENCE_FILES = 10_000;
@@ -157,9 +157,9 @@ function emptyConfidenceCounts(): Record<ThirdPartyConfidence, number> {
   return { high: 0, medium: 0, low: 0 };
 }
 
-export async function analyzeThirdPartyRisks(
+export async function analyzeThirdPartyRisksWithSnapshot(
   root: string, files: FileEntry[], options: ThirdPartyAnalysisOptions = {},
-): Promise<ThirdPartyRiskReport> {
+): Promise<ThirdPartyRiskAnalysis> {
   const { signal } = options;
   signal?.throwIfAborted();
   const inventory = await collectDependencyInventory(root, options.maxManifestFiles, signal);
@@ -266,7 +266,7 @@ export async function analyzeThirdPartyRisks(
     finding.affected.relPaths.forEach((relPath) => affected.add(relPath));
   }
   diagnostics.sort((a, b) => `${a.file ?? ''}:${a.code}`.localeCompare(`${b.file ?? ''}:${b.code}`));
-  return {
+  const report: ThirdPartyRiskReport = {
     schemaVersion: 1, rulesVersion: THIRD_PARTY_RULES_VERSION,
     findings: finalized, diagnostics,
     summary: {
@@ -274,4 +274,22 @@ export async function analyzeThirdPartyRisks(
       findingCount: finalized.length, affectedFileCount: affected.size, byKind, byConfidence,
     },
   };
+  signal?.throwIfAborted();
+  const confirmedInventory = await collectDependencyInventory(root, options.maxManifestFiles, signal);
+  signal?.throwIfAborted();
+  if (JSON.stringify(inventory.manifestCandidateRelPaths) !== JSON.stringify(confirmedInventory.manifestCandidateRelPaths)
+    || JSON.stringify(inventory.manifestIdentities) !== JSON.stringify(confirmedInventory.manifestIdentities)) {
+    throw new Error('依赖清单在风险分析期间发生变化，请重新扫描项目');
+  }
+  return {
+    report,
+    manifestIdentities: confirmedInventory.manifestIdentities,
+    manifestCandidateRelPaths: confirmedInventory.manifestCandidateRelPaths,
+  };
+}
+
+export async function analyzeThirdPartyRisks(
+  root: string, files: FileEntry[], options: ThirdPartyAnalysisOptions = {},
+): Promise<ThirdPartyRiskReport> {
+  return (await analyzeThirdPartyRisksWithSnapshot(root, files, options)).report;
 }

@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, MAX_FILE_BYTES, defaultCleanOptions, discoverAsync,
-  type CleanedFile, type FileCandidate, type ScanFileOutcome, type ThirdPartyRiskReport,
+  type CleanedFile, type FileCandidate, type ScanFileOutcome,
+  type ThirdPartyRiskAnalysis, type ThirdPartyRiskReport,
 } from '@codesucker/core';
 import { WorkerPool } from '../src/main/worker-pool.ts';
 import type {
@@ -64,6 +65,14 @@ async function main() {
     finding.kind === 'dependency-source'
       && finding.affected.relPaths.includes('third_party/lodash/index.js')
   )), 'worker 应依据可信扫描文件与本地依赖清单识别第三方源码');
+  const riskAnalysis = await pipelinePool.run({
+    type: 'analyze-risks-with-snapshot',
+    root: tmp,
+    files: workerScan.files,
+  }) as ThirdPartyRiskAnalysis;
+  assert.deepEqual(riskAnalysis.report, riskReport);
+  assert.match(riskAnalysis.manifestIdentities.find((item) => item.relPath === 'package.json')?.contentSha256 ?? '', /^[a-f0-9]{64}$/);
+  assert.ok(riskAnalysis.manifestCandidateRelPaths.includes('package.json'));
   const oversizedCandidate: FileCandidate = {
     ...candidate,
     path: path.join(tmp, 'plus-one.ts'),

@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import fg from 'fast-glob';
 import type {
   ThirdPartyAnalysisDiagnostic, ThirdPartyEcosystem, ThirdPartyEvidenceSource,
+  ThirdPartyManifestIdentity,
 } from './types.ts';
 
 const MANIFEST_MAX_BYTES = 8 * 1024 * 1024;
@@ -41,6 +43,8 @@ export interface DependencyInventory {
   dependencies: DependencyIdentity[];
   diagnostics: ThirdPartyAnalysisDiagnostic[];
   analyzedManifests: number;
+  manifestIdentities: ThirdPartyManifestIdentity[];
+  manifestCandidateRelPaths: string[];
 }
 
 interface ManifestDocument {
@@ -48,6 +52,7 @@ interface ManifestDocument {
   basename: string;
   text: string;
   lockfile: boolean;
+  identity: ThirdPartyManifestIdentity;
 }
 
 function normalizeRel(value: string): string {
@@ -84,11 +89,79 @@ async function readManifest(rootReal: string, relPath: string): Promise<Manifest
     if (stats.size > limit) {
       return diagnostic('manifest-too-large', normalized, `依赖清单超过 ${limit / 1024 / 1024} MiB 分析上限。`, '可精简锁文件后重新扫描，或手工核验第三方代码。');
     }
-    const text = (await fs.readFile(real, 'utf8')).replace(/^\uFEFF/, '');
-    return { relPath: normalized, basename, text, lockfile };
+    const buffer = await fs.readFile(real);
+    const afterRead = await fs.stat(real);
+    if (afterRead.size !== stats.size || afterRead.mtimeMs !== stats.mtimeMs) {
+      throw new Error('MANIFEST_CHANGED_DURING_READ');
+    }
+    const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
+    return {
+      relPath: normalized,
+      basename,
+      text,
+      lockfile,
+      identity: {
+        relPath: normalized,
+        sizeBytes: afterRead.size,
+        mtimeMs: afterRead.mtimeMs,
+        contentSha256: createHash('sha256').update(buffer).digest('hex'),
+      },
+    };
   } catch (error) {
     void error;
     return diagnostic('manifest-read-failed', normalized, '无法读取依赖清单。', '请检查文件权限、编码和符号链接后重新扫描。');
+  }
+}
+
+async function snapshotManifestIdentity(
+  rootReal: string, relPath: string, signal?: AbortSignal,
+): Promise<ThirdPartyManifestIdentity | null> {
+  const normalized = normalizeRel(relPath);
+  const absolute = path.resolve(rootReal, normalized);
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    signal?.throwIfAborted();
+    const real = await fs.realpath(absolute);
+    if (!insideRoot(rootReal, real)) return null;
+    handle = await fs.open(real, 'r');
+    const before = await handle.stat();
+    if (!before.isFile()) return null;
+    const hash = createHash('sha256');
+    const chunk = Buffer.allocUnsafe(256 * 1024);
+    let position = 0;
+    while (position < before.size) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, before.size - position), position);
+      signal?.throwIfAborted();
+      if (bytesRead === 0) break;
+      hash.update(chunk.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    const after = await handle.stat();
+    signal?.throwIfAborted();
+    if (position !== after.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) return null;
+    const currentReal = await fs.realpath(absolute);
+    signal?.throwIfAborted();
+    const current = await fs.stat(currentReal);
+    signal?.throwIfAborted();
+    if (currentReal !== real
+      || current.dev !== after.dev
+      || current.ino !== after.ino
+      || current.size !== after.size
+      || current.mtimeMs !== after.mtimeMs
+      || current.ctimeMs !== after.ctimeMs) return null;
+    signal?.throwIfAborted();
+    return {
+      relPath: normalized,
+      sizeBytes: after.size,
+      mtimeMs: after.mtimeMs,
+      contentSha256: hash.digest('hex'),
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return null;
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 }
 
@@ -543,8 +616,46 @@ interface TomlSection {
   body: string;
 }
 
+function maskTomlMultilineStrings(text: string): string {
+  const characters = text.split('');
+  let quote: "'" | '"' | "'''" | '"""' | undefined;
+  let escapedCharacter = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const triple = text.slice(index, index + 3);
+    if (quote === "'''" || quote === '"""') {
+      const closing = triple === quote;
+      for (let offset = 0; offset < (closing ? 3 : 1); offset++) {
+        if (characters[index + offset] !== '\r' && characters[index + offset] !== '\n') characters[index + offset] = ' ';
+      }
+      if (closing) {
+        index += 2;
+        quote = undefined;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escapedCharacter) escapedCharacter = false;
+      else if (quote === '"' && char === '\\') escapedCharacter = true;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (triple === "'''" || triple === '"""') {
+      characters[index] = ' ';
+      characters[index + 1] = ' ';
+      characters[index + 2] = ' ';
+      index += 2;
+      quote = triple;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    }
+  }
+  return characters.join('');
+}
+
 function tomlSections(text: string): TomlSection[] {
-  const headers = [...text.matchAll(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/gm)];
+  const structure = maskTomlMultilineStrings(stripTomlComments(text));
+  const headers = [...structure.matchAll(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*$/gm)];
   return headers.map((header, index) => ({
     name: header[1].trim().toLocaleLowerCase(),
     body: text.slice((header.index ?? 0) + header[0].length, headers[index + 1]?.index ?? text.length),
@@ -603,8 +714,10 @@ function quotedTomlValues(value: string): string[] {
 
 function tomlArrayAssignment(body: string, key: string): string[] {
   const source = stripTomlComments(body);
+  const structure = maskTomlMultilineStrings(source);
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = new RegExp(`^\\s*${escaped}\\s*=\\s*\\[`, 'm').exec(source);
+  const keyPattern = `(?:${escaped}|"${escaped}"|'${escaped}')`;
+  const match = new RegExp(`^\\s*${keyPattern}\\s*=\\s*\\[`, 'm').exec(structure);
   if (!match) return [];
   const start = (match.index ?? 0) + match[0].length;
   let quote: "'" | '"' | "'''" | '\"\"\"' | undefined;
@@ -635,6 +748,16 @@ function tomlArrayAssignment(body: string, key: string): string[] {
     }
   }
   return [];
+}
+
+function hasDynamicPep621Dependencies(doc: ManifestDocument): boolean {
+  if (doc.basename !== 'pyproject.toml') return false;
+  return tomlSections(doc.text).some((section) => (
+    section.name === 'project'
+    && tomlArrayAssignment(section.body, 'dynamic').some((field) => (
+      field === 'dependencies' || field === 'optional-dependencies'
+    ))
+  ));
 }
 
 function pythonDependency(
@@ -803,15 +926,21 @@ export async function collectDependencyInventory(
     ));
   }
   const dependencies: DependencyIdentity[] = [];
+  const manifestIdentities: ThirdPartyManifestIdentity[] = [];
+  const identityPaths = new Set<string>();
+  const attemptedPaths = new Set<string>();
   let analyzedManifests = 0;
   for (const relPath of selected) {
     signal?.throwIfAborted();
     const document = await readManifest(rootReal, relPath);
     if ('code' in document) {
       diagnostics.push(document);
+      if (document.code === 'manifest-read-failed') attemptedPaths.add(relPath);
       continue;
     }
     try {
+      manifestIdentities.push(document.identity);
+      identityPaths.add(document.identity.relPath);
       dependencies.push(...parseManifest(document));
       analyzedManifests++;
       if (document.basename === 'pom.xml') {
@@ -832,7 +961,9 @@ export async function collectDependencyInventory(
           selected.push(moduleManifest);
         }
       }
-      if (hasUnsupportedGradleDeclarations(document) || hasUnresolvedMavenCoordinates(document)) {
+      if (hasUnsupportedGradleDeclarations(document)
+        || hasUnresolvedMavenCoordinates(document)
+        || hasDynamicPep621Dependencies(document)) {
         diagnostics.push(diagnostic(
           'dynamic-manifest-partial', document.relPath,
           '依赖清单包含动态声明，只完成了保守分析。',
@@ -849,5 +980,14 @@ export async function collectDependencyInventory(
       ));
     }
   }
-  return { dependencies: dedupeDependencies(dependencies), diagnostics, analyzedManifests };
+  for (const relPath of all) {
+    if (attemptedPaths.has(relPath) || identityPaths.has(relPath)) continue;
+    const identity = await snapshotManifestIdentity(rootReal, relPath, signal);
+    if (identity) manifestIdentities.push(identity);
+  }
+  return {
+    dependencies: dedupeDependencies(dependencies), diagnostics, analyzedManifests,
+    manifestIdentities: manifestIdentities.sort((a, b) => a.relPath.localeCompare(b.relPath)),
+    manifestCandidateRelPaths: all,
+  };
 }

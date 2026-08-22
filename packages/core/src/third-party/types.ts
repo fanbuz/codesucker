@@ -82,9 +82,23 @@ export interface ThirdPartyRiskReport {
   };
 }
 
+/** 仅在主进程内保存，覆盖全部候选清单，用于确认扫描与导出之间未变化。 */
+export interface ThirdPartyManifestIdentity {
+  relPath: string;
+  sizeBytes: number;
+  mtimeMs: number;
+  contentSha256: string;
+}
+
+export interface ThirdPartyRiskAnalysis {
+  report: ThirdPartyRiskReport;
+  manifestIdentities: ThirdPartyManifestIdentity[];
+  /** 包含分析上限之外及读取失败的清单路径，用于发现新增、删除和选集漂移。 */
+  manifestCandidateRelPaths: string[];
+}
+
 export interface ThirdPartyAnalysisOptions {
   signal?: AbortSignal;
   maxManifestFiles?: number;
   maxEvidenceFiles?: number;
 }
-

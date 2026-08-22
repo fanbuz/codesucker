@@ -1,6 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 import {
-  analyzeThirdPartyRisks, annotate, cleanFile, readSourceAsync, scanFileCandidate,
+  analyzeThirdPartyRisks, analyzeThirdPartyRisksWithSnapshot,
+  annotate, cleanFile, readSourceAsync, scanFileCandidate,
 } from '@codesucker/core';
 import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, WorkerEnvelope, WorkerReply,
@@ -11,6 +12,9 @@ if (!parentPort) throw new Error('pipeline worker 缺少 parentPort');
 async function execute(payload: PipelineWorkerRequest): Promise<PipelineWorkerResult> {
   if (payload.type === 'scan') return scanFileCandidate(payload.candidate);
   if (payload.type === 'analyze-risks') return analyzeThirdPartyRisks(payload.root, payload.files);
+  if (payload.type === 'analyze-risks-with-snapshot') {
+    return analyzeThirdPartyRisksWithSnapshot(payload.root, payload.files);
+  }
 
   const { text, encoding } = await readSourceAsync(payload.entry.path);
   const entry = { ...payload.entry, encoding };

@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ThirdPartyRiskFinding, ThirdPartyRiskReport } from '@codesucker/core';
 import {
+  assertThirdPartyManifestDiscoveryUnchanged, assertThirdPartyManifestSnapshotUnchanged,
   assertThirdPartyRiskReportUnchanged, buildThirdPartyRiskSidecar,
   emptyThirdPartyRiskReport, sanitizeProjectConfigValues,
   trustedThirdPartyEvidenceRelPath, writeThirdPartyRiskSidecar,
@@ -68,6 +69,24 @@ const findings = [
   finding('sha-like-id-unsafe-evidence', ['pending.ts'], `${absoluteSecret}/secret.ts`),
 ];
 const riskReport = report(findings);
+const manifestSnapshot = [{
+  relPath: 'package.json', sizeBytes: 128, mtimeMs: 1234,
+  contentSha256: 'a'.repeat(64),
+}];
+assert.doesNotThrow(() => assertThirdPartyManifestDiscoveryUnchanged(['package.json'], ['package.json']));
+assert.throws(
+  () => assertThirdPartyManifestDiscoveryUnchanged(['package.json'], ['package.json', 'z/package.json']),
+  /依赖清单集合.*扫描后发生变化/,
+  '分析上限之外新增清单也必须要求重新扫描',
+);
+assert.doesNotThrow(() => assertThirdPartyManifestSnapshotUnchanged(manifestSnapshot, structuredClone(manifestSnapshot)));
+const changedManifestSnapshot = structuredClone(manifestSnapshot);
+changedManifestSnapshot[0].contentSha256 = 'b'.repeat(64);
+assert.throws(
+  () => assertThirdPartyManifestSnapshotUnchanged(manifestSnapshot, changedManifestSnapshot),
+  /依赖清单文件.*扫描后发生变化/,
+  '语义结果相同但清单字节变化时也必须要求重新扫描',
+);
 assert.doesNotThrow(() => assertThirdPartyRiskReportUnchanged(riskReport, structuredClone(riskReport)));
 const changedRiskReport = structuredClone(riskReport);
 changedRiskReport.summary.analyzedManifests++;
@@ -176,6 +195,7 @@ async function main() {
   assert.ok(!Number.isNaN(Date.parse(written.generatedAt)));
 
   fs.writeFileSync(output, 'previous-sidecar', 'utf8');
+  let asyncBeforeCommitCompleted = false;
   await assert.rejects(
     writeThirdPartyRiskSidecar(
       riskReport,
@@ -184,11 +204,26 @@ async function main() {
       outputDir,
       '测试/软件:*V1.0',
       metadata.appVersion,
-      { beforeCommit: () => { throw new Error('stale scan session'); } },
+      { beforeCommit: async () => {
+        await Promise.resolve();
+        asyncBeforeCommitCompleted = true;
+        throw new Error('stale scan session');
+      } },
     ),
     /stale scan session/,
   );
+  assert.equal(asyncBeforeCommitCompleted, true, '写入器必须等待异步最终复核完成后才能提交侧车');
   assert.equal(fs.readFileSync(output, 'utf8'), 'previous-sidecar', '过期会话不能覆盖既有摘要');
+
+  const abortDuringCommit = new AbortController();
+  await assert.rejects(
+    writeThirdPartyRiskSidecar(
+      riskReport, included, undefined, outputDir, '测试/软件:*V1.0', metadata.appVersion,
+      { signal: abortDuringCommit.signal, beforeCommit: () => abortDuringCommit.abort() },
+    ),
+    (error: unknown) => error instanceof Error && error.name === 'AbortError',
+  );
+  assert.equal(fs.readFileSync(output, 'utf8'), 'previous-sidecar', '最终复核期间取消不能覆盖既有摘要');
 
   const controller = new AbortController();
   controller.abort();
