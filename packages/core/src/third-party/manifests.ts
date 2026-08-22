@@ -32,6 +32,7 @@ export interface DependencyIdentity {
   sourceFile: string;
   source: ThirdPartyEvidenceSource;
   local: boolean;
+  workspaceRole?: 'definition' | 'reference';
 }
 
 export interface DependencyInventory {
@@ -380,19 +381,29 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
     }
     return out;
   }
-  const packageBlock = /\[package\]([\s\S]*?)(?=\n\[|$)/.exec(doc.text)?.[1] ?? '';
+  const packageBlock = /\[package\]([\s\S]*?)(?=\r?\n\s*\[|$)/.exec(doc.text)?.[1] ?? '';
   const packageName = /^name\s*=\s*['"]([^'"]+)['"]\s*$/m.exec(packageBlock)?.[1];
   if (packageName) {
     const own = identity('rust', packageName, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
   }
-  for (const section of doc.text.matchAll(/\[(?:workspace\.|(?:target\.[^\]]+\.)?)(?:dev-|build-)?dependencies\]([\s\S]*?)(?=\n\[|$)/g)) {
-    for (const line of section[1].split(/\r?\n/)) {
+  for (const section of doc.text.matchAll(/\[([^\]]*dependencies)\]([\s\S]*?)(?=\r?\n\s*\[|$)/g)) {
+    const sectionName = section[1].trim();
+    if (!/^(?:workspace\.dependencies|(?:target\..+\.)?(?:dev-|build-)?dependencies)$/.test(sectionName)) continue;
+    const workspaceDefinition = sectionName === 'workspace.dependencies';
+    for (const line of section[2].split(/\r?\n/)) {
       const match = /^\s*([\w.-]+)\s*=\s*(.+)$/.exec(line);
       if (!match) continue;
       const packageOverride = /\bpackage\s*=\s*['"]([^'"]+)['"]/.exec(match[2])?.[1];
       const item = identity('rust', packageOverride ?? match[1], doc.relPath, 'manifest', /\bpath\s*=/.test(match[2]));
-      if (item) out.push(item);
+      if (item) {
+        const workspaceReference = /\bworkspace\s*=\s*true\b/.test(match[2]);
+        out.push({
+          ...item,
+          ...(workspaceDefinition && item.local ? { workspaceRole: 'definition' as const } : {}),
+          ...(workspaceReference ? { workspaceRole: 'reference' as const } : {}),
+        });
+      }
     }
   }
   return out;
@@ -402,6 +413,10 @@ function pythonName(spec: string): string | undefined {
   const trimmed = spec.trim().replace(/^[-*]\s*/, '');
   if (!trimmed || /^#/.test(trimmed) || /^(?:-e\s+)?(?:\.\.?\/|\/|file:|git\+)/i.test(trimmed)) return undefined;
   return /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(trimmed)?.[1];
+}
+
+function pythonLocalSpec(spec: string): boolean {
+  return /@\s*(?:(?:git\+)?file:|\.\.?\/|\/)/i.test(spec);
 }
 
 interface TomlSection {
@@ -439,7 +454,7 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     for (const line of doc.text.split(/\r?\n/)) {
       const name = pythonName(line);
       if (!name) continue;
-      const item = identity('python', name, doc.relPath, 'manifest');
+      const item = identity('python', name, doc.relPath, 'manifest', pythonLocalSpec(line));
       if (item) out.push(item);
     }
     return out;
@@ -476,7 +491,7 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     }
     if (section.name === 'project') {
       for (const spec of tomlArrayAssignment(section.body, 'dependencies')) {
-        const item = pythonDependency(pythonName(spec), doc);
+        const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
         if (item) out.push(item);
       }
       continue;
@@ -484,7 +499,7 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
     if (section.name === 'project.optional-dependencies' || section.name === 'dependency-groups') {
       for (const match of section.body.matchAll(/^\s*[A-Za-z0-9._-]+\s*=\s*\[([\s\S]*?)\]/gm)) {
         for (const spec of quotedTomlValues(match[1])) {
-          const item = pythonDependency(pythonName(spec), doc);
+          const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
           if (item) out.push(item);
         }
       }
@@ -512,10 +527,20 @@ function parseManifest(doc: ManifestDocument): DependencyIdentity[] {
 }
 
 function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
-  const localNames = new Set(items.filter((item) => item.local).map((item) => `${item.ecosystem}:${item.normalizedName}`));
+  const workspaceDefinitions = items.filter((item) => item.local && item.workspaceRole === 'definition');
   const seen = new Set<string>();
   return items
-    .map((item) => localNames.has(`${item.ecosystem}:${item.normalizedName}`) ? { ...item, local: true } : item)
+    .map((item) => {
+      if (item.local || item.workspaceRole !== 'reference') return item;
+      const referenceDir = path.posix.dirname(item.sourceFile);
+      const relatedDefinition = workspaceDefinitions.some((definition) => {
+        if (definition.ecosystem !== item.ecosystem || definition.normalizedName !== item.normalizedName) return false;
+        const workspaceDir = path.posix.dirname(definition.sourceFile);
+        const rel = path.posix.relative(workspaceDir, referenceDir);
+        return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel));
+      });
+      return relatedDefinition ? { ...item, local: true } : item;
+    })
     .filter((item) => {
       const key = `${item.ecosystem}\0${item.normalizedName}\0${item.sourceFile}\0${item.source}\0${item.local}`;
       if (seen.has(key)) return false;

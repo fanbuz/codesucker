@@ -46,12 +46,35 @@ function dependencyTokens(item: DependencyIdentity): string[] {
   return [...tokens].filter((token) => token.length > 1);
 }
 
-function matchDependency(relSegments: string[], dependencies: DependencyIdentity[]): DependencyIdentity | undefined {
+function manifestScopeDepth(sourceFile: string, relPath: string): number {
+  const scope = path.posix.dirname(normalizeRel(sourceFile));
+  const rel = path.posix.relative(scope, normalizeRel(relPath));
+  if (rel === '..' || rel.startsWith('../') || path.posix.isAbsolute(rel)) return -1;
+  return scope === '.' ? 0 : scope.split('/').filter(Boolean).length;
+}
+
+function matchDependency(
+  relPath: string, relSegments: string[], dependencies: DependencyIdentity[],
+): DependencyIdentity | undefined {
   const lower = relSegments.map((segment) => segment.toLocaleLowerCase());
-  return dependencies.find((dependency) => !dependency.local && dependencyTokens(dependency).some((token) => {
-    const tokenSegments = token.split('/');
-    return lower.some((segment, index) => tokenSegments.every((part, offset) => lower[index + offset] === part));
-  }));
+  const matches = dependencies.map((dependency) => ({
+    dependency,
+    depth: manifestScopeDepth(dependency.sourceFile, relPath),
+    nameMatches: dependencyTokens(dependency).some((token) => {
+      const tokenSegments = token.split('/');
+      return lower.some((segment, index) => tokenSegments.every((part, offset) => lower[index + offset] === part));
+    }),
+  })).filter((match) => match.depth >= 0 && match.nameMatches);
+  if (matches.length === 0) return undefined;
+  const external = matches.filter((match) => !match.dependency.local && !matches.some((candidate) => (
+    candidate.dependency.local
+    && candidate.depth >= match.depth
+    && candidate.dependency.ecosystem === match.dependency.ecosystem
+    && candidate.dependency.normalizedName === match.dependency.normalizedName
+  )));
+  if (external.length === 0) return undefined;
+  const nearestDepth = Math.max(...external.map((match) => match.depth));
+  return external.find((match) => match.depth === nearestDepth)?.dependency;
 }
 
 function generatedByPath(relPath: string): { ruleId: string; detail: string } | undefined {
@@ -144,7 +167,7 @@ export async function analyzeThirdPartyRisks(
     if (vendorIndex >= 0) {
       const commonRoot = segments.slice(0, vendorIndex + 1).join('/');
       const rest = segments.slice(vendorIndex + 1);
-      const dependency = matchDependency(rest, inventory.dependencies);
+      const dependency = matchDependency(entry.relPath, rest, inventory.dependencies);
       if (dependency) {
         addFinding(findings, {
           key: `dependency-source:${dependency.ecosystem}:${dependency.normalizedName}:${commonRoot}`,

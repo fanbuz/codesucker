@@ -44,6 +44,8 @@ try {
       },
     },
   }));
+  await fs.mkdir(path.join(root, 'examples/left-pad'), { recursive: true });
+  await fs.writeFile(path.join(root, 'examples/left-pad/package.json'), JSON.stringify({ name: 'left-pad' }));
   await fs.writeFile(path.join(root, 'pom.xml'), `
     <project><artifactId>self-java</artifactId><dependencies><dependency>
       <groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId>
@@ -70,11 +72,32 @@ try {
     [workspace.dependencies]
     workspace-local = { path = "crates/workspace-local" }
   `);
+  await fs.mkdir(path.join(root, 'rust-workspace/member'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-workspace/Cargo.toml'), `
+    [workspace.dependencies]
+    workspace-member-local = { path = "crates/workspace-member-local" }
+  `);
+  await fs.writeFile(path.join(root, 'rust-workspace/member/Cargo.toml'), `
+    [package]
+    name = "workspace-member"
+    [dependencies]
+    workspace-member-local = { workspace = true }
+  `);
+  await fs.mkdir(path.join(root, 'rust-external'), { recursive: true });
+  await fs.writeFile(path.join(root, 'rust-external/Cargo.toml'), `
+    [package]
+    name = "external-member"
+    [dependencies]
+    workspace-member-local = "1"
+  `);
   await fs.writeFile(path.join(root, 'requirements.txt'), 'requests==2.32.0\n-e ./local-python\n');
   await fs.writeFile(path.join(root, 'pyproject.toml'), `
     [project]
     name = "self-python"
-    dependencies = ["httpx>=0.27"]
+    dependencies = ["httpx>=0.27", "owned-direct @ file:../owned-direct"]
+
+    [project.optional-dependencies]
+    local = ["optional-owned @ file:../optional-owned"]
 
     [project.scripts]
     acme-cli = "mine.cli:main"
@@ -104,8 +127,12 @@ try {
     write('third_party/example.local/block/tool.go', 'package block'),
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
     write('deps/workspace-local/lib.rs', 'pub fn owned() {}'),
+    write('rust-workspace/deps/workspace-member-local/lib.rs', 'pub fn owned() {}'),
+    write('rust-external/deps/workspace-member-local/lib.rs', 'pub fn external() {}'),
     write('vendors/requests/api.py', 'def get(): pass'),
     write('vendor/httpx/client.py', 'def request(): pass'),
+    write('vendor/owned-direct/owned.py', 'def owned(): pass'),
+    write('vendor/optional-owned/owned.py', 'def owned(): pass'),
     write('third_party/bar/index.js', 'module.exports = true;'),
     write('third_party/@scope/deep/index.js', 'module.exports = true;'),
     write('third_party/@legacy/v1-nested/index.js', 'module.exports = true;'),
@@ -146,14 +173,20 @@ try {
     'vendor/httpx/client.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
     'external/slf4j-api/Logger.java', 'external/debug-lib/Debug.java', 'external/legacy-core/Legacy.java',
+    'rust-external/deps/workspace-member-local/lib.rs',
   ]) {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('rust-workspace/deps/workspace-member-local/lib.rs'),
+    '兄弟工程的同名外部依赖不能覆盖当前 Cargo workspace 的本地声明');
   assert.ok(!dependencyFiles.has('vendor/acme-cli/owned.py'), 'project.scripts 不能误当 Python 依赖');
   assert.ok(!dependencyFiles.has('vendor/local-tool/owned.py'), 'Poetry path 依赖不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/owned-direct/owned.py'), 'PEP 508 file 直接引用不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/optional-owned/owned.py'), 'PEP 508 optional 本地引用不能默认判为第三方');
+  assert.ok(dependencyFiles.has('vendor/left-pad/index.js'), '无关子项目的同名 package metadata 不能覆盖根项目外部依赖');
   assert.ok(first.findings.some((finding) => finding.kind === 'dependency-source'
     && finding.affected.relPaths.includes('third_party/@legacy/v1-nested/index.js')
     && finding.evidence.some((evidence) => evidence.packageName === '@legacy/v1-nested')),
