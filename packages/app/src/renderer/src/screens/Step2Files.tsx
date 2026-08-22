@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
-import { completeFileOrder, orderedIncluded, reorderIncludedPaths, useStore, type FileRow } from '../store';
+import { completeFileOrder, orderedIncluded, reorderIncludedPaths, toast, useStore, type FileRow } from '../store';
 import { unlockStep } from '../wizard-progress';
 import {
   aggregateStats, compositionCells, includeOnlyExtension, rankExtensionStats,
@@ -12,6 +12,9 @@ import {
   type FileTreeDirectoryNode, type FileTreeFileNode, type SelectionState,
 } from '../file-selection';
 import { ScanIssueReport } from '../components/ScanIssueReport';
+import { ThirdPartyRiskPanel } from '../components/ThirdPartyRiskPanel';
+import { excludeThirdPartyFinding, keepThirdPartyFinding } from '../third-party-risk-state';
+import type { ThirdPartyRiskFinding } from '@codesucker/core';
 
 const FILE_TREE_SEARCH_DEBOUNCE_MS = 180;
 
@@ -176,11 +179,38 @@ export default function Step2Files() {
 
   const totalRawLines = fileTypes.includedRawLines;
   const estPages = Math.min(60, Math.ceil(totalRawLines * 0.82 / 50)); // 清洗后行数按 82% 粗估
-  const updateFiles = (files: FileRow[]) => {
+  const updateFiles = (files: FileRow[], keptThirdPartyRiskFindingIds = s.keptThirdPartyRiskFindingIds) => {
     const knownPaths = new Set(files.map((file) => file.relPath));
     const preferred = s.sortMode === 'mtime' ? s.mtimeOrder : s.entryOrder;
     const order = completeFileOrder(s.sortMode === 'manual' ? s.order : preferred, preferred, knownPaths);
-    s.set({ files, order, processData: null });
+    s.set({ files, order, keptThirdPartyRiskFindingIds, processData: null });
+  };
+
+  const excludeRisk = (finding: ThirdPartyRiskFinding) => {
+    const affected = new Set(finding.affected.relPaths);
+    const changed = s.files.filter((file) => file.included && affected.has(file.relPath)).length;
+    const next = excludeThirdPartyFinding(s.files, s.keptThirdPartyRiskFindingIds, finding);
+    updateFiles(next.files, next.keptFindingIds);
+    toast(`已按建议取消勾选 ${changed} 个相关文件`);
+  };
+
+  const keepRisk = (finding: ThirdPartyRiskFinding) => {
+    const next = keepThirdPartyFinding(s.files, s.keptThirdPartyRiskFindingIds, finding);
+    updateFiles(next.files, next.keptFindingIds);
+    toast(`已确认纳入 ${finding.affected.fileCount} 个相关文件`);
+  };
+
+  const revealRisk = async (finding: ThirdPartyRiskFinding) => {
+    if (!s.root) { toast('项目目录不可用，请重新导入项目'); return; }
+    const relPath = finding.evidence[0]?.location.file
+      ?? finding.affected.commonRoot
+      ?? finding.affected.relPaths[0];
+    if (!relPath) { toast('该提示没有可定位的证据'); return; }
+    try {
+      await window.cs.revealRiskEvidence(s.root, relPath);
+    } catch (error) {
+      toast('无法定位证据：' + (error instanceof Error ? error.message : String(error)));
+    }
   };
 
   const toggleFile = (rel: string) => {
@@ -318,6 +348,11 @@ export default function Step2Files() {
             })}
           </div>
         </div>
+        {s.thirdPartyRiskReport && (
+          <ThirdPartyRiskPanel report={s.thirdPartyRiskReport} files={s.files}
+            keptFindingIds={s.keptThirdPartyRiskFindingIds}
+            onExclude={excludeRisk} onKeep={keepRisk} onReveal={(finding) => { void revealRisk(finding); }} />
+        )}
         <div className="step2-order-list">
           {included.map((f, i) => (
             <div key={f.relPath} draggable className="step2-order-row"

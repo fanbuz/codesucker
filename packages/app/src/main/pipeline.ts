@@ -6,13 +6,14 @@ import {
   discoverAsync, processFilesAsync, renderTxtAsync, sortFiles,
 } from '@codesucker/core';
 import type {
-  CleanedFile, CleanOptions, FileCandidate, FileEntry, PipelineProgress, ProjectConfig, ScanFileOutcome,
+  CleanedFile, CleanOptions, FileCandidate, FileEntry, PipelineProgress, ProjectConfig,
+  ScanFileOutcome, ThirdPartyRiskReport,
 } from '@codesucker/core';
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
 import { validateDroppedDirectory } from './drop-path';
 import {
-  captureProjectRoot, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  captureProjectRoot, resolveProjectEvidencePath, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
   type ProjectRootSnapshot,
 } from './project-file';
 import { recommendedWorkerCount, WorkerPool } from './worker-pool';
@@ -26,10 +27,16 @@ import {
 import type {
   PipelineWorkerRequest, PipelineWorkerResult, PreviewResult, RenderWorkerRequest,
 } from './workers/protocol';
+import {
+  emptyThirdPartyRiskReport, sanitizeProjectConfigValues, trustedThirdPartyEvidenceRelPath,
+  writeThirdPartyRiskSidecar,
+  type ThirdPartyRiskPreference,
+} from './third-party-risk-sidecar';
 
 interface ScanSnapshot {
   rootSnapshot: ProjectRootSnapshot;
   byRel: Map<string, FileEntry>;
+  thirdPartyRisk: ThirdPartyRiskReport;
 }
 
 /** 当前扫描会话只保存文件元数据，不保存原始源码。 */
@@ -171,6 +178,7 @@ interface ProcessPayload {
   owner?: string;
   foundedDate?: string;
   clean: CleanOptions;
+  thirdPartyRisk?: ThirdPartyRiskPreference;
 }
 
 function buildConfig(payload: ProcessPayload): ProjectConfig {
@@ -248,9 +256,25 @@ async function scanWithWorkers(
     });
     job.assertCurrent();
     validateProjectRoot(rootSnapshot, request.root);
+    report({ stage: 'analyzing-risks', completed: 0, total: 1 });
+    let thirdPartyRisk: ThirdPartyRiskReport;
+    try {
+      thirdPartyRisk = await workerResources.pipeline.run({
+        type: 'analyze-risks',
+        root: rootSnapshot.realPath,
+        files: result.files,
+      }, job.signal) as ThirdPartyRiskReport;
+    } catch (error) {
+      if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+      thirdPartyRisk = emptyThirdPartyRiskReport(0, '本地分析任务发生内部错误');
+    }
+    report({ stage: 'analyzing-risks', completed: 1, total: 1 });
+    job.assertCurrent();
+    validateProjectRoot(rootSnapshot, request.root);
     scanSessions.commit(request.scanSessionId, normalizedRoot, {
       rootSnapshot,
       byRel: new Map(result.files.map((file) => [file.relPath, file])),
+      thirdPartyRisk,
     });
     const entryOrder = sortFiles(result.files, 'entry').map((file) => file.relPath);
     const mtimeOrder = sortFiles(result.files, 'mtime').map((file) => file.relPath);
@@ -267,6 +291,7 @@ async function scanWithWorkers(
       issues: result.issues,
       summary: result.summary,
       appliedExcludeRules: result.appliedExcludeRules,
+      thirdPartyRisk,
       errors: result.errors,
       workerCount: workerResources.workerCount,
       langCounts,
@@ -327,6 +352,14 @@ export function registerPipelineIpc() {
 
   ipcMain.handle('project:revealFile', (_event, root: unknown, relPath: unknown) => {
     shell.showItemInFolder(resolveProjectFile(scanSessions.peek()?.rootSnapshot ?? null, root, relPath));
+  });
+
+  ipcMain.handle('project:revealRiskEvidence', (_event, root: unknown, relPath: unknown) => {
+    const scan = scanSessions.peek();
+    if (!scan) throw new Error('请先重新扫描项目，再定位风险证据');
+    const trustedRelPath = trustedThirdPartyEvidenceRelPath(scan.thirdPartyRisk, relPath);
+    if (!trustedRelPath) throw new Error('风险证据与最近扫描结果不一致，请重新扫描项目');
+    shell.showItemInFolder(resolveProjectEvidencePath(scan.rootSnapshot, root, trustedRelPath));
   });
 
   ipcMain.handle('project:revealLatestExport', () => {
@@ -396,9 +429,10 @@ export function registerPipelineIpc() {
     const workerResources = getResources();
     const report = createProgressReporter(job, event.sender, workerResources.workerCount);
     try {
+      if (!request.payload.formats.docx && !request.payload.formats.txt) throw new Error('请至少选择一种输出格式');
       const entries = orderedEntries(request.payload);
       const result = await processWithWorkers(entries, request.payload, job, event.sender);
-      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       const pages = result.selection.pages;
       assertExportableSelection(result.selection);
       const renderOptions = {
@@ -407,7 +441,7 @@ export function registerPipelineIpc() {
         fontSizePt: 10.5,
         outDir: request.payload.outDir,
       };
-      const formatCount = Number(request.payload.formats.docx) + Number(request.payload.formats.txt);
+      const formatCount = Number(request.payload.formats.docx) + Number(request.payload.formats.txt) + 1;
       let rendered = 0;
       report({ stage: 'rendering', completed: 0, total: formatCount });
       const output: {
@@ -418,6 +452,7 @@ export function registerPipelineIpc() {
         lines: number;
         appVersion: string;
         rulesVersion: string;
+        thirdPartyRiskSummary?: string;
         errors: typeof result.errors;
       } = {
         size: 0,
@@ -443,6 +478,18 @@ export function registerPipelineIpc() {
 
       job.assertCurrent();
       requireCurrentScan(request.payload.root, request.payload.scanSessionId);
+      output.thirdPartyRiskSummary = await writeThirdPartyRiskSidecar(
+        scan.thirdPartyRisk,
+        entries.map((entry) => entry.relPath),
+        request.payload.thirdPartyRisk,
+        request.payload.outDir,
+        request.payload.title,
+        app.getVersion(),
+      );
+      report({ stage: 'rendering', completed: ++rendered, total: formatCount });
+
+      job.assertCurrent();
+      requireCurrentScan(request.payload.root, request.payload.scanSessionId);
       const exportedFile = output.docx ?? output.txt;
       if (!exportedFile) throw new Error('请至少选择一种输出格式');
       lastExportFile = fs.realpathSync.native(exportedFile);
@@ -459,10 +506,10 @@ export function registerPipelineIpc() {
     }
   });
 
-  ipcMain.handle('project:saveConfig', (_event, root: string, config: unknown) => {
-    const values = isRecord(config) ? config : {};
+  ipcMain.handle('project:saveConfig', (_event, root: string, scanSessionId: string, config: unknown) => {
+    const scan = requireCurrentScan(root, scanSessionId);
     const persisted = {
-      ...values,
+      ...sanitizeProjectConfigValues(scan.thirdPartyRisk, config, new Set(scan.byRel.keys())),
       schemaVersion: CONFIG_SCHEMA_VERSION,
       appVersion: app.getVersion(),
       rulesVersion: RULES_VERSION,

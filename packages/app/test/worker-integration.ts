@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, MAX_FILE_BYTES, defaultCleanOptions, discoverAsync,
-  type CleanedFile, type FileCandidate, type ScanFileOutcome,
+  type CleanedFile, type FileCandidate, type ScanFileOutcome, type ThirdPartyRiskReport,
 } from '@codesucker/core';
 import { WorkerPool } from '../src/main/worker-pool.ts';
 import type {
@@ -21,6 +21,9 @@ async function main() {
   const sourcePath = path.join(tmp, 'main.ts');
   const source = '// @author Worker Tester\nexport const answer = 42;\n';
   fs.writeFileSync(sourcePath, source, 'utf8');
+  fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ dependencies: { lodash: '^4.17.21' } }), 'utf8');
+  fs.mkdirSync(path.join(tmp, 'third_party', 'lodash'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'third_party', 'lodash', 'index.js'), 'module.exports = {};\n', 'utf8');
   const candidate: FileCandidate = {
     path: sourcePath,
     relPath: 'main.ts',
@@ -51,6 +54,16 @@ async function main() {
   assert.ok(workerScan.files.some((file) => file.relPath === 'exact.ts'), '2 MiB 文件应进入 worker 扫描');
   assert.equal(workerScan.issues.find((item) => item.file === 'plus-one.ts')?.reason, 'file-too-large');
   assert.equal(workerScan.summary.candidates, workerScan.summary.included + workerScan.summary.excluded + workerScan.summary.skipped + workerScan.summary.failed);
+  const riskReport = await pipelinePool.run({
+    type: 'analyze-risks',
+    root: tmp,
+    files: workerScan.files,
+  }) as ThirdPartyRiskReport;
+  assert.equal(riskReport.summary.analyzedSourceFiles, workerScan.files.length);
+  assert.ok(riskReport.findings.some((finding) => (
+    finding.kind === 'dependency-source'
+      && finding.affected.relPaths.includes('third_party/lodash/index.js')
+  )), 'worker 应依据可信扫描文件与本地依赖清单识别第三方源码');
   const oversizedCandidate: FileCandidate = {
     ...candidate,
     path: path.join(tmp, 'plus-one.ts'),

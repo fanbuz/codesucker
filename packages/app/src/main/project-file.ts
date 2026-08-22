@@ -54,6 +54,15 @@ export function validateProjectRoot(snapshot: ProjectRootSnapshot, root: unknown
  * 返回 realpath，避免在校验完成后继续沿用可能被替换的项目内符号链接。
  */
 export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: unknown, relPath: unknown): string {
+  const realFile = resolveProjectEvidencePath(snapshot, root, relPath);
+  if (!fs.statSync(realFile).isFile()) {
+    throw new Error('问题路径不是普通文件，无法定位');
+  }
+  return realFile;
+}
+
+/** 定位风险证据，可接受项目内普通文件或目录，但拒绝符号链接越界。 */
+export function resolveProjectEvidencePath(snapshot: ProjectRootSnapshot | null, root: unknown, relPath: unknown): string {
   if (!snapshot) {
     throw new Error('请先重新扫描项目，再定位问题文件');
   }
@@ -75,8 +84,9 @@ export function resolveProjectFile(snapshot: ProjectRootSnapshot | null, root: u
   if (!isPathInside(realRoot, realFile)) {
     throw new Error('问题文件不在项目目录内，已拒绝定位');
   }
-  if (!fs.statSync(realFile).isFile()) {
-    throw new Error('问题路径不是普通文件，无法定位');
+  const stat = fs.statSync(realFile);
+  if (!stat.isFile() && !stat.isDirectory()) {
+    throw new Error('问题路径不是普通文件或目录，无法定位');
   }
   return realFile;
 }

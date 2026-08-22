@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  captureProjectRoot, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
+  captureProjectRoot, resolveProjectEvidencePath, resolveProjectFile, resolveRecentExportFile, validateProjectRoot,
 } from '../src/main/project-file.ts';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codesucker-project-file-'));
@@ -27,6 +27,7 @@ for (const input of ['/etc/passwd', 'C:\\Windows\\system.ini', '../outside.ts', 
 
 assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/missing.ts'), /不存在/);
 assert.throws(() => resolveProjectFile(rootSnapshot, root, 'src/folder'), /普通文件/);
+assert.equal(resolveProjectEvidencePath(rootSnapshot, root, 'src/folder'), fs.realpathSync(path.join(root, 'src', 'folder')));
 assert.throws(() => resolveProjectFile(rootSnapshot, root, ''), /相对路径/);
 assert.throws(() => resolveProjectFile(null, root, 'src/main.ts'), /重新扫描/);
 assert.throws(() => resolveProjectFile(rootSnapshot, sandbox, 'outside.ts'), /扫描结果/);

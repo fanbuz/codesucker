@@ -165,7 +165,7 @@ export interface ProjectStats {
   langCounts: Record<string, number>;
 }
 
-export type PipelineStage = 'discovering' | 'scanning' | 'cleaning' | 'selecting' | 'auditing' | 'rendering';
+export type PipelineStage = 'discovering' | 'scanning' | 'analyzing-risks' | 'cleaning' | 'selecting' | 'auditing' | 'rendering';
 
 export interface PipelineProgress {
   stage: PipelineStage;

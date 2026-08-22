@@ -5,7 +5,7 @@ interface ProgressEvent {
   jobId: string;
   jobKind: 'scan' | 'process' | 'export';
   workerCount: number;
-  stage: 'discovering' | 'scanning' | 'cleaning' | 'selecting' | 'auditing' | 'rendering';
+  stage: 'discovering' | 'scanning' | 'analyzing-risks' | 'cleaning' | 'selecting' | 'auditing' | 'rendering';
   completed: number;
   total: number;
   bytes?: number;
@@ -37,8 +37,9 @@ const api = {
     ipcRenderer.on('project:progress', (_event, progress: ProgressEvent) => callback(progress));
   },
   offProgress: () => ipcRenderer.removeAllListeners('project:progress'),
-  saveConfig: (root: string, config: unknown) => ipcRenderer.invoke('project:saveConfig', root, config),
+  saveConfig: (root: string, scanSessionId: string, config: unknown) => ipcRenderer.invoke('project:saveConfig', root, scanSessionId, config),
   revealProjectFile: (root: string, relPath: string): Promise<void> => ipcRenderer.invoke('project:revealFile', root, relPath),
+  revealRiskEvidence: (root: string, relPath: string): Promise<void> => ipcRenderer.invoke('project:revealRiskEvidence', root, relPath),
   revealLatestExport: (): Promise<void> => ipcRenderer.invoke('project:revealLatestExport'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
 };

@@ -1,22 +1,23 @@
 import assert from 'node:assert/strict';
 import { ScanSessionGuard, StaleScanSessionError } from '../src/main/scan-session.ts';
 
-const sessions = new ScanSessionGuard<{ files: string[] }>();
+const sessions = new ScanSessionGuard<{ files: string[]; riskReport: string }>();
 sessions.begin('scan-a', '/project-a');
 assert.throws(() => sessions.require('scan-a', '/project-a'), StaleScanSessionError);
-sessions.commit('scan-a', '/project-a', { files: ['old.ts'] });
+sessions.commit('scan-a', '/project-a', { files: ['old.ts'], riskReport: 'old-risk' });
 assert.deepEqual(sessions.require('scan-a', '/project-a').files, ['old.ts']);
 
 sessions.begin('scan-b', '/project-a');
 assert.equal(sessions.peek(), null, '重扫开始时必须立即废弃旧派生数据');
 assert.throws(() => sessions.require('scan-a', '/project-a'), StaleScanSessionError);
 assert.throws(
-  () => sessions.commit('scan-a', '/project-a', { files: ['late.ts'] }),
+  () => sessions.commit('scan-a', '/project-a', { files: ['late.ts'], riskReport: 'late-risk' }),
   StaleScanSessionError,
   '旧扫描晚到结果不得覆盖新会话',
 );
-sessions.commit('scan-b', '/project-a', { files: ['new.ts'] });
+sessions.commit('scan-b', '/project-a', { files: ['new.ts'], riskReport: 'new-risk' });
 assert.deepEqual(sessions.require('scan-b', '/project-a').files, ['new.ts']);
+assert.equal(sessions.require('scan-b', '/project-a').riskReport, 'new-risk', '风险报告必须跟随当前扫描快照，旧会话不得串台');
 assert.throws(() => sessions.require('scan-b', '/project-b'), StaleScanSessionError);
 
 console.log('✅ scan session guard 全部通过');

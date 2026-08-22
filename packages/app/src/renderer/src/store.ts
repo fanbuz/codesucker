@@ -1,8 +1,10 @@
 import { create } from 'zustand';
+import type { ThirdPartyRiskReport } from '@codesucker/core';
 import type { UpdateCheckResult } from '../../shared/update-types';
 import { mergeRescannedFiles } from './scan-project-state';
 import { canStartScan } from './scan-guard';
 import { LatestRequestGuard } from './latest-request-guard';
+import { restoreKeptFindingIds } from './third-party-risk-state';
 
 export interface FileRow {
   relPath: string; name: string; ext: string; lang: string;
@@ -65,6 +67,7 @@ interface ScanResult {
   issues: ScanIssueRow[];
   summary: ScanSummary;
   appliedExcludeRules: string[];
+  thirdPartyRisk: ThirdPartyRiskReport;
   errors: FileTaskError[];
   workerCount: number;
   langCounts: Record<string, number>;
@@ -77,6 +80,7 @@ interface ScanResult {
     order?: string[]; excludedRelPaths?: string[];
     clean?: CleanToggles;
     fmtDocx?: boolean; fmtTxt?: boolean; outDir?: string;
+    thirdPartyRisk?: { rulesVersion?: string; keptFindingIds?: string[] };
   };
 }
 
@@ -102,6 +106,8 @@ interface State {
   scanIssues: ScanIssueRow[];
   scanSummary: ScanSummary | null;
   appliedScanExcludeRules: string[];
+  thirdPartyRiskReport: ThirdPartyRiskReport | null;
+  keptThirdPartyRiskFindingIds: string[];
   scanSessionId: string | null;
   activeJobId: string | null;
   jobProgress: JobProgress | null;
@@ -125,7 +131,7 @@ interface State {
   fmtTxt: boolean;
   outDir: string;
   exporting: boolean;
-  exportResult: null | { scanSessionId: string; docx?: string; txt?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
+  exportResult: null | { scanSessionId: string; docx?: string; txt?: string; thirdPartyRiskSummary?: string; size: number; pages: number; lines: number; appVersion: string; rulesVersion: string; errors: FileTaskError[] };
   toast: string | null;
   set: (p: Partial<State>) => void;
 }
@@ -145,6 +151,8 @@ export const useStore = create<State>((set) => ({
   scanIssues: [],
   scanSummary: null,
   appliedScanExcludeRules: [],
+  thirdPartyRiskReport: null,
+  keptThirdPartyRiskFindingIds: [],
   scanSessionId: null,
   activeJobId: null,
   jobProgress: null,
@@ -286,6 +294,8 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
     scanIssues: [],
     scanSummary: null,
     appliedScanExcludeRules: [],
+    thirdPartyRiskReport: null,
+    keptThirdPartyRiskFindingIds: [],
     scanSessionId: null,
     activeJobId: jobId,
     jobProgress: null,
@@ -315,6 +325,8 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
         scanIssues: result.issues,
         scanSummary: result.summary,
         appliedScanExcludeRules: result.appliedExcludeRules,
+        thirdPartyRiskReport: result.thirdPartyRisk,
+        keptThirdPartyRiskFindingIds: [],
         activeJobId: null,
         jobProgress: null,
       });
@@ -331,6 +343,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
     let fmtDocx: boolean;
     let fmtTxt: boolean;
     let outDir: string;
+    let keptThirdPartyRiskFindingIds: string[];
 
     if (preserveCurrentConfig) {
       const merged = mergeRescannedFiles(previous.files, previous.order, result.files, preferredOrder);
@@ -343,6 +356,10 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       fmtDocx = previous.fmtDocx;
       fmtTxt = previous.fmtTxt;
       outDir = previous.outDir;
+      keptThirdPartyRiskFindingIds = restoreKeptFindingIds(result.thirdPartyRisk, {
+        rulesVersion: previous.thirdPartyRiskReport?.rulesVersion,
+        keptFindingIds: previous.keptThirdPartyRiskFindingIds,
+      });
     } else {
       const config = result.savedConfig;
       const excluded = new Set(config?.excludedRelPaths ?? []);
@@ -359,6 +376,7 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       fmtDocx = config?.fmtDocx ?? true;
       fmtTxt = config?.fmtTxt ?? false;
       outDir = config?.outDir ?? '';
+      keptThirdPartyRiskFindingIds = restoreKeptFindingIds(result.thirdPartyRisk, config?.thirdPartyRisk);
     }
 
     current.set({
@@ -373,6 +391,8 @@ export async function scanProject(root: string, intent: ScanIntent): Promise<voi
       scanIssues: result.issues,
       scanSummary: result.summary,
       appliedScanExcludeRules: result.appliedExcludeRules,
+      thirdPartyRiskReport: result.thirdPartyRisk,
+      keptThirdPartyRiskFindingIds,
       activeJobId: null,
       jobProgress: null,
       pathSeparator: result.pathSeparator,

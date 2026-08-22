@@ -22,10 +22,11 @@ function unavailableLabel(reason: RecentProject['unavailableReason']): string {
 
 function scanPercent(progress: JobProgress | null): number {
   if (!progress) return 2;
-  if (progress.stage === 'discovering') return progress.total > 0 ? 8 : 3;
+  if (progress.stage === 'discovering') return progress.total > 0 ? 6 : 3;
   if (progress.stage === 'scanning') {
-    return 8 + (progress.total > 0 ? (progress.completed / progress.total) * 92 : 0);
+    return 6 + (progress.total > 0 ? (progress.completed / progress.total) * 86 : 0);
   }
+  if (progress.stage === 'analyzing-risks') return 92 + (progress.completed / Math.max(1, progress.total)) * 8;
   return 100;
 }
 
@@ -195,7 +196,11 @@ export default function Step1Import() {
         <div style={{ border: '1.5px solid var(--border)', borderRadius: 14, background: 'var(--panel)', height: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
           <svg width="30" height="30" viewBox="0 0 30 30" style={{ animation: 'cs-spin 1s linear infinite' }}><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" strokeWidth="3" /><path d="M15 3a12 12 0 0 1 12 12" fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" /></svg>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
-            {progress?.stage === 'discovering' ? '正在发现源代码文件…' : '正在并发扫描项目…'}
+            {progress?.stage === 'discovering'
+              ? '正在发现源代码文件…'
+              : progress?.stage === 'analyzing-risks'
+                ? '正在本地分析第三方代码风险…'
+                : '正在并发扫描项目…'}
           </div>
           <div style={{ width: 360, height: 6, borderRadius: 3, background: 'var(--border2)', overflow: 'hidden' }}>
             <div style={{ height: '100%', borderRadius: 3, background: 'var(--accent)', width: `${pct}%`, transition: 'width .12s', position: 'relative', overflow: 'hidden' }}>
@@ -211,6 +216,9 @@ export default function Step1Import() {
               {' · '}{formatBytes(progress.bytes)}
               {' · '}{progress.workerCount} workers
             </div>
+          )}
+          {progress?.stage === 'analyzing-risks' && (
+            <div style={{ fontSize: 12, color: 'var(--text2)' }}>分析仅在本机进行，不上传源码或项目路径</div>
           )}
           <button className="btn-ghost" style={{ height: 28, padding: '0 12px', fontSize: 11.5 }} onClick={() => { void cancelActiveScan(); }}>取消扫描</button>
         </div>

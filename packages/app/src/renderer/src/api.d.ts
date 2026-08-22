@@ -9,7 +9,7 @@ declare global {
     jobId: string;
     jobKind: 'scan' | 'process' | 'export';
     workerCount: number;
-    stage: 'discovering' | 'scanning' | 'cleaning' | 'selecting' | 'auditing' | 'rendering';
+    stage: 'discovering' | 'scanning' | 'analyzing-risks' | 'cleaning' | 'selecting' | 'auditing' | 'rendering';
     completed: number;
     total: number;
     bytes?: number;
@@ -55,8 +55,9 @@ declare global {
       cancel: (jobId: string) => Promise<boolean>;
       onProgress: (callback: (progress: JobProgress) => void) => void;
       offProgress: () => void;
-      saveConfig: (root: string, config: unknown) => Promise<boolean>;
+      saveConfig: (root: string, scanSessionId: string, config: unknown) => Promise<boolean>;
       revealProjectFile: (root: string, relPath: string) => Promise<void>;
+      revealRiskEvidence: (root: string, relPath: string) => Promise<void>;
       revealLatestExport: () => Promise<void>;
       openExternal: (url: string) => Promise<void>;
     };
