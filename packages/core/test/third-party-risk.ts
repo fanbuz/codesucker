@@ -181,7 +181,32 @@ try {
     [dependencies]
     workspace-member-local = "1"
   `);
-  await fs.writeFile(path.join(root, 'requirements.txt'), 'requests==2.32.0\n-e ./local-python\n');
+  await fs.writeFile(path.join(root, 'requirements.txt'), [
+    'requests==2.32.0',
+    '-e ./local-python',
+    '-r requirements/base.txt',
+  ].join('\n'));
+  await fs.mkdir(path.join(root, 'requirements/deeper'), { recursive: true });
+  await fs.writeFile(path.join(root, 'requirements/base.txt'), [
+    'nested-requirement==1.0.0',
+    '--requirement deeper/common.in',
+  ].join('\n'));
+  await fs.writeFile(path.join(root, 'requirements/deeper/common.in'), [
+    'deep-requirement==2.0.0',
+    '-r ../base.txt',
+  ].join('\n'));
+  await fs.mkdir(path.join(root, 'services/shared'), { recursive: true });
+  await fs.mkdir(path.join(root, 'services/app'), { recursive: true });
+  await fs.writeFile(path.join(root, 'services/app/requirements.txt'), '-r ../shared/base.in\n');
+  await fs.writeFile(path.join(root, 'services/shared/base.in'), 'service-only==3.0.0\n');
+  await fs.mkdir(path.join(root, 'invalid-requirements'), { recursive: true });
+  await fs.writeFile(path.join(root, 'invalid-requirements/requirements.txt'), [
+    '-r',
+    '--requirement',
+    '-r ../../outside.txt',
+    '-r https://example.invalid/requirements.txt',
+    '-r missing.txt',
+  ].join('\n'));
   await fs.writeFile(path.join(root, 'Pipfile.lock'), JSON.stringify({
     default: {
       'pipenv-local-path': { path: './pipenv-local-path', editable: true },
@@ -306,6 +331,10 @@ try {
     write('rust-workspace/member/vendor/workspace-alias/lib.rs', 'pub fn owned() {}'),
     write('rust-external/deps/workspace-member-local/lib.rs', 'pub fn external() {}'),
     write('vendors/requests/api.py', 'def get(): pass'),
+    write('vendor/nested-requirement/api.py', 'def nested(): pass'),
+    write('vendor/deep-requirement/api.py', 'def deep(): pass'),
+    write('services/app/vendor/service-only/api.py', 'def service(): pass'),
+    write('services/other/vendor/service-only/api.py', 'def sibling(): pass'),
     write('vendor/httpx/client.py', 'def request(): pass'),
     write('vendor/extra-only/security.py', 'def verify(): pass'),
     write('vendor/after-comment/client.py', 'def request(): pass'),
@@ -414,6 +443,11 @@ try {
     && item.file === 'quoted-dynamic-python/pyproject.toml'), 'PEP 621 引号键 dynamic 必须报告部分分析');
   assert.ok(!first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'literal-dynamic-python/pyproject.toml'), 'TOML 多行字符串里的 dynamic 文本不能形成部分分析诊断');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'invalid-requirements/requirements.txt'
+    && item.message.includes('requirements include')), '无效 requirements include 必须给出准确的部分分析诊断');
+  assert.ok(first.diagnostics.some((item) => item.code === 'manifest-read-failed'
+    && item.file === 'invalid-requirements/missing.txt'), '项目内缺失的 requirements include 必须报告目标文件读取失败');
   assert.ok(!first.diagnostics.some((item) => item.file === 'commented-maven/pom.xml'
     || item.file === 'commented-maven/ghost/pom.xml'), 'Maven XML 注释不能形成依赖或模块诊断');
 
@@ -428,6 +462,8 @@ try {
     'deps/serde/lib.rs', 'deps/table-form/lib.rs',
     'deps/lock-external/lib.rs', 'vendor/lock-collision/lib.rs', 'vendor/sparse-dep/lib.rs',
     'deps/target-table/lib.rs', 'vendors/requests/api.py', 'vendor/httpx/client.py',
+    'vendor/nested-requirement/api.py', 'vendor/deep-requirement/api.py',
+    'services/app/vendor/service-only/api.py',
     'vendor/extra-only/security.py', 'vendor/after-comment/client.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
@@ -438,6 +474,8 @@ try {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('services/other/vendor/service-only/api.py'),
+    '子项目 requirements include 的依赖作用域不能泄漏到兄弟项目');
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('vendor/retract/retract.go'), 'Go retract 指令不能被误当作单段依赖');

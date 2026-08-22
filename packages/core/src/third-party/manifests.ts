@@ -37,6 +37,7 @@ export interface DependencyIdentity {
   workspaceRole?: 'definition' | 'reference';
   workspaceKey?: string;
   workspaceScopes?: string[];
+  projectScopes?: string[];
 }
 
 export interface DependencyInventory {
@@ -52,6 +53,8 @@ interface ManifestDocument {
   basename: string;
   text: string;
   lockfile: boolean;
+  requirementFile: boolean;
+  requirementScopes: string[];
   identity: ThirdPartyManifestIdentity;
 }
 
@@ -71,7 +74,9 @@ function diagnostic(
   return { code, ...(file ? { file } : {}), message, suggestion };
 }
 
-async function readManifest(rootReal: string, relPath: string): Promise<ManifestDocument | ThirdPartyAnalysisDiagnostic> {
+async function readManifest(
+  rootReal: string, relPath: string, requirementFile = false, requirementScopes: string[] = [],
+): Promise<ManifestDocument | ThirdPartyAnalysisDiagnostic> {
   const normalized = normalizeRel(relPath);
   const absolute = path.resolve(rootReal, normalized);
   try {
@@ -100,6 +105,8 @@ async function readManifest(rootReal: string, relPath: string): Promise<Manifest
       basename,
       text,
       lockfile,
+      requirementFile,
+      requirementScopes,
       identity: {
         relPath: normalized,
         sizeBytes: afterRead.size,
@@ -602,8 +609,10 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
 }
 
 function pythonName(spec: string): string | undefined {
-  const trimmed = spec.trim().replace(/^[-*]\s*/, '');
-  if (!trimmed || /^#/.test(trimmed) || /^(?:-e\s+)?(?:\.\.?\/|\/|file:|git\+)/i.test(trimmed)) return undefined;
+  const raw = spec.trim();
+  if (!raw || /^[-#]/.test(raw)) return undefined;
+  const trimmed = raw.replace(/^\*\s*/, '');
+  if (/^(?:\.\.?\/|\/|file:|git\+)/i.test(trimmed)) return undefined;
   return /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(trimmed)?.[1];
 }
 
@@ -786,12 +795,12 @@ function pythonLockPackageIsLocal(packageBody: string, sourceBody = ''): boolean
 
 function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
-  if (/^requirements/i.test(doc.basename)) {
+  if (doc.requirementFile) {
     for (const line of doc.text.split(/\r?\n/)) {
       const name = pythonName(line);
       if (!name) continue;
       const item = identity('python', name, doc.relPath, 'manifest', pythonLocalSpec(line));
-      if (item) out.push(item);
+      if (item) out.push({ ...item, projectScopes: doc.requirementScopes });
     }
     return out;
   }
@@ -864,6 +873,32 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   return out;
 }
 
+function pythonRequirementIncludes(doc: ManifestDocument): { incomplete: boolean; relPaths: string[] } {
+  if (!doc.requirementFile) return { incomplete: false, relPaths: [] };
+  const relPaths = new Set<string>();
+  let incomplete = false;
+  for (const rawLine of doc.text.split(/\r?\n/)) {
+    const match = /^\s*(?:-r(?:\s+|=)?|--requirement(?:\s+|=))(?:(['"])(.*?)\1|([^\s#]+))/.exec(rawLine);
+    if (!match) {
+      if (/^\s*(?:-r|--requirement(?:\s|=|$))/.test(rawLine)) incomplete = true;
+      continue;
+    }
+    const include = (match[2] ?? match[3] ?? '').trim().replace(/\\/g, '/');
+    if (!include || include.includes('\0') || path.posix.isAbsolute(include)
+      || path.win32.isAbsolute(include) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(include)) {
+      incomplete = true;
+      continue;
+    }
+    const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(doc.relPath), include));
+    if (resolved === '..' || resolved.startsWith('../') || path.posix.isAbsolute(resolved)) {
+      incomplete = true;
+      continue;
+    }
+    relPaths.add(resolved);
+  }
+  return { incomplete, relPaths: [...relPaths].sort() };
+}
+
 function parseManifest(doc: ManifestDocument): DependencyIdentity[] {
   if (doc.basename === 'package.json' || doc.basename === 'package-lock.json') return parseNode(doc);
   if (doc.basename === 'pom.xml') return parseMaven(doc);
@@ -893,7 +928,7 @@ function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
       return relatedDefinition ? { ...item, local: true } : item;
     })
     .filter((item) => {
-      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.workspaceKey ?? ''}\0${item.workspaceScopes?.join('\0') ?? ''}\0${item.sourceFile}\0${item.source}\0${item.local}`;
+      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.workspaceKey ?? ''}\0${item.workspaceScopes?.join('\0') ?? ''}\0${item.projectScopes?.join('\0') ?? ''}\0${item.sourceFile}\0${item.source}\0${item.local}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -913,15 +948,21 @@ export async function collectDependencyInventory(
     cwd: rootReal, onlyFiles: true, dot: true, followSymbolicLinks: false,
     ignore: IGNORE_DIRS.filter((item) => !item.includes('vendor')),
   });
-  const all = [...new Set([...regular, ...goVendor].map(normalizeRel))].sort();
-  const selected = all.slice(0, maxManifestFiles);
+  const candidatePaths = new Set([...regular, ...goVendor].map(normalizeRel));
+  const initialCandidates = [...candidatePaths].sort();
+  const selected = initialCandidates.slice(0, maxManifestFiles);
   const selectedSet = new Set(selected);
+  const requirementFiles = new Set(initialCandidates.filter((relPath) => /^requirements.*\.txt$/i.test(path.posix.basename(relPath))));
+  const requirementScopes = new Map([...requirementFiles].map((relPath) => [
+    relPath, new Set([path.posix.dirname(relPath)]),
+  ]));
+  const requirementEdges = new Map<string, Set<string>>();
   const diagnostics: ThirdPartyAnalysisDiagnostic[] = [];
-  let limitReported = all.length > selected.length;
+  let limitReported = initialCandidates.length > selected.length;
   if (limitReported) {
     diagnostics.push(diagnostic(
       'analysis-limit-reached', undefined,
-      `依赖清单共 ${all.length} 个，仅分析前 ${selected.length} 个。`,
+      `依赖清单共 ${initialCandidates.length} 个，仅分析前 ${selected.length} 个。`,
       '可缩小项目范围或减少重复的嵌套工程后重新扫描。',
     ));
   }
@@ -932,7 +973,10 @@ export async function collectDependencyInventory(
   let analyzedManifests = 0;
   for (const relPath of selected) {
     signal?.throwIfAborted();
-    const document = await readManifest(rootReal, relPath);
+    const document = await readManifest(
+      rootReal, relPath, requirementFiles.has(relPath),
+      [...(requirementScopes.get(relPath) ?? [])].sort(),
+    );
     if ('code' in document) {
       diagnostics.push(document);
       if (document.code === 'manifest-read-failed') attemptedPaths.add(relPath);
@@ -943,6 +987,38 @@ export async function collectDependencyInventory(
       identityPaths.add(document.identity.relPath);
       dependencies.push(...parseManifest(document));
       analyzedManifests++;
+      const requirementIncludes = pythonRequirementIncludes(document);
+      if (requirementIncludes.incomplete) {
+        diagnostics.push(diagnostic(
+          'dynamic-manifest-partial', document.relPath,
+          'requirements include 存在缺失参数、项目外路径或远程地址，相关依赖未分析。',
+          '请改为项目内可读取的相对路径，或手工核验被引用的依赖。',
+        ));
+      }
+      for (const included of requirementIncludes.relPaths) {
+        const edges = requirementEdges.get(document.relPath) ?? new Set<string>();
+        edges.add(included);
+        requirementEdges.set(document.relPath, edges);
+        candidatePaths.add(included);
+        requirementFiles.add(included);
+        const scopes = requirementScopes.get(included) ?? new Set<string>();
+        document.requirementScopes.forEach((scope) => scopes.add(scope));
+        requirementScopes.set(included, scopes);
+        if (selectedSet.has(included)) continue;
+        if (selected.length >= maxManifestFiles) {
+          if (!limitReported) {
+            diagnostics.push(diagnostic(
+              'analysis-limit-reached', undefined,
+              `依赖清单达到 ${maxManifestFiles} 个分析上限，部分 Python requirements include 未分析。`,
+              '请缩小项目范围或合并重复的依赖清单后重新扫描。',
+            ));
+            limitReported = true;
+          }
+          continue;
+        }
+        selectedSet.add(included);
+        selected.push(included);
+      }
       if (document.basename === 'pom.xml') {
         for (const moduleManifest of mavenModuleManifests(document)) {
           if (selectedSet.has(moduleManifest)) continue;
@@ -980,13 +1056,34 @@ export async function collectDependencyInventory(
       ));
     }
   }
+  let scopesChanged = true;
+  while (scopesChanged) {
+    signal?.throwIfAborted();
+    scopesChanged = false;
+    for (const [parent, children] of requirementEdges) {
+      const parentScopes = requirementScopes.get(parent) ?? new Set<string>();
+      for (const child of children) {
+        const childScopes = requirementScopes.get(child) ?? new Set<string>();
+        const sizeBefore = childScopes.size;
+        parentScopes.forEach((scope) => childScopes.add(scope));
+        requirementScopes.set(child, childScopes);
+        if (childScopes.size !== sizeBefore) scopesChanged = true;
+      }
+    }
+  }
+  const scopedDependencies = dependencies.map((item) => (
+    item.ecosystem === 'python' && requirementFiles.has(item.sourceFile)
+      ? { ...item, projectScopes: [...(requirementScopes.get(item.sourceFile) ?? [])].sort() }
+      : item
+  ));
+  const all = [...candidatePaths].sort();
   for (const relPath of all) {
     if (attemptedPaths.has(relPath) || identityPaths.has(relPath)) continue;
     const identity = await snapshotManifestIdentity(rootReal, relPath, signal);
     if (identity) manifestIdentities.push(identity);
   }
   return {
-    dependencies: dedupeDependencies(dependencies), diagnostics, analyzedManifests,
+    dependencies: dedupeDependencies(scopedDependencies), diagnostics, analyzedManifests,
     manifestIdentities: manifestIdentities.sort((a, b) => a.relPath.localeCompare(b.relPath)),
     manifestCandidateRelPaths: all,
   };
