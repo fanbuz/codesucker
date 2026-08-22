@@ -33,6 +33,7 @@ export interface DependencyIdentity {
   source: ThirdPartyEvidenceSource;
   local: boolean;
   workspaceRole?: 'definition' | 'reference';
+  workspaceKey?: string;
 }
 
 export interface DependencyInventory {
@@ -398,10 +399,15 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
       const item = identity('rust', packageOverride ?? match[1], doc.relPath, 'manifest', /\bpath\s*=/.test(match[2]));
       if (item) {
         const workspaceReference = /\bworkspace\s*=\s*true\b/.test(match[2]);
+        const workspaceKey = normalizePackageName(match[1], 'rust');
         out.push({
           ...item,
-          ...(workspaceDefinition && item.local ? { workspaceRole: 'definition' as const } : {}),
-          ...(workspaceReference ? { workspaceRole: 'reference' as const } : {}),
+          ...(workspaceDefinition && item.local
+            ? { workspaceRole: 'definition' as const, workspaceKey }
+            : {}),
+          ...(workspaceReference
+            ? { workspaceRole: 'reference' as const, workspaceKey }
+            : {}),
         });
       }
     }
@@ -563,7 +569,8 @@ function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
       if (item.local || item.workspaceRole !== 'reference') return item;
       const referenceDir = path.posix.dirname(item.sourceFile);
       const relatedDefinition = workspaceDefinitions.some((definition) => {
-        if (definition.ecosystem !== item.ecosystem || definition.normalizedName !== item.normalizedName) return false;
+        if (definition.ecosystem !== item.ecosystem
+          || (definition.workspaceKey ?? definition.normalizedName) !== (item.workspaceKey ?? item.normalizedName)) return false;
         const workspaceDir = path.posix.dirname(definition.sourceFile);
         const rel = path.posix.relative(workspaceDir, referenceDir);
         return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel));
@@ -571,7 +578,7 @@ function dedupeDependencies(items: DependencyIdentity[]): DependencyIdentity[] {
       return relatedDefinition ? { ...item, local: true } : item;
     })
     .filter((item) => {
-      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.sourceFile}\0${item.source}\0${item.local}`;
+      const key = `${item.ecosystem}\0${item.normalizedName}\0${item.workspaceKey ?? ''}\0${item.sourceFile}\0${item.source}\0${item.local}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

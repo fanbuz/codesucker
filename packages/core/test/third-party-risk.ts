@@ -76,12 +76,14 @@ try {
   await fs.writeFile(path.join(root, 'rust-workspace/Cargo.toml'), `
     [workspace.dependencies]
     workspace-member-local = { path = "crates/workspace-member-local" }
+    workspace-alias = { package = "workspace-actual", path = "crates/workspace-actual" }
   `);
   await fs.writeFile(path.join(root, 'rust-workspace/member/Cargo.toml'), `
     [package]
     name = "workspace-member"
     [dependencies]
     workspace-member-local = { workspace = true }
+    workspace-alias = { workspace = true }
   `);
   await fs.mkdir(path.join(root, 'rust-external'), { recursive: true });
   await fs.writeFile(path.join(root, 'rust-external/Cargo.toml'), `
@@ -164,6 +166,7 @@ try {
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
     write('deps/workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/deps/workspace-member-local/lib.rs', 'pub fn owned() {}'),
+    write('rust-workspace/member/vendor/workspace-alias/lib.rs', 'pub fn owned() {}'),
     write('rust-external/deps/workspace-member-local/lib.rs', 'pub fn external() {}'),
     write('vendors/requests/api.py', 'def get(): pass'),
     write('vendor/httpx/client.py', 'def request(): pass'),
@@ -201,6 +204,14 @@ try {
   const second = await analyzeThirdPartyRisks(root, [...files].reverse());
   const addedDependencyFile = await write('vendor/left-pad/extra.js', 'module.exports = 2;');
   const changed = await analyzeThirdPartyRisks(root, [...files, addedDependencyFile]);
+  const changedLicenseFile = await write('vendor/left-pad/index.js', [
+    '// SPDX-License-Identifier: MIT',
+    '// SPDX-License-Identifier: GPL-3.0',
+    'module.exports = value => value;',
+  ].join('\n'));
+  const evidenceChanged = await analyzeThirdPartyRisks(root, files.map((file) => (
+    file.relPath === changedLicenseFile.relPath ? changedLicenseFile : file
+  )));
   globalThis.fetch = originalFetch;
 
   assert.equal(first.rulesVersion, THIRD_PARTY_RULES_VERSION);
@@ -212,6 +223,12 @@ try {
     && finding.affected.relPaths.includes('vendor/left-pad/extra.js'))?.id;
   assert.ok(leftPadId && changedLeftPadId && leftPadId !== changedLeftPadId,
     '受影响文件集合变化时 finding ID 必须失效，不能沿用旧的人工确认');
+  const licenseFindingId = first.findings.find((finding) => finding.kind === 'license-declaration'
+    && finding.affected.relPaths.includes('vendor/left-pad/index.js'))?.id;
+  const changedLicenseFindingId = evidenceChanged.findings.find((finding) => finding.kind === 'license-declaration'
+    && finding.affected.relPaths.includes('vendor/left-pad/index.js'))?.id;
+  assert.ok(licenseFindingId && changedLicenseFindingId && licenseFindingId !== changedLicenseFindingId,
+    '同一文件新增许可证证据时 finding ID 必须失效，不能沿用旧的人工确认');
   assert.ok(first.diagnostics.some((item) => item.code === 'manifest-parse-failed' && item.file === 'broken/pom.xml'));
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'build.gradle.kts'),
     'Gradle 同时含可识别与动态声明时必须报告部分分析');
@@ -236,6 +253,8 @@ try {
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('rust-workspace/deps/workspace-member-local/lib.rs'),
     '兄弟工程的同名外部依赖不能覆盖当前 Cargo workspace 的本地声明');
+  assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/workspace-alias/lib.rs'),
+    'Cargo workspace 重命名依赖必须按别名传播本地属性');
   assert.ok(!dependencyFiles.has('vendor/acme-cli/owned.py'), 'project.scripts 不能误当 Python 依赖');
   assert.ok(!dependencyFiles.has('vendor/local-tool/owned.py'), 'Poetry path 依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/owned-direct/owned.py'), 'PEP 508 file 直接引用不能默认判为第三方');

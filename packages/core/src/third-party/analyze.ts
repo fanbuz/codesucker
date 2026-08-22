@@ -89,13 +89,21 @@ function generatedByPath(relPath: string): { ruleId: string; detail: string } | 
   return undefined;
 }
 
+function evidenceIdentity(evidence: ThirdPartyEvidence): string {
+  return [
+    evidence.ruleId, evidence.source, evidence.location.file, evidence.location.line ?? 0,
+    evidence.detail, evidence.ecosystem ?? '', evidence.packageName ?? '',
+    evidence.licenseId ?? '', evidence.attributionSubject ?? '',
+  ].join('\0');
+}
+
 function addFinding(map: Map<string, FindingAccumulator>, value: Omit<FindingAccumulator, 'relPaths'>, relPath: string): void {
   const existing = map.get(value.key);
   if (existing) {
     existing.relPaths.add(relPath);
     for (const evidence of value.evidence) {
-      const evidenceKey = `${evidence.ruleId}\0${evidence.location.file}\0${evidence.location.line ?? 0}\0${evidence.packageName ?? ''}\0${evidence.licenseId ?? ''}\0${evidence.attributionSubject ?? ''}`;
-      if (!existing.evidence.some((item) => `${item.ruleId}\0${item.location.file}\0${item.location.line ?? 0}\0${item.packageName ?? ''}\0${item.licenseId ?? ''}\0${item.attributionSubject ?? ''}` === evidenceKey)) {
+      const evidenceKey = evidenceIdentity(evidence);
+      if (!existing.evidence.some((item) => evidenceIdentity(item) === evidenceKey)) {
         existing.evidence.push(evidence);
       }
     }
@@ -105,25 +113,22 @@ function addFinding(map: Map<string, FindingAccumulator>, value: Omit<FindingAcc
 }
 
 function findingId(item: FindingAccumulator): string {
-  const primary = item.evidence[0];
   const affectedRelPaths = [...item.relPaths].sort();
+  const evidence = [...item.evidence].map(evidenceIdentity).sort();
   return crypto.createHash('sha256').update([
     THIRD_PARTY_RULES_VERSION, item.ruleId, item.kind,
-    primary?.ecosystem ?? '', primary?.packageName ?? '',
-    primary?.licenseId ?? '', primary?.attributionSubject ?? '',
-    primary?.location.file ?? '', primary?.location.line ?? 0,
     item.commonRoot ?? '',
     affectedRelPaths.length, ...affectedRelPaths,
+    evidence.length, ...evidence,
   ].join('\0')).digest('hex').slice(0, 24);
 }
 
 function finalizeFinding(item: FindingAccumulator): ThirdPartyRiskFinding {
   const relPaths = [...item.relPaths].sort();
-  const evidence = [...item.evidence]
-    .sort((a, b) => `${a.location.file}:${a.location.line ?? 0}:${a.ruleId}`.localeCompare(`${b.location.file}:${b.location.line ?? 0}:${b.ruleId}`))
-    .slice(0, 50);
+  const allEvidence = [...item.evidence].sort((a, b) => evidenceIdentity(a).localeCompare(evidenceIdentity(b)));
+  const evidence = allEvidence.slice(0, 50);
   return {
-    id: findingId({ ...item, evidence }), kind: item.kind, confidence: item.confidence,
+    id: findingId({ ...item, evidence: allEvidence }), kind: item.kind, confidence: item.confidence,
     title: item.title, basis: item.basis, suggestion: item.suggestion,
     recommendation: item.recommendation, evidence,
     affected: { fileCount: relPaths.length, relPaths, ...(item.commonRoot ? { commonRoot: item.commonRoot } : {}) },
