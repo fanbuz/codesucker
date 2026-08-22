@@ -128,6 +128,9 @@ write('issues/malformed-gb18030.py', Buffer.concat([
 write('issues/malformed-shift-jis.py', Buffer.concat([
   Buffer.from('# -*- coding: shift_jis -*-\nvalue = "', 'ascii'), Buffer.from([0x82]), Buffer.from('"', 'ascii'),
 ]));
+write('issues/ambiguous-gbk.java', iconv.encode('class A { String s = "中文"; }', 'gbk'));
+write('issues/ambiguous-gb18030.java', iconv.encode('class A { String s = "𠮷"; }', 'gb18030'));
+write('issues/ambiguous-windows-874.java', Buffer.from('c0d2c9d2e4b7c2c0d2c9d2e4b7c2', 'hex'));
 write('issues/malformed-utf7.py', Buffer.from('# coding: utf-7\nvalue = 1\n+A', 'ascii'));
 write('issues/xml-utf16-ascii.xml', Buffer.from(
   '<?xml version="1.0" encoding="UTF-16LE"?><root>ascii bytes</root>', 'ascii',
@@ -252,6 +255,9 @@ expectReason('issues/malformed.ts', 'decode-error');
 expectReason('issues/malformed-gbk.py', 'decode-error');
 expectReason('issues/malformed-gb18030.py', 'decode-error');
 expectReason('issues/malformed-shift-jis.py', 'decode-error');
+expectReason('issues/ambiguous-gbk.java', 'decode-error');
+expectReason('issues/ambiguous-gb18030.java', 'decode-error');
+expectReason('issues/ambiguous-windows-874.java', 'decode-error');
 expectReason('issues/malformed-utf7.py', 'decode-error');
 expectReason('issues/xml-utf16-ascii.xml', 'decode-error');
 expectReason('issues/xml-utf16-bom-conflict.xml', 'decode-error');

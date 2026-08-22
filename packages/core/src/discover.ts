@@ -361,6 +361,20 @@ function normalizeDetectedEncoding(encoding: string): string {
   return normalized;
 }
 
+function isAmbiguousSingleByteGuess(buf: Buffer, encoding: string): boolean {
+  if (buf.includes(0)) return false;
+  const structuredEncodings = new Set([
+    'UTF-8', 'UTF-16LE', 'UTF-16BE', 'UTF-32', 'UTF-32LE', 'UTF-32BE',
+    'GBK', 'GB18030', 'SHIFT-JIS', 'BIG5', 'EUC-JP', 'EUC-KR',
+    'ISO-2022-CN', 'ISO-2022-JP', 'ISO-2022-KR',
+  ]);
+  if (structuredEncodings.has(encoding) || !iconv.encodingExists(encoding)) return false;
+  const gb18030 = iconv.decode(buf, 'GB18030');
+  return /\p{Script=Han}/u.test(gb18030)
+    && !gb18030.includes('\uFFFD')
+    && iconv.encode(gb18030, 'GB18030').equals(buf);
+}
+
 function assertXmlEncodingMatchesBytes(
   buf: Buffer, extension: string | undefined, byteEncoding: 'UTF-8' | 'UTF-16LE' | 'UTF-16BE', bomBytes: number,
 ): void {
@@ -425,7 +439,14 @@ function detectSourceEncoding(buf: Buffer, extension?: string): { encoding: stri
 
   const detected = chardet.detect(buf);
   if (!detected) throw new SourceDecodeError('unsupported-encoding', '无法识别文件编码');
-  return { encoding: normalizeDetectedEncoding(String(detected)), bomBytes: 0 };
+  const normalized = normalizeDetectedEncoding(String(detected));
+  if (isAmbiguousSingleByteGuess(buf, normalized)) {
+    throw new SourceDecodeError(
+      'decode-error',
+      `文件编码无法安全判定：${normalized} 与 GB18030 均可解释当前字节`,
+    );
+  }
+  return { encoding: normalized, bomBytes: 0 };
 }
 
 export function decodeSource(buf: Buffer, extension?: string): { text: string; encoding: string } {

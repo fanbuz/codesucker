@@ -33,6 +33,7 @@ try {
       'win-drive-owned': 'C:\\repo\\owned', 'win-unc-owned': '\\\\server\\share\\owned',
       'win-relative-owned': '..\\owned',
       'node-owned': '^1.0.0', 'node-nested-owned': '^1.0.0', 'node-external': '^1.0.0',
+      'portal-owned': 'portal:./vendor/portal-owned',
     },
   }));
   await fs.writeFile(path.join(root, 'package-lock.json'), JSON.stringify({
@@ -589,6 +590,7 @@ try {
     write('vendor/win-drive-owned/index.js', 'module.exports = true;'),
     write('vendor/win-unc-owned/index.js', 'module.exports = true;'),
     write('vendor/win-relative-owned/index.js', 'module.exports = true;'),
+    write('vendor/portal-owned/index.js', 'module.exports = true;'),
     write('vendor/pipenv-local-path/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-local-file/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-external/library.py', 'def external(): pass'),
@@ -796,6 +798,7 @@ try {
     assert.ok(dependencyFiles.has(relPath), `${relPath} 应由本地清单与目录映射为依赖源码`);
   }
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/portal-owned/index.js'), 'Yarn portal 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/node-owned/index.js'),
     '显式 ignored/vendor Node workspace 成员不能判为第三方');
   assert.ok(!dependencyFiles.has('vendor/node-owned/node-nested-owned/index.js'),

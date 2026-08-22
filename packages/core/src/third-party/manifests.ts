@@ -197,7 +197,7 @@ function identity(
 
 function localSpec(spec: unknown): boolean {
   return typeof spec === 'string'
-    && /^(?:workspace:|file:|link:|\.\.?(?:[\\/]|$)|[A-Za-z]:[\\/]|[\\/]{2}|\/)/i.test(spec.trim());
+    && /^(?:workspace:|file:|link:|portal:|\.\.?(?:[\\/]|$)|[A-Za-z]:[\\/]|[\\/]{2}|\/)/i.test(spec.trim());
 }
 
 function nodePackageNameFromLockPath(pkgPath: string): string {
