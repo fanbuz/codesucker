@@ -236,11 +236,22 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
   for (const match of doc.text.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
     const group = xmlValue(match[1], 'groupId');
     const artifact = xmlValue(match[1], 'artifactId');
-    if (!artifact) continue;
-    const item = identity('java', group ? `${group}:${artifact}` : artifact, doc.relPath, 'manifest');
+    if (!artifact || /\$\{[^}]+\}/.test(artifact)) continue;
+    const resolvedGroup = group && !/\$\{[^}]+\}/.test(group) ? group : undefined;
+    const item = identity('java', resolvedGroup ? `${resolvedGroup}:${artifact}` : artifact, doc.relPath, 'manifest');
     if (item) out.push(item);
   }
   return out;
+}
+
+function hasUnresolvedMavenCoordinates(doc: ManifestDocument): boolean {
+  if (doc.basename !== 'pom.xml') return false;
+  for (const match of doc.text.matchAll(/<dependency\b[^>]*>([\s\S]*?)<\/dependency>/gi)) {
+    const group = xmlValue(match[1], 'groupId');
+    const artifact = xmlValue(match[1], 'artifactId');
+    if (/\$\{[^}]+\}/.test(group ?? '') || /\$\{[^}]+\}/.test(artifact ?? '')) return true;
+  }
+  return false;
 }
 
 const GRADLE_DEPENDENCY_CONFIGURATION = '(?:api|implementation|compile|compileOnly|runtime|runtimeOnly|classpath|annotationProcessor|(?:kapt|ksp)[A-Za-z0-9_]*|[A-Za-z0-9_]+(?:Api|Implementation|Compile|CompileOnly|Runtime|RuntimeOnly|AnnotationProcessor))';
@@ -414,28 +425,34 @@ function parseCargo(doc: ManifestDocument): DependencyIdentity[] {
     const own = identity('rust', packageName, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
   }
-  for (const section of doc.text.matchAll(/\[([^\]]*dependencies)\]([\s\S]*?)(?=\r?\n\s*\[|$)/g)) {
-    const sectionName = section[1].trim();
-    if (!/^(?:workspace\.dependencies|(?:target\..+\.)?(?:dev-|build-)?dependencies)$/.test(sectionName)) continue;
-    const workspaceDefinition = sectionName === 'workspace.dependencies';
-    for (const line of section[2].split(/\r?\n/)) {
-      const match = /^\s*([\w.-]+)\s*=\s*(.+)$/.exec(line);
-      if (!match) continue;
-      const packageOverride = /\bpackage\s*=\s*['"]([^'"]+)['"]/.exec(match[2])?.[1];
-      const item = identity('rust', packageOverride ?? match[1], doc.relPath, 'manifest', /\bpath\s*=/.test(match[2]));
-      if (item) {
-        const workspaceReference = /\bworkspace\s*=\s*true\b/.test(match[2]);
-        const workspaceKey = normalizePackageName(match[1], 'rust');
-        out.push({
-          ...item,
-          ...(workspaceDefinition && item.local
-            ? { workspaceRole: 'definition' as const, workspaceKey }
-            : {}),
-          ...(workspaceReference
-            ? { workspaceRole: 'reference' as const, workspaceKey }
-            : {}),
-        });
-      }
+  const addDependency = (key: string, value: string, workspaceDefinition: boolean): void => {
+    const packageOverride = /\bpackage\s*=\s*['"]([^'"]+)['"]/.exec(value)?.[1];
+    const item = identity('rust', packageOverride ?? key, doc.relPath, 'manifest', /\bpath\s*=/.test(value));
+    if (!item) return;
+    const workspaceReference = /\bworkspace\s*=\s*true\b/.test(value);
+    const workspaceKey = normalizePackageName(key, 'rust');
+    out.push({
+      ...item,
+      ...(workspaceDefinition && item.local
+        ? { workspaceRole: 'definition' as const, workspaceKey }
+        : {}),
+      ...(workspaceReference
+        ? { workspaceRole: 'reference' as const, workspaceKey }
+        : {}),
+    });
+  };
+  for (const section of tomlSections(doc.text)) {
+    const match = /^(workspace\.dependencies|(?:target\..+\.)?(?:dev-|build-)?dependencies)(?:\.(.+))?$/.exec(section.name);
+    if (!match) continue;
+    const workspaceDefinition = match[1] === 'workspace.dependencies';
+    const tableDependency = match[2]?.trim().replace(/^(['"])(.*)\1$/, '$2');
+    if (tableDependency) {
+      addDependency(tableDependency, section.body, workspaceDefinition);
+      continue;
+    }
+    for (const line of section.body.split(/\r?\n/)) {
+      const assignment = /^\s*([\w.-]+)\s*=\s*(.+)$/.exec(line);
+      if (assignment) addDependency(assignment[1], assignment[2], workspaceDefinition);
     }
   }
   return out;
@@ -470,8 +487,37 @@ function quotedTomlValues(value: string): string[] {
 
 function tomlArrayAssignment(body: string, key: string): string[] {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = new RegExp(`^\\s*${escaped}\\s*=\\s*\\[([\\s\\S]*?)\\]`, 'm').exec(body);
-  return match ? quotedTomlValues(match[1]) : [];
+  const match = new RegExp(`^\\s*${escaped}\\s*=\\s*\\[`, 'm').exec(body);
+  if (!match) return [];
+  const start = (match.index ?? 0) + match[0].length;
+  let quote: "'" | '"' | "'''" | '\"\"\"' | undefined;
+  let escapedCharacter = false;
+  for (let index = start; index < body.length; index++) {
+    const char = body[index];
+    const triple = body.slice(index, index + 3);
+    if (quote === "'''" || quote === '\"\"\"') {
+      if (triple === quote) {
+        index += 2;
+        quote = undefined;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escapedCharacter) escapedCharacter = false;
+      else if (quote === '"' && char === '\\') escapedCharacter = true;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (triple === "'''" || triple === '\"\"\"') {
+      quote = triple;
+      index += 2;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (char === ']') {
+      return quotedTomlValues(body.slice(start, index));
+    }
+  }
+  return [];
 }
 
 function pythonDependency(
@@ -558,8 +604,8 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
       continue;
     }
     if (section.name === 'project.optional-dependencies' || section.name === 'dependency-groups') {
-      for (const match of section.body.matchAll(/^\s*[A-Za-z0-9._-]+\s*=\s*\[([\s\S]*?)\]/gm)) {
-        for (const spec of quotedTomlValues(match[1])) {
+      for (const match of section.body.matchAll(/^\s*([A-Za-z0-9._-]+)\s*=\s*\[/gm)) {
+        for (const spec of tomlArrayAssignment(section.body, match[1])) {
           const item = pythonDependency(pythonName(spec), doc, pythonLocalSpec(spec));
           if (item) out.push(item);
         }
@@ -666,7 +712,7 @@ export async function collectDependencyInventory(
           selected.push(moduleManifest);
         }
       }
-      if (hasUnsupportedGradleDeclarations(document)) {
+      if (hasUnsupportedGradleDeclarations(document) || hasUnresolvedMavenCoordinates(document)) {
         diagnostics.push(diagnostic(
           'dynamic-manifest-partial', document.relPath,
           '依赖清单包含动态声明，只完成了保守分析。',

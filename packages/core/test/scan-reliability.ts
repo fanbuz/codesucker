@@ -35,6 +35,15 @@ write('issues/empty.ts', Buffer.alloc(0));
 write('issues/binary.ts', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]));
 write('issues/unsupported.ts', Buffer.from([0x81]));
 write('issues/malformed.ts', Buffer.from([0xff, 0xfe, 0x61]));
+write('issues/malformed-gbk.py', Buffer.concat([
+  Buffer.from('# -*- coding: gbk -*-\nvalue = "', 'ascii'), Buffer.from([0x81, 0x30]), Buffer.from('"', 'ascii'),
+]));
+write('issues/malformed-gb18030.py', Buffer.concat([
+  Buffer.from('# -*- coding: gb18030 -*-\nvalue = "', 'ascii'), Buffer.from([0x81, 0x30, 0x81]), Buffer.from('"', 'ascii'),
+]));
+write('issues/malformed-shift-jis.py', Buffer.concat([
+  Buffer.from('# -*- coding: shift_jis -*-\nvalue = "', 'ascii'), Buffer.from([0x82]), Buffer.from('"', 'ascii'),
+]));
 write('issues/ignored.ts', 'const ignored = true;');
 write('.hidden-source.ts', 'const hiddenSource = true;');
 fs.writeFileSync(path.join(root, '.gitignore'), 'issues/ignored.ts\n', 'utf8');
@@ -87,6 +96,9 @@ expectReason('issues/empty.ts', 'empty-file');
 expectReason('issues/binary.ts', 'binary-file');
 expectReason('issues/unsupported.ts', 'unsupported-encoding');
 expectReason('issues/malformed.ts', 'decode-error');
+expectReason('issues/malformed-gbk.py', 'decode-error');
+expectReason('issues/malformed-gb18030.py', 'decode-error');
+expectReason('issues/malformed-shift-jis.py', 'decode-error');
 expectReason('issues/ignored.ts', 'gitignore');
 expectReason('size/plus-one.ts', 'file-too-large');
 assert.equal(issueByPath.get('size/plus-one.ts')?.sizeBytes, MAX_FILE_BYTES + 1);

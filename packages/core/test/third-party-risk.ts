@@ -53,6 +53,7 @@ try {
       <dependencies>
         <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId></dependency>
         <dependency><groupId>com.acme</groupId><artifactId>common</artifactId></dependency>
+        <dependency><groupId>\${dynamic.group}</groupId><artifactId>dynamic-lib</artifactId></dependency>
       </dependencies>
     </project>
   `);
@@ -83,6 +84,15 @@ try {
 
     [workspace.dependencies]
     workspace-local = { path = "crates/workspace-local" }
+
+    [dependencies.table-form]
+    version = "1"
+
+    [dependencies.local-table]
+    path = "crates/local-table"
+
+    [target.'cfg(unix)'.dev-dependencies.target-table]
+    version = "1"
   `);
   await fs.mkdir(path.join(root, 'rust-workspace/member'), { recursive: true });
   await fs.writeFile(path.join(root, 'rust-workspace/Cargo.toml'), `
@@ -144,7 +154,7 @@ try {
   await fs.writeFile(path.join(root, 'pyproject.toml'), `
     [project]
     name = "self-python"
-    dependencies = ["httpx>=0.27", "owned-direct @ file:../owned-direct"]
+    dependencies = ["httpx>=0.27", "extra-only[security]>=1", "owned-direct @ file:../owned-direct"]
 
     [project.optional-dependencies]
     local = ["optional-owned @ file:../optional-owned"]
@@ -173,16 +183,21 @@ try {
   const files = await Promise.all([
     write('vendor/left-pad/index.js', '// SPDX-License-Identifier: MIT\nmodule.exports = value => value;'),
     write('external/commons-lang3/StringUtils.java', 'class StringUtils {}'),
+    write('external/dynamic-lib/Dynamic.java', 'class Dynamic {}'),
     write('vendor/common/src/Common.java', 'class Common {}'),
     write('third_party/github.com/acme/tool/tool.go', 'package tool'),
     write('third_party/example.local/block/tool.go', 'package block'),
     write('deps/serde/lib.rs', 'pub fn serialize() {}'),
+    write('deps/table-form/lib.rs', 'pub fn table() {}'),
+    write('deps/local-table/lib.rs', 'pub fn owned() {}'),
+    write('deps/target-table/lib.rs', 'pub fn target() {}'),
     write('deps/workspace-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/deps/workspace-member-local/lib.rs', 'pub fn owned() {}'),
     write('rust-workspace/member/vendor/workspace-alias/lib.rs', 'pub fn owned() {}'),
     write('rust-external/deps/workspace-member-local/lib.rs', 'pub fn external() {}'),
     write('vendors/requests/api.py', 'def get(): pass'),
     write('vendor/httpx/client.py', 'def request(): pass'),
+    write('vendor/extra-only/security.py', 'def verify(): pass'),
     write('vendor/owned-direct/owned.py', 'def owned(): pass'),
     write('vendor/optional-owned/owned.py', 'def owned(): pass'),
     write('vendor/pipenv-local-path/owned.py', 'def owned(): pass'),
@@ -245,14 +260,16 @@ try {
   assert.ok(first.diagnostics.some((item) => item.code === 'manifest-parse-failed' && item.file === 'broken/pom.xml'));
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'build.gradle.kts'),
     'Gradle 同时含可识别与动态声明时必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial' && item.file === 'pom.xml'),
+    'Maven 坐标含未解析属性时必须报告部分分析');
 
   const dependencyFiles = new Set(first.findings
     .filter((finding) => finding.kind === 'dependency-source')
     .flatMap((finding) => finding.affected.relPaths));
   for (const relPath of [
-    'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java',
-    'third_party/github.com/acme/tool/tool.go', 'deps/serde/lib.rs', 'vendors/requests/api.py',
-    'vendor/httpx/client.py',
+    'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
+    'third_party/github.com/acme/tool/tool.go', 'deps/serde/lib.rs', 'deps/table-form/lib.rs',
+    'deps/target-table/lib.rs', 'vendors/requests/api.py', 'vendor/httpx/client.py', 'vendor/extra-only/security.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
     'third_party/bar/index.js', 'third_party/@scope/deep/index.js', 'third_party/@legacy/v1-nested/index.js',
@@ -265,6 +282,7 @@ try {
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('deps/local-table/lib.rs'), 'Cargo table-form path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('rust-workspace/deps/workspace-member-local/lib.rs'),
     '兄弟工程的同名外部依赖不能覆盖当前 Cargo workspace 的本地声明');
   assert.ok(!dependencyFiles.has('rust-workspace/member/vendor/workspace-alias/lib.rs'),
