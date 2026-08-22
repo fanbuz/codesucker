@@ -13,6 +13,40 @@ export async function discardExportStagingDirectory(stagingDir: string | null): 
 
 type ExportMutationPhase = 'backup' | 'publish' | 'restore';
 
+interface FileIdentity {
+  ctimeMs: number;
+  dev: number;
+  ino: number;
+  mtimeMs: number;
+  size: number;
+}
+
+function fileIdentity(stat: fs.Stats): FileIdentity {
+  return {
+    ctimeMs: stat.ctimeMs,
+    dev: stat.dev,
+    ino: stat.ino,
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+  };
+}
+
+function sameFileObject(stat: fs.Stats, expected: FileIdentity): boolean {
+  return stat.isFile() && !stat.isSymbolicLink()
+    && stat.dev === expected.dev
+    && stat.ino === expected.ino
+    && stat.mtimeMs === expected.mtimeMs
+    && stat.size === expected.size;
+}
+
+function sameFileSnapshot(stat: fs.Stats, expected: FileIdentity): boolean {
+  return sameFileObject(stat, expected) && stat.ctimeMs === expected.ctimeMs;
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
 export interface ExportCommitOptions {
   signal?: AbortSignal;
   assertCurrent?: () => void;
@@ -43,53 +77,79 @@ export async function commitStagedExportFiles(
     const name = path.basename(resolvedStagedPath);
     if (uniqueNames.has(name)) throw new Error('导出暂存文件名重复');
     uniqueNames.add(name);
-    const stat = await fs.promises.lstat(resolvedStagedPath);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('导出暂存产物不是普通文件');
+    const stagedStat = await fs.promises.lstat(resolvedStagedPath);
+    if (!stagedStat.isFile() || stagedStat.isSymbolicLink()) throw new Error('导出暂存产物不是普通文件');
     const finalPath = path.join(resolvedOutDir, name);
+    let finalIdentity: FileIdentity | undefined;
     try {
       const existing = await fs.promises.lstat(finalPath);
       if (!existing.isFile() || existing.isSymbolicLink()) throw new Error(`无法覆盖非普通文件：${name}`);
+      finalIdentity = fileIdentity(existing);
     } catch (error) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      if (!isMissing(error)) throw error;
     }
-    return { stagedPath: resolvedStagedPath, finalPath, name };
+    return {
+      stagedPath: resolvedStagedPath,
+      stagedIdentity: fileIdentity(stagedStat),
+      finalPath,
+      finalIdentity,
+      name,
+    };
   }));
 
   options.signal?.throwIfAborted();
   await options.beforeCommit?.();
   options.signal?.throwIfAborted();
   const backupDir = await fs.promises.mkdtemp(path.join(resolvedOutDir, '.codesucker-export-backup-'));
-  const backups: Array<{ finalPath: string; backupPath: string }> = [];
-  const published: string[] = [];
+  const backups: Array<{ finalPath: string; backupPath: string; identity: FileIdentity }> = [];
+  const published: Array<{ finalPath: string; identity: FileIdentity }> = [];
   const assertCanMutate = () => {
     options.signal?.throwIfAborted();
     options.assertCurrent?.();
   };
-  const mutate = async (
-    phase: ExportMutationPhase,
-    file: string,
-    operation: () => Promise<void>,
-  ) => {
+  const beforeMutation = async (phase: ExportMutationPhase, file: string) => {
     assertCanMutate();
     await options.beforeMutation?.(phase, file);
     assertCanMutate();
-    await operation();
-    await options.afterMutation?.(phase, file);
   };
   try {
     for (const entry of entries) {
+      await beforeMutation('backup', entry.finalPath);
+      let existing: fs.Stats | undefined;
       try {
-        await fs.promises.access(entry.finalPath, fs.constants.F_OK);
-      } catch {
-        continue;
+        existing = await fs.promises.lstat(entry.finalPath);
+      } catch (error) {
+        if (isMissing(error) && entry.finalIdentity === undefined) continue;
+        throw error;
+      }
+      if (!existing.isFile() || existing.isSymbolicLink()) {
+        throw new Error(`无法覆盖非普通文件：${entry.name}`);
+      }
+      if (!entry.finalIdentity || !sameFileSnapshot(existing, entry.finalIdentity)) {
+        throw new Error(`导出目标在提交期间发生变化：${entry.name}`);
       }
       const backupPath = path.join(backupDir, entry.name);
-      await mutate('backup', entry.finalPath, () => fs.promises.rename(entry.finalPath, backupPath));
-      backups.push({ finalPath: entry.finalPath, backupPath });
+      await fs.promises.rename(entry.finalPath, backupPath);
+      backups.push({ finalPath: entry.finalPath, backupPath, identity: entry.finalIdentity });
+      const backedUp = await fs.promises.lstat(backupPath);
+      if (!sameFileObject(backedUp, entry.finalIdentity)) {
+        throw new Error(`导出目标在备份期间发生变化：${entry.name}`);
+      }
+      await options.afterMutation?.('backup', entry.finalPath);
     }
     for (const entry of entries) {
-      await mutate('publish', entry.finalPath, () => fs.promises.rename(entry.stagedPath, entry.finalPath));
-      published.push(entry.finalPath);
+      await beforeMutation('publish', entry.finalPath);
+      const staged = await fs.promises.lstat(entry.stagedPath);
+      if (!sameFileSnapshot(staged, entry.stagedIdentity)) {
+        throw new Error(`导出暂存产物在提交期间发生变化：${entry.name}`);
+      }
+      await fs.promises.rename(entry.stagedPath, entry.finalPath);
+      published.push({ finalPath: entry.finalPath, identity: entry.stagedIdentity });
+      const final = await fs.promises.lstat(entry.finalPath);
+      if (!sameFileObject(final, entry.stagedIdentity)) {
+        throw new Error(`导出产物在发布期间发生变化：${entry.name}`);
+      }
+      await options.afterMutation?.('publish', entry.finalPath);
     }
     assertCanMutate();
     await fs.promises.rm(backupDir, { recursive: true, force: true }).catch(() => undefined);
@@ -97,17 +157,38 @@ export async function commitStagedExportFiles(
     return entries.map((entry) => entry.finalPath);
   } catch (error) {
     const unrecovered = new Map<string, string>();
-    for (const finalPath of published.reverse()) {
+    for (const publishedFile of published.reverse()) {
       try {
-        await fs.promises.unlink(finalPath);
+        const current = await fs.promises.lstat(publishedFile.finalPath);
+        if (!sameFileObject(current, publishedFile.identity)) {
+          throw new Error('发布产物已被其他文件替换，未自动删除');
+        }
+        await fs.promises.unlink(publishedFile.finalPath);
       } catch (rollbackError) {
-        unrecovered.set(finalPath, rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
+        if (!isMissing(rollbackError)) {
+          unrecovered.set(
+            publishedFile.finalPath,
+            rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+          );
+        }
       }
     }
     for (const backup of backups.reverse()) {
       try {
         await options.beforeMutation?.('restore', backup.finalPath);
+        const backedUp = await fs.promises.lstat(backup.backupPath);
+        if (!sameFileObject(backedUp, backup.identity)) {
+          throw new Error('旧产物备份已发生变化');
+        }
+        try {
+          await fs.promises.lstat(backup.finalPath);
+          throw new Error('目标路径已被其他文件占用');
+        } catch (targetError) {
+          if (!isMissing(targetError)) throw targetError;
+        }
         await fs.promises.rename(backup.backupPath, backup.finalPath);
+        const restored = await fs.promises.lstat(backup.finalPath);
+        if (!sameFileObject(restored, backup.identity)) throw new Error('旧产物恢复后身份不一致');
         await options.afterMutation?.('restore', backup.finalPath);
         unrecovered.delete(backup.finalPath);
       } catch (rollbackError) {

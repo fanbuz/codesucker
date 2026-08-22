@@ -107,6 +107,28 @@ async function main() {
   assertOldFiles();
   await discardExportStagingDirectory(staleEvidence.stage);
 
+  const directoryRaceStage = await createExportStagingDirectory(outDir);
+  const directoryRaceName = '目录竞态.txt';
+  const directoryRaceStaged = path.join(directoryRaceStage, directoryRaceName);
+  const directoryRaceFinal = path.join(outDir, directoryRaceName);
+  fs.writeFileSync(directoryRaceStaged, 'new:directory-race', 'utf8');
+  await assert.rejects(
+    commitStagedExportFiles(directoryRaceStage, outDir, [directoryRaceStaged], {
+      beforeCommit: async () => {
+        await Promise.resolve();
+        fs.mkdirSync(directoryRaceFinal);
+        fs.writeFileSync(path.join(directoryRaceFinal, 'keep.txt'), 'must survive', 'utf8');
+      },
+    }),
+    /无法覆盖非普通文件/,
+  );
+  assert.equal(fs.readFileSync(path.join(directoryRaceFinal, 'keep.txt'), 'utf8'), 'must survive',
+    '证据复核期间出现的同名目录及其内容不能被备份后删除');
+  assert.equal(exportWorkDirectories().some((name) => name.includes('backup')), false,
+    '拒绝竞态目录后不能遗留空备份目录');
+  await fs.promises.rm(directoryRaceFinal, { recursive: true });
+  await discardExportStagingDirectory(directoryRaceStage);
+
   const committedStage = await createStage();
   const committed = await commitStagedExportFiles(committedStage.stage, outDir, committedStage.files);
   assert.deepEqual(committed.map((item) => path.basename(item)), names);

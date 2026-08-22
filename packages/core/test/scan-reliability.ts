@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import iconv from 'iconv-lite';
 import {
-  DEFAULT_EXTENSIONS, MAX_FILE_BYTES, defaultCleanOptions, discoverAsync, discoverDetailed,
+  DEFAULT_EXTENSIONS, MAX_FILE_BYTES, decodeSource, defaultCleanOptions, discoverAsync, discoverDetailed,
   processFiles, renderTxt, scanFileCandidate, type FileCandidate, type ProjectConfig, type ScanIssue,
 } from '../src/index.ts';
 
@@ -66,6 +66,11 @@ write('enc/declared-html-window.html', Buffer.concat([
   Buffer.from(`<!doctype html><html><head><title>${'x'.repeat(560)}</title><meta charset="windows-1252"></head><body>`, 'ascii'),
   Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
 ]));
+const xUserDefinedHtml = Buffer.concat([
+  Buffer.from('<!doctype html><html><head><meta charset="x-user-defined"></head><body>', 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('</body></html>', 'ascii'),
+]);
+write('enc/declared-html-x-user-defined.html', xUserDefinedHtml);
 write('enc/utf8-html-comment-cross-window.html', `<!doctype html><html><head><!-- <meta charset="windows-1252">${'x'.repeat(1024)} --></head><body>é</body></html>`);
 write('enc/utf8-meta-string.ts', 'const sample = "<meta charset=gbk>";\nconst 名称 = "仍是 UTF-8";');
 write('enc/utf8-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="charset=windows-1252"><meta charset="utf-8"></head><body>é</body></html>');
@@ -212,6 +217,10 @@ assert.equal(byPath.get('enc/declared-html.html')?.encoding, 'WINDOWS-1252', 'do
 assert.equal(byPath.get('enc/declared-html-iso-8859-1.html')?.encoding, 'WINDOWS-1252',
   'HTML legacy ISO-8859-1 标签必须按 WHATWG 映射为 Windows-1252');
 assert.equal(byPath.get('enc/declared-html-window.html')?.encoding, 'WINDOWS-1252', 'HTML 前 1024 字节内的 meta 编码声明必须生效');
+assert.deepEqual(decodeSource(xUserDefinedHtml, '.html'), {
+  encoding: 'WINDOWS-1252',
+  text: '<!doctype html><html><head><meta charset="x-user-defined"></head><body>Ã©</body></html>',
+}, 'HTML x-user-defined 必须在创建 TextDecoder 前映射为 Windows-1252');
 assert.equal(byPath.get('enc/utf8-html-comment-cross-window.html')?.encoding, 'UTF-8', '跨越 1024 字节探测窗口的 HTML 注释不能让伪 meta 声明生效');
 assert.equal(byPath.get('enc/utf8-meta-string.ts')?.encoding, 'UTF-8', '普通字符串中的 meta 标签不能伪装成编码声明');
 assert.equal(byPath.get('enc/utf8-meta-attribute.html')?.encoding, 'UTF-8', '普通 meta 属性值中的 charset 不能抢在真实 charset 属性前');

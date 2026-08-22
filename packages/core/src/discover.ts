@@ -198,10 +198,10 @@ function htmlMetaEncoding(tag: HtmlOpeningTag): string | null {
 function normalizeWebDeclaredEncoding(encoding: string | null): string | null {
   const label = encoding?.trim().toLocaleLowerCase();
   if (!label) return null;
+  if (label === 'x-user-defined') return 'WINDOWS-1252';
   try {
     const canonical = new TextDecoder(label).encoding.toLocaleLowerCase();
     if (canonical === 'utf-16le' || canonical === 'utf-16be') return 'UTF-8';
-    if (canonical === 'x-user-defined') return 'WINDOWS-1252';
     return canonical;
   } catch {
     return null;
