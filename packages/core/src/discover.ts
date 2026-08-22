@@ -267,7 +267,8 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
     if (secondAllowed) return magic(lines[1]);
   }
   if (ext === 'xml') {
-    return /^\s*<\?xml\b[^>]*\bencoding\s*=\s*["']([A-Za-z0-9._-]+)["']/i.exec(header)?.[1] ?? null;
+    const declaration = /^<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(?:"1\.[0-9]+"|'1\.[0-9]+')[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(?:"([A-Za-z][A-Za-z0-9._-]*)"|'([A-Za-z][A-Za-z0-9._-]*)')(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(?:"(?:yes|no)"|'(?:yes|no)'))?[ \t\r\n]*\?>/i.exec(header);
+    return declaration?.[1] ?? declaration?.[2] ?? null;
   }
   if (ext === 'css' || ext === 'scss') {
     const encoding = /^@charset "([A-Za-z0-9._-]+)";/.exec(header)?.[1];

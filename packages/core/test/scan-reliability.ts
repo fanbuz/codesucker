@@ -49,6 +49,12 @@ write('enc/utf8-meta-attribute.html', '<!doctype html><html><head><meta name="de
 write('enc/utf8-nested-meta-attribute.html', '<!doctype html><html><head><meta name="description" content="<meta charset=windows-1252>"><meta charset="utf-8"></head><body>é</body></html>');
 write('enc/utf8-magic-comment.js', '// This tool supports charset=windows-1252 and coding=utf-16.\nconst value = "é";');
 write('enc/utf8-late-python-cookie.py', 'value = "é"\n# coding: windows-1252');
+write('enc/declared-xml.xml', Buffer.concat([
+  Buffer.from('<?xml version="1.0" encoding="windows-1252"?><root>', 'ascii'),
+  Buffer.from([0xc3, 0xa9]), Buffer.from('</root>', 'ascii'),
+]));
+write('enc/utf8-invalid-xml-declaration.xml', ' \n<?xml version="1.0" encoding="windows-1252"?><root>é</root>');
+write('enc/utf8-xml-stylesheet.xml', '<?xml-stylesheet encoding="windows-1252"?><root>é</root>');
 write('enc/declared-css.css', Buffer.concat([
   Buffer.from('@charset "windows-1252";\n.sample { content: "', 'ascii'), Buffer.from([0xc3, 0xa9]), Buffer.from('"; }', 'ascii'),
 ]));
@@ -129,6 +135,9 @@ assert.equal(byPath.get('enc/utf8-meta-attribute.html')?.encoding, 'UTF-8', '普
 assert.equal(byPath.get('enc/utf8-nested-meta-attribute.html')?.encoding, 'UTF-8', '属性值中的伪 meta 标签不能抢在真实 charset 属性前');
 assert.equal(byPath.get('enc/utf8-magic-comment.js')?.encoding, 'UTF-8', '不支持 magic comment 的语言不能把普通编码说明当作声明');
 assert.equal(byPath.get('enc/utf8-late-python-cookie.py')?.encoding, 'UTF-8', '首行已有代码时第二行 Python cookie 不能作为声明');
+assert.equal(byPath.get('enc/declared-xml.xml')?.encoding, 'WINDOWS-1252', '位于字节零的 XML 编码声明必须生效');
+assert.equal(byPath.get('enc/utf8-invalid-xml-declaration.xml')?.encoding, 'UTF-8', '前置空白后的 XML 声明无效，不能改变 UTF-8 解码');
+assert.equal(byPath.get('enc/utf8-xml-stylesheet.xml')?.encoding, 'UTF-8', 'xml-stylesheet 处理指令不能伪装成 XML 编码声明');
 assert.equal(byPath.get('enc/declared-css.css')?.encoding, 'WINDOWS-1252', '位于字节零的 CSS @charset 必须生效');
 assert.equal(byPath.get('enc/utf8-invalid-css-charset.css')?.encoding, 'UTF-8', '前置空白后的 CSS @charset 无效，不能改变 UTF-8 解码');
 assert.equal(byPath.get('enc/utf8-invalid-css-syntax.scss')?.encoding, 'UTF-8', '非精确 CSS @charset 字节序列不能改变 UTF-8 解码');
@@ -201,6 +210,12 @@ const gb18030 = processFiles([byPath.get('enc/gb18030.py')!], config);
 assert.match(gb18030.cleaned[0].lines.join('\n'), /𠮷/, 'GB18030 四字节字符不能按 GBK 解码损坏');
 const latin1 = processFiles([byPath.get('enc/declared-latin1.py')!], config);
 assert.match(latin1.cleaned[0].lines.join('\n'), /Ã©/, '显式 latin-1 源码必须按声明保留原始字符语义');
+const declaredXml = processFiles([byPath.get('enc/declared-xml.xml')!], config);
+assert.match(declaredXml.cleaned[0].lines.join('\n'), /Ã©/, '有效 XML 编码声明必须优先于 UTF-8 字节有效性');
+const invalidXmlDeclaration = processFiles([byPath.get('enc/utf8-invalid-xml-declaration.xml')!], config);
+assert.match(invalidXmlDeclaration.cleaned[0].lines.join('\n'), /é/, '无效 XML 声明不能改变 UTF-8 字符语义');
+const xmlStylesheet = processFiles([byPath.get('enc/utf8-xml-stylesheet.xml')!], config);
+assert.match(xmlStylesheet.cleaned[0].lines.join('\n'), /é/, 'xml-stylesheet 处理指令不能改变 UTF-8 字符语义');
 const declaredHtml = processFiles([byPath.get('enc/declared-html.html')!], config);
 assert.match(declaredHtml.cleaned[0].lines.join('\n'), /Ã©/, 'HTML meta 声明必须优先于 UTF-8 字节有效性');
 const declaredHtmlMetadata = processFiles([byPath.get('enc/declared-html-metadata.html')!], config);
