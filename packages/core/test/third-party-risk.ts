@@ -80,6 +80,14 @@ try {
   await fs.writeFile(path.join(root, 'go.mod'), `
     module example.local/self
     require github.com/acme/tool v1.2.3
+    require example v1.0.0
+    require (
+      blockdep v1.1.0
+    )
+    retract v1.0.0
+    exclude (
+      other v1.2.3
+    )
     require example.local/internal v0.0.0
     require example.local/block v0.0.0
     replace example.local/internal => ./internal
@@ -251,6 +259,10 @@ try {
     write('external/old-lib/Old.java', 'class Old {}'),
     write('vendor/common/src/Common.java', 'class Common {}'),
     write('third_party/github.com/acme/tool/tool.go', 'package tool'),
+    write('vendor/example/example.go', 'package example'),
+    write('vendor/blockdep/blockdep.go', 'package blockdep'),
+    write('vendor/retract/retract.go', 'package retract'),
+    write('vendor/other/other.go', 'package other'),
     write('third_party/example.local/block/tool.go', 'package block'),
     write('go-workspace/app/vendor/work-owned/owned.go', 'package owned'),
     write('go-workspace/app/vendor/work-external/external.go', 'package external'),
@@ -344,7 +356,8 @@ try {
     .flatMap((finding) => finding.affected.relPaths));
   for (const relPath of [
     'vendor/left-pad/index.js', 'external/commons-lang3/StringUtils.java', 'external/dynamic-lib/Dynamic.java',
-    'third_party/github.com/acme/tool/tool.go', 'go-workspace/app/vendor/work-external/external.go',
+    'third_party/github.com/acme/tool/tool.go', 'vendor/example/example.go', 'vendor/blockdep/blockdep.go',
+    'go-workspace/app/vendor/work-external/external.go',
     'go-outsider/vendor/work-owned/external.go',
     'deps/serde/lib.rs', 'deps/table-form/lib.rs',
     'deps/lock-external/lib.rs', 'vendor/lock-collision/lib.rs', 'vendor/sparse-dep/lib.rs',
@@ -361,6 +374,8 @@ try {
   assert.ok(!dependencyFiles.has('vendor/local/src.ts'), 'workspace/local/path 依赖不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('vendor/common/src/Common.java'), 'Maven reactor 本地模块不能默认判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('third_party/example.local/block/tool.go'), 'Go replace 块中的本地模块不能判为第三方依赖源码');
+  assert.ok(!dependencyFiles.has('vendor/retract/retract.go'), 'Go retract 指令不能被误当作单段依赖');
+  assert.ok(!dependencyFiles.has('vendor/other/other.go'), 'Go exclude 块条目不能被误当作 require 依赖');
   assert.ok(!dependencyFiles.has('go-workspace/app/vendor/work-owned/owned.go'), 'go.work 本地 replace 必须传播到 use 成员的 go.mod');
   assert.ok(!dependencyFiles.has('deps/workspace-local/lib.rs'), 'Cargo workspace path 依赖不能判为第三方依赖源码');
   assert.ok(!dependencyFiles.has('deps/local-table/lib.rs'), 'Cargo table-form path 依赖不能判为第三方依赖源码');

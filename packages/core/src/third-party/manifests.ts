@@ -442,11 +442,21 @@ function parseGo(doc: ManifestDocument): DependencyIdentity[] {
       ? { ...item, workspaceRole: 'reference', workspaceKey: item.normalizedName }
       : item
   );
-  for (const match of doc.text.matchAll(/^\s*([\w.~-]+\/[\w./~-]+)\s+v[^\s]+(?:\s+\/\/.*)?$/gm)) {
-    const item = identity('go', match[1], doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', replacedLocal.has(match[1]));
-    if (item) out.push(withWorkspaceReference(item));
-  }
-  for (const match of doc.text.matchAll(/^\s*require\s+([\w.~-]+\/[\w./~-]+)\s+v[^\s]+(?:\s+\/\/.*)?$/gm)) {
+  let requireBlock = false;
+  for (const rawLine of doc.text.split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+\/\/.*$/, '').trim();
+    if (/^require\s*\($/.test(line)) {
+      requireBlock = true;
+      continue;
+    }
+    if (requireBlock && /^\)$/.test(line)) {
+      requireBlock = false;
+      continue;
+    }
+    const expression = requireBlock ? line : line.replace(/^require\s+/, '');
+    if (!requireBlock && expression === line) continue;
+    const match = /^([A-Za-z0-9][A-Za-z0-9._~-]*(?:\/[A-Za-z0-9._~-]+)*)\s+v[^\s]+$/.exec(expression);
+    if (!match) continue;
     const item = identity('go', match[1], doc.relPath, 'manifest', replacedLocal.has(match[1]));
     if (item) out.push(withWorkspaceReference(item));
   }
