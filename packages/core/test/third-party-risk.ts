@@ -192,16 +192,16 @@ try {
   `);
   await fs.mkdir(path.join(root, 'invalid-go'), { recursive: true });
   await fs.writeFile(path.join(root, 'invalid-go/go.mod'), `
-    module example.local/invalid-fixture
+    module "example.local/invalid\\q"
     require "example.local/invalid\\q" v1.0.0
   `);
   await fs.mkdir(path.join(root, 'vendor/go-owned'), { recursive: true });
   await fs.writeFile(path.join(root, 'vendor/go-owned/go.mod'), `
-    module example.local/go-owned
+    module "example.local/go\\u002downed" // Deprecated: use the workspace copy
   `);
   await fs.mkdir(path.join(root, 'vendor/go owned'), { recursive: true });
   await fs.writeFile(path.join(root, 'vendor/go owned/go.mod'), `
-    module example.local/go-space-owned
+    module \`example.local/go-space-owned\`
   `);
   await fs.mkdir(path.join(root, 'vendor/go-escaped'), { recursive: true });
   await fs.writeFile(path.join(root, 'vendor/go-escaped/go.mod'), `
@@ -320,7 +320,16 @@ try {
   `);
   await fs.writeFile(path.join(root, 'requirements.txt'), [
     'requests==2.32.0',
-    '-e ./local-python',
+    '-e ./local-python#egg=local-python',
+    '-e git+https://example.invalid/owned.git#egg=vcs-owned',
+    '--editable hg+https://example.invalid/owned-two#subdirectory=src&egg=vcs%2Downed%2Dtwo',
+    '--editable=svn+https://example.invalid/owned-three#egg=vcs_owned_three',
+    '-e bzr+https://example.invalid/owned-four#EGG=VCS-Owned-Four',
+    '--editable git+file:///workspace/local-vcs#egg=local-vcs',
+    'direct-vcs @ git+https://example.invalid/direct-vcs',
+    'direct-local @ file:../direct-local',
+    'direct-local-vcs @ hg+file:///workspace/direct-local-vcs',
+    '-e git+https://example.invalid/missing-egg',
     '-r requirements/base.txt',
   ].join('\n'));
   await fs.mkdir(path.join(root, 'requirements/deeper'), { recursive: true });
@@ -336,6 +345,11 @@ try {
   await fs.mkdir(path.join(root, 'services/app'), { recursive: true });
   await fs.writeFile(path.join(root, 'services/app/requirements.txt'), '-r ../shared/base.in\n');
   await fs.writeFile(path.join(root, 'services/shared/base.in'), 'service-only==3.0.0\n');
+  await fs.mkdir(path.join(root, 'local-editable'), { recursive: true });
+  await fs.writeFile(path.join(root, 'local-editable/requirements.txt'), [
+    '-e ./local-python',
+    '--editable git+file:///workspace/local-vcs',
+  ].join('\n'));
   await fs.mkdir(path.join(root, 'invalid-requirements'), { recursive: true });
   await fs.writeFile(path.join(root, 'invalid-requirements/requirements.txt'), [
     '-r',
@@ -506,6 +520,16 @@ try {
     write('services/app/vendor/service-only/api.py', 'def service(): pass'),
     write('services/other/vendor/service-only/api.py', 'def sibling(): pass'),
     write('vendor/httpx/client.py', 'def request(): pass'),
+    write('vendor/vcs-owned/api.py', 'def external(): pass'),
+    write('vendor/vcs-owned-two/api.py', 'def external(): pass'),
+    write('vendor/vcs_owned_three/api.py', 'def external(): pass'),
+    write('vendor/vcs-owned-four/api.py', 'def external(): pass'),
+    write('vendor/direct-vcs/api.py', 'def external(): pass'),
+    write('vendor/missing-egg/api.py', 'def unknown(): pass'),
+    write('vendor/local-python/owned.py', 'def owned(): pass'),
+    write('vendor/local-vcs/owned.py', 'def owned(): pass'),
+    write('vendor/direct-local/owned.py', 'def owned(): pass'),
+    write('vendor/direct-local-vcs/owned.py', 'def owned(): pass'),
     write('vendor/extra-only/security.py', 'def verify(): pass'),
     write('vendor/after-comment/client.py', 'def request(): pass'),
     write('vendor/fake-only/fake.py', 'def fake(): pass'),
@@ -633,6 +657,11 @@ try {
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'invalid-go/go.mod'), 'go.mod 非法字符串转义必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'requirements.txt'), '无 egg 名称的 editable VCS 依赖必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
+    && item.file === 'local-editable/requirements.txt'),
+  '无 egg 名称的本地 editable 目录与 git+file 依赖必须报告部分分析');
+  assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'dynamic-python/pyproject.toml'), 'PEP 621 动态依赖字段必须报告部分分析');
   assert.ok(first.diagnostics.some((item) => item.code === 'dynamic-manifest-partial'
     && item.file === 'quoted-dynamic-python/pyproject.toml'), 'PEP 621 引号键 dynamic 必须报告部分分析');
@@ -663,6 +692,8 @@ try {
     'vendor/nested-requirement/api.py', 'vendor/deep-requirement/api.py',
     'services/app/vendor/service-only/api.py',
     'vendor/extra-only/security.py', 'vendor/after-comment/client.py',
+    'vendor/vcs-owned/api.py', 'vendor/vcs-owned-two/api.py', 'vendor/vcs_owned_three/api.py',
+    'vendor/vcs-owned-four/api.py', 'vendor/direct-vcs/api.py',
     'vendor/quoted-extra/api.py', 'vendor/quoted-group/api.py',
     'vendor/pipenv-external/library.py',
     'vendor/poetry-external/library.py', 'vendor/uv-external/library.py',
@@ -735,6 +766,13 @@ try {
   assert.ok(!dependencyFiles.has('vendor/local-tool/owned.py'), 'Poetry path 依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/owned-direct/owned.py'), 'PEP 508 file 直接引用不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/optional-owned/owned.py'), 'PEP 508 optional 本地引用不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/local-python/owned.py'), 'editable 本地目录不能判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/local-vcs/owned.py'), 'editable git+file 依赖不能判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/direct-local/owned.py'), 'requirements 中 PEP 508 file 引用不能判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/direct-local-vcs/owned.py'),
+    'requirements 中 PEP 508 VCS file 引用不能判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/missing-egg/api.py'),
+    '无 egg 名称的 editable VCS 依赖只能给出部分分析与目录提示，不能伪造高置信包名');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-path/owned.py'), 'Pipfile.lock path 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-file/owned.py'), 'Pipfile.lock file 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/poetry-local-directory/owned.py'), 'Poetry package.source 目录依赖不能默认判为第三方');

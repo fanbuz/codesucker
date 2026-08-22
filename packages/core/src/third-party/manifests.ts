@@ -691,7 +691,8 @@ function goWorkspaceMemberManifests(doc: ManifestDocument): string[] {
 
 function parseGo(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
-  const module = /^\s*module\s+([^\s]+)\s*$/m.exec(doc.text)?.[1];
+  const module = doc.text.split(/\r?\n/).map((rawLine) => goDirectiveTokens(rawLine))
+    .find((tokens) => tokens?.[0] === 'module' && tokens.length === 2)?.[1];
   if (module) {
     const own = identity('go', module, doc.relPath, 'package-metadata', true);
     if (own) out.push(own);
@@ -918,12 +919,12 @@ function pythonName(spec: string): string | undefined {
   const raw = spec.trim();
   if (!raw || /^[-#]/.test(raw)) return undefined;
   const trimmed = raw.replace(/^\*\s*/, '');
-  if (/^(?:\.\.?\/|\/|file:|git\+)/i.test(trimmed)) return undefined;
+  if (/^(?:\.\.?\/|\/|[A-Za-z][A-Za-z0-9+.-]*:)/.test(trimmed)) return undefined;
   return /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(trimmed)?.[1];
 }
 
 function pythonLocalSpec(spec: string): boolean {
-  return /@\s*(?:(?:git\+)?file:|\.\.?\/|\/)/i.test(spec);
+  return /@\s*(?:(?:(?:git|hg|svn|bzr)\+)?file:|\.\.?\/|\/)/i.test(spec);
 }
 
 interface TomlSection {
@@ -1093,6 +1094,55 @@ function pythonDependency(
   return name ? identity('python', name, doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', local) : null;
 }
 
+interface PythonRequirementLine {
+  incomplete: boolean;
+  local: boolean;
+  name?: string;
+}
+
+function pythonEggName(spec: string): string | undefined {
+  const encoded = /(?:#|&)egg=([^&\s]+)/i.exec(spec)?.[1];
+  if (!encoded) return undefined;
+  try {
+    return pythonName(decodeURIComponent(encoded));
+  } catch {
+    return undefined;
+  }
+}
+
+function unquoteRequirementValue(value: string): string {
+  const trimmed = value.trim();
+  const quoted = /^(['"])([\s\S]*?)\1(?:\s+#.*)?$/.exec(trimmed);
+  return quoted?.[2] ?? trimmed;
+}
+
+function parsePythonRequirementLine(rawLine: string): PythonRequirementLine {
+  const trimmed = rawLine.trim();
+  if (!trimmed || trimmed.startsWith('#')) return { incomplete: false, local: false };
+  const editablePrefix = /^(?:-e|--editable)(?:\s|=|$)/.test(trimmed);
+  const value = editablePrefix
+    ? trimmed.replace(/^(?:-e|--editable)(?:\s+|=)?/, '')
+    : trimmed;
+  const spec = unquoteRequirementValue(value);
+  if (editablePrefix && !spec) return { incomplete: true, local: false };
+  const directName = pythonName(spec);
+  if (directName) {
+    return { incomplete: false, local: pythonLocalSpec(spec), name: directName };
+  }
+  const target = spec.split('#', 1)[0].trim();
+  const local = localSpec(target) || /^(?:git|hg|svn|bzr)\+file:/i.test(target);
+  const url = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target);
+  const name = pythonEggName(spec);
+  if (name && (local || url)) return { incomplete: false, local, name };
+  if (editablePrefix || url) return { incomplete: true, local };
+  return { incomplete: false, local: false };
+}
+
+function hasIncompletePythonRequirements(doc: ManifestDocument): boolean {
+  return doc.requirementFile
+    && doc.text.split(/\r?\n/).some((line) => parsePythonRequirementLine(line).incomplete);
+}
+
 function localPathValue(value: unknown): boolean {
   if (typeof value !== 'string' || value.trim().length === 0) return false;
   const normalized = value.trim();
@@ -1115,9 +1165,8 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
   if (doc.requirementFile) {
     for (const line of doc.text.split(/\r?\n/)) {
-      const name = pythonName(line);
-      if (!name) continue;
-      const item = identity('python', name, doc.relPath, 'manifest', pythonLocalSpec(line));
+      const requirement = parsePythonRequirementLine(line);
+      const item = pythonDependency(requirement.name, doc, requirement.local);
       if (item) out.push({ ...item, projectScopes: doc.requirementScopes });
     }
     return out;
@@ -1380,6 +1429,7 @@ export async function collectDependencyInventory(
       if (hasUnsupportedGradleDeclarations(document)
         || hasUnresolvedMavenCoordinates(document)
         || hasInvalidGoDirectives(document)
+        || hasIncompletePythonRequirements(document)
         || hasDynamicPep621Dependencies(document)) {
         diagnostics.push(diagnostic(
           'dynamic-manifest-partial', document.relPath,
