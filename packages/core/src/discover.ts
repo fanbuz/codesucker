@@ -195,21 +195,60 @@ function htmlMetaEncoding(tag: HtmlOpeningTag): string | null {
   return /(?:^|;)\s*charset\s*=\s*([A-Za-z0-9._-]+)/i.exec(attributes.get('content') ?? '')?.[1] ?? null;
 }
 
-function blankMarkup(value: string): string {
-  return value.replace(/[^\r\n]/g, ' ');
-}
-
-function blankHtmlRawText(text: string): string {
+function blankHtmlEncodingNoise(text: string): string {
   const characters = text.split('');
-  let rawTextUntil = 0;
-  for (const tag of htmlOpeningTags(text).filter((item) => ['script', 'style', 'title'].includes(item.name))) {
-    if (tag.index < rawTextUntil) continue;
-    const closing = new RegExp(`<\\/${tag.name}\\s*>`, 'ig');
-    closing.lastIndex = tag.end;
+  const blank = (start: number, end: number) => {
+    for (let index = start; index < end; index++) {
+      if (characters[index] !== '\r' && characters[index] !== '\n') characters[index] = ' ';
+    }
+  };
+  let cursor = 0;
+  while (cursor < text.length) {
+    if (text.startsWith('<!--', cursor)) {
+      const close = text.indexOf('-->', cursor + 4);
+      const end = close >= 0 ? close + 3 : text.length;
+      blank(cursor, end);
+      cursor = end;
+      continue;
+    }
+    if (text[cursor] !== '<') {
+      cursor++;
+      continue;
+    }
+    const opening = /^<([A-Za-z][A-Za-z0-9:-]*)\b/.exec(text.slice(cursor));
+    if (!opening && !/^<(?:!|\/|\?)/.test(text.slice(cursor))) {
+      cursor++;
+      continue;
+    }
+    let quote: "'" | '"' | undefined;
+    let tagEnd = -1;
+    const scanFrom = opening ? cursor + opening[0].length : cursor + 1;
+    for (let index = scanFrom; index < text.length; index++) {
+      const char = text[index];
+      if (quote) {
+        if (char === quote) quote = undefined;
+      } else if (char === "'" || char === '"') quote = char;
+      else if (char === '>') {
+        tagEnd = index + 1;
+        break;
+      }
+    }
+    if (tagEnd < 0) break;
+    if (!opening) {
+      cursor = tagEnd;
+      continue;
+    }
+    const name = opening[1].toLocaleLowerCase();
+    if (!['script', 'style', 'title'].includes(name)) {
+      cursor = tagEnd;
+      continue;
+    }
+    const closing = new RegExp(`<\\/${name}\\s*>`, 'ig');
+    closing.lastIndex = tagEnd;
     const match = closing.exec(text);
-    const end = match ? (match.index ?? tag.end) + match[0].length : text.length;
-    rawTextUntil = end;
-    characters.fill(' ', tag.index, end);
+    const end = match ? (match.index ?? tagEnd) + match[0].length : text.length;
+    blank(cursor, end);
+    cursor = end;
   }
   return characters.join('');
 }
@@ -234,7 +273,7 @@ function declaredEncoding(buf: Buffer, extension?: string): string | null {
     return /^\s*@charset\s+["']([A-Za-z0-9._-]+)["']/i.exec(header)?.[1] ?? null;
   }
   if (ext === 'html' || ext === 'htm') {
-    const htmlHeader = blankHtmlRawText(header.replace(/<!--[\s\S]*?-->/g, blankMarkup));
+    const htmlHeader = blankHtmlEncodingNoise(header);
     const tags = htmlOpeningTags(htmlHeader);
     const head = tags.find((tag) => tag.name === 'head');
     const body = tags.find((tag) => tag.name === 'body');
