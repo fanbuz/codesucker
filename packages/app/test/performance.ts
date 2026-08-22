@@ -7,6 +7,7 @@ import {
   DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, defaultCleanOptions,
   discover, discoverAsync, processFiles, processFilesAsync, renderDocx, sortFiles,
   type CleanedFile, type FileCandidate, type ProjectConfig, type ScanFileOutcome,
+  type ThirdPartyRiskReport,
 } from '@codesucker/core';
 import { recommendedWorkerCount, WorkerPool } from '../src/main/worker-pool.ts';
 import type {
@@ -101,6 +102,10 @@ async function main() {
       syncScan.result.map((file) => file.relPath),
       '并发扫描文件顺序必须与同步基准一致',
     );
+    const riskAnalysis = await measure(() => pipelinePool.run({
+      type: 'analyze-risks', root, files: parallelScan.result.files,
+    }) as Promise<ThirdPartyRiskReport>);
+    assert.equal(riskAnalysis.result.summary.analyzedSourceFiles, fileCount);
 
     const customExcludeRules = [...DEFAULT_EXCLUDES, 'src/module-*'];
     const customExcludeScan = await measure(() => discover(root, DEFAULT_EXTENSIONS, customExcludeRules));
@@ -160,6 +165,7 @@ async function main() {
       },
       worker: {
         scan: metric(parallelScan),
+        thirdPartyRisk: metric(riskAnalysis),
         process: metric(parallelProcess),
         render: metric(parallelRender),
       },

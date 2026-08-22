@@ -23,7 +23,9 @@ async function write(relPath: string, text: string): Promise<FileEntry> {
 
 try {
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
-    name: 'self-app', dependencies: { 'left-pad': '^1.3.0', '@self/local': 'workspace:*' },
+    name: 'self-app', dependencies: {
+      'left-pad': '^1.3.0', '@self/local': 'workspace:*', '/Users/private/customer': '^1.0.0',
+    },
   }));
   await fs.writeFile(path.join(root, 'pom.xml'), `
     <project><artifactId>self-java</artifactId><dependencies><dependency>
@@ -90,6 +92,7 @@ try {
 
   const serialized = JSON.stringify(first);
   assert.ok(!serialized.includes(root), '报告不得包含项目绝对路径');
+  assert.ok(!serialized.includes('/Users/private/customer'), '非法依赖名称不得把绝对路径带入报告');
   assert.ok(!serialized.includes('module.exports = value'), '报告不得包含源码正文');
   assert.ok(!serialized.includes('Copyright Mallory'), '报告不得包含字符串或原始署名行');
   assert.equal(first.summary.findingCount, first.findings.length);

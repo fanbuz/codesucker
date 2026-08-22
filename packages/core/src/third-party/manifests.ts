@@ -84,7 +84,8 @@ async function readManifest(rootReal: string, relPath: string): Promise<Manifest
     const text = (await fs.readFile(real, 'utf8')).replace(/^\uFEFF/, '');
     return { relPath: normalized, basename, text, lockfile };
   } catch (error) {
-    return diagnostic('manifest-read-failed', normalized, '无法读取依赖清单。', error instanceof Error ? error.message : '请检查文件权限和编码。');
+    void error;
+    return diagnostic('manifest-read-failed', normalized, '无法读取依赖清单。', '请检查文件权限、编码和符号链接后重新扫描。');
   }
 }
 
@@ -99,7 +100,15 @@ function identity(
   source: ThirdPartyEvidenceSource, local = false,
 ): DependencyIdentity | null {
   const cleaned = name.trim();
-  if (!cleaned) return null;
+  if (!cleaned || cleaned.length > 256 || /[\0\r\n]/.test(cleaned)) return null;
+  const valid = ecosystem === 'node'
+    ? /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/.test(cleaned)
+    : ecosystem === 'java'
+      ? /^[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?$/.test(cleaned)
+      : ecosystem === 'go'
+        ? /^[A-Za-z0-9][A-Za-z0-9._~-]*(?:\/[A-Za-z0-9._~-]+)*$/.test(cleaned)
+        : /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(cleaned);
+  if (!valid) return null;
   return { ecosystem, name: cleaned, normalizedName: normalizePackageName(cleaned, ecosystem), sourceFile, source, local };
 }
 
@@ -174,11 +183,22 @@ function parseMaven(doc: ManifestDocument): DependencyIdentity[] {
 
 function parseGradle(doc: ManifestDocument): DependencyIdentity[] {
   const out: DependencyIdentity[] = [];
+  if (doc.basename === 'gradle.lockfile') {
+    for (const match of doc.text.matchAll(/^\s*([^:#\s]+):([^:\s]+):[^=\s]+(?:=.*)?$/gm)) {
+      const item = identity('java', `${match[1]}:${match[2]}`, doc.relPath, 'lockfile');
+      if (item) out.push(item);
+    }
+    return out;
+  }
   for (const match of doc.text.matchAll(/\b(?:api|implementation|compileOnly|runtimeOnly|testImplementation|classpath)\s*(?:\(|\s)\s*['"]([^:'"]+):([^:'"]+):[^'"]+['"]/g)) {
     const item = identity('java', `${match[1]}:${match[2]}`, doc.relPath, doc.lockfile ? 'lockfile' : 'manifest');
     if (item) out.push(item);
   }
   for (const match of doc.text.matchAll(/\bproject\s*\(\s*['"]:([^'"]+)['"]\s*\)/g)) {
+    const item = identity('java', match[1], doc.relPath, 'manifest', true);
+    if (item) out.push(item);
+  }
+  for (const match of doc.text.matchAll(/\binclude\s*(?:\(|\s)\s*['"]:([^'"]+)['"]/g)) {
     const item = identity('java', match[1], doc.relPath, 'manifest', true);
     if (item) out.push(item);
   }
