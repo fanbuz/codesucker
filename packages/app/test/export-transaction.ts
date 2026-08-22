@@ -129,6 +129,52 @@ async function main() {
   await fs.promises.rm(directoryRaceFinal, { recursive: true });
   await discardExportStagingDirectory(directoryRaceStage);
 
+  const newOccupantStage = await createExportStagingDirectory(outDir);
+  const newOccupantName = '发布边界新占用.txt';
+  const newOccupantStaged = path.join(newOccupantStage, newOccupantName);
+  const newOccupantFinal = path.join(outDir, newOccupantName);
+  fs.writeFileSync(newOccupantStaged, 'new:must-not-overwrite', 'utf8');
+  await assert.rejects(
+    commitStagedExportFiles(newOccupantStage, outDir, [newOccupantStaged], {
+      beforeMutation: (phase) => {
+        if (phase === 'publish') fs.writeFileSync(newOccupantFinal, 'concurrent occupant', 'utf8');
+      },
+    }),
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'EEXIST',
+  );
+  assert.equal(fs.readFileSync(newOccupantFinal, 'utf8'), 'concurrent occupant',
+    '发布边界新出现的同名文件不能被暂存产物覆盖');
+  assert.equal(fs.readFileSync(newOccupantStaged, 'utf8'), 'new:must-not-overwrite',
+    '原子发布被拒绝后暂存产物必须保留');
+  await fs.promises.unlink(newOccupantFinal);
+  await discardExportStagingDirectory(newOccupantStage);
+
+  const backedUpOccupantStage = await createExportStagingDirectory(outDir);
+  const backedUpOccupantName = '备份后新占用.txt';
+  const backedUpOccupantStaged = path.join(backedUpOccupantStage, backedUpOccupantName);
+  const backedUpOccupantFinal = path.join(outDir, backedUpOccupantName);
+  fs.writeFileSync(backedUpOccupantStaged, 'new:backed-up-target', 'utf8');
+  fs.writeFileSync(backedUpOccupantFinal, 'old:backed-up-target', 'utf8');
+  await assert.rejects(
+    commitStagedExportFiles(backedUpOccupantStage, outDir, [backedUpOccupantStaged], {
+      beforeMutation: (phase) => {
+        if (phase === 'publish') fs.writeFileSync(backedUpOccupantFinal, 'concurrent after backup', 'utf8');
+      },
+    }),
+    /备份保留在/,
+  );
+  assert.equal(fs.readFileSync(backedUpOccupantFinal, 'utf8'), 'concurrent after backup',
+    '旧产物备份后新出现的同名文件不能被发布或恢复操作覆盖');
+  const occupiedBackupDirs = exportWorkDirectories().filter((name) => name.includes('backup'));
+  assert.equal(occupiedBackupDirs.length, 1, '目标被并发占用时旧产物备份必须保留');
+  const occupiedBackup = path.join(outDir, occupiedBackupDirs[0], backedUpOccupantName);
+  assert.equal(fs.readFileSync(occupiedBackup, 'utf8'), 'old:backed-up-target');
+  await fs.promises.unlink(backedUpOccupantFinal);
+  await fs.promises.rename(occupiedBackup, backedUpOccupantFinal);
+  await fs.promises.rm(path.dirname(occupiedBackup), { recursive: true, force: true });
+  await discardExportStagingDirectory(backedUpOccupantStage);
+  await fs.promises.unlink(backedUpOccupantFinal);
+
   const committedStage = await createStage();
   const committed = await commitStagedExportFiles(committedStage.stage, outDir, committedStage.files);
   assert.deepEqual(committed.map((item) => path.basename(item)), names);

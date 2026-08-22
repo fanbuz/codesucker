@@ -47,6 +47,12 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
+/** 同一文件系统内用硬链接原子占用目标名；目标已存在时绝不覆盖。 */
+async function moveFileNoReplace(source: string, destination: string): Promise<void> {
+  await fs.promises.link(source, destination);
+  await fs.promises.unlink(source);
+}
+
 export interface ExportCommitOptions {
   signal?: AbortSignal;
   assertCurrent?: () => void;
@@ -143,12 +149,13 @@ export async function commitStagedExportFiles(
       if (!sameFileSnapshot(staged, entry.stagedIdentity)) {
         throw new Error(`导出暂存产物在提交期间发生变化：${entry.name}`);
       }
-      await fs.promises.rename(entry.stagedPath, entry.finalPath);
+      await fs.promises.link(entry.stagedPath, entry.finalPath);
       published.push({ finalPath: entry.finalPath, identity: entry.stagedIdentity });
       const final = await fs.promises.lstat(entry.finalPath);
       if (!sameFileObject(final, entry.stagedIdentity)) {
         throw new Error(`导出产物在发布期间发生变化：${entry.name}`);
       }
+      await fs.promises.unlink(entry.stagedPath);
       await options.afterMutation?.('publish', entry.finalPath);
     }
     assertCanMutate();
@@ -180,13 +187,7 @@ export async function commitStagedExportFiles(
         if (!sameFileObject(backedUp, backup.identity)) {
           throw new Error('旧产物备份已发生变化');
         }
-        try {
-          await fs.promises.lstat(backup.finalPath);
-          throw new Error('目标路径已被其他文件占用');
-        } catch (targetError) {
-          if (!isMissing(targetError)) throw targetError;
-        }
-        await fs.promises.rename(backup.backupPath, backup.finalPath);
+        await moveFileNoReplace(backup.backupPath, backup.finalPath);
         const restored = await fs.promises.lstat(backup.finalPath);
         if (!sameFileObject(restored, backup.identity)) throw new Error('旧产物恢复后身份不一致');
         await options.afterMutation?.('restore', backup.finalPath);
