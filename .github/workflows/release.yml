@@ -25,6 +25,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check versions, test, and build
+        run: npm run verify
+
   license:
     name: License compliance
     runs-on: ubuntu-latest
@@ -47,7 +67,7 @@ jobs:
 
   package:
     name: Package ${{ matrix.label }}
-    needs: license
+    needs: [verify, license]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
@@ -114,7 +134,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [license, package]
+    needs: [verify, license, package]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -146,4 +166,5 @@ jobs:
             --verify-tag \
             --title "CodeSucker $GITHUB_REF_NAME" \
             --generate-notes \
+            --notes $'### macOS 安装提示\n\n当前安装包尚未进行 Apple Developer ID 签名与公证。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。' \
             "${release_options[@]}"
