@@ -597,6 +597,8 @@ other''']
     '--editable=svn+https://example.invalid/owned-three#egg=vcs_owned_three',
     '-e bzr+https://example.invalid/owned-four#EGG=VCS-Owned-Four',
     '--editable git+file:///workspace/local-vcs#egg=local-vcs',
+    '-e libs/owned',
+    '-e direct-editable @ file:../direct-editable',
     'direct-vcs @ git+https://example.invalid/direct-vcs',
     'direct-local @ file:../direct-local',
     'direct-local-vcs @ hg+file:///workspace/direct-local-vcs',
@@ -843,6 +845,8 @@ other''']
     write('vendor/vcs-owned-four/api.py', 'def external(): pass'),
     write('vendor/direct-vcs/api.py', 'def external(): pass'),
     write('vendor/missing-egg/api.py', 'def unknown(): pass'),
+    write('vendor/libs/tool.py', 'def local_editable(): pass'),
+    write('vendor/direct-editable/tool.py', 'def local_direct_editable(): pass'),
     write('vendor/local-python/owned.py', 'def owned(): pass'),
     write('vendor/local-vcs/owned.py', 'def owned(): pass'),
     write('vendor/direct-local/owned.py', 'def owned(): pass'),
@@ -1211,6 +1215,10 @@ other''']
     'requirements 中 PEP 508 VCS file 引用不能判为第三方');
   assert.ok(!dependencyFiles.has('vendor/missing-egg/api.py'),
     '无 egg 名称的 editable VCS 依赖只能给出部分分析与目录提示，不能伪造高置信包名');
+  assert.ok(!dependencyFiles.has('vendor/libs/tool.py'),
+    '无点前缀的 editable 本地路径不能伪造成同名外部包依赖');
+  assert.ok(!dependencyFiles.has('vendor/direct-editable/tool.py'),
+    'editable PEP 508 本地 direct reference 不能判为外部依赖');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-path/owned.py'), 'Pipfile.lock path 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/pipenv-local-file/owned.py'), 'Pipfile.lock file 本地依赖不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/poetry-local-directory/owned.py'), 'Poetry package.source 目录依赖不能默认判为第三方');

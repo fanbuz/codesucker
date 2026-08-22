@@ -1521,6 +1521,13 @@ function pythonLocalSpec(spec: string): boolean {
   return /@\s*(?:(?:(?:git|hg|svn|bzr)\+)?file:|\.\.?\/|\/)/i.test(spec);
 }
 
+function pythonReferenceTargetIsLocal(target: string): boolean {
+  const normalized = target.trim();
+  return localSpec(normalized)
+    || /^(?:git|hg|svn|bzr)\+file:/i.test(normalized)
+    || !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized);
+}
+
 interface TomlSection {
   name: string;
   rawName: string;
@@ -1890,6 +1897,18 @@ function parsePythonRequirementLine(rawLine: string): PythonRequirementLine {
     : trimmed;
   const spec = unquoteRequirementValue(value);
   if (editablePrefix && !spec) return { incomplete: true, local: false };
+  const direct = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?\s*@\s*(.+)$/.exec(spec);
+  if (direct) {
+    return { incomplete: false, local: pythonReferenceTargetIsLocal(direct[2]), name: direct[1] };
+  }
+  if (editablePrefix) {
+    const target = spec.split('#', 1)[0].trim();
+    const local = !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)
+      || localSpec(target)
+      || /^(?:git|hg|svn|bzr)\+file:/i.test(target);
+    const name = pythonEggName(spec);
+    return name ? { incomplete: false, local, name } : { incomplete: true, local };
+  }
   const directName = pythonName(spec);
   if (directName) {
     return { incomplete: false, local: pythonLocalSpec(spec), name: directName };
@@ -1899,7 +1918,7 @@ function parsePythonRequirementLine(rawLine: string): PythonRequirementLine {
   const url = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target);
   const name = pythonEggName(spec);
   if (name && (local || url)) return { incomplete: false, local, name };
-  if (editablePrefix || url) return { incomplete: true, local };
+  if (url) return { incomplete: true, local };
   return { incomplete: false, local: false };
 }
 
