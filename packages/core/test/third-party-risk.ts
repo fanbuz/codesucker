@@ -716,6 +716,7 @@ other''']
     Flask = "^3.0"
     "poetry-\\u0065scaped-only" = "^1.0"
     local-tool = { path = "./local-tool" }
+    poetry-quoted-path-owned = { "path" = "./vendor/poetry-quoted-path-owned" }
 
     [tool.poetry.group."qa]prod".dependencies]
     bracket-group = "^1.0"
@@ -895,6 +896,7 @@ other''']
     write('vendor/quoted-group/api.py', 'def group(): pass'),
     write('vendor/escaped-group/api.py', 'def escaped_group(): pass'),
     write('vendor/poetry-escaped-only/api.py', 'def poetry_escaped(): pass'),
+    write('vendor/poetry-quoted-path-owned/owned.py', 'def poetry_owned(): pass'),
     write('vendor/win-drive-owned/index.js', 'module.exports = true;'),
     write('vendor/win-unc-owned/index.js', 'module.exports = true;'),
     write('vendor/win-relative-owned/index.js', 'module.exports = true;'),
@@ -1254,6 +1256,8 @@ other''']
     '嵌套 Cargo workspace 引用必须继承最近根定义的依赖来源');
   assert.ok(!dependencyFiles.has('vendor/acme-cli/owned.py'), 'project.scripts 不能误当 Python 依赖');
   assert.ok(!dependencyFiles.has('vendor/local-tool/owned.py'), 'Poetry path 依赖不能默认判为第三方');
+  assert.ok(!dependencyFiles.has('vendor/poetry-quoted-path-owned/owned.py'),
+    'Poetry 行内表的引号 path 键必须识别为本地依赖');
   assert.ok(!dependencyFiles.has('vendor/owned-direct/owned.py'), 'PEP 508 file 直接引用不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/optional-owned/owned.py'), 'PEP 508 optional 本地引用不能默认判为第三方');
   assert.ok(!dependencyFiles.has('vendor/local-python/owned.py'), 'editable 本地目录不能判为第三方');

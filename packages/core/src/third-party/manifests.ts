@@ -1888,6 +1888,17 @@ function pythonDependency(
   return name ? identity('python', name, doc.relPath, doc.lockfile ? 'lockfile' : 'manifest', local) : null;
 }
 
+function poetryDependencyIsLocal(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    const parsed = parseTomlAssignments(trimmed.slice(1, -1), ',');
+    return parsed.assignments.some((assignment) => assignment.keyPath.length === 1
+      && assignment.keyPath[0] === 'path'
+      && localPathValue(tomlStringValue(assignment.value) ?? undefined));
+  }
+  return localSpec(tomlStringValue(trimmed));
+}
+
 interface PythonRequirementLine {
   incomplete: boolean;
   local: boolean;
@@ -2086,8 +2097,7 @@ function parsePython(doc: ManifestDocument): DependencyIdentity[] {
         if (assignment.keyPath.length !== 1) continue;
         const name = assignment.keyPath[0];
         if (name.toLocaleLowerCase() === 'python') continue;
-        const local = /\bpath\s*=|^(?:['"])?(?:\.\.?\/|\/|file:)/.test(assignment.value.trim());
-        const item = pythonDependency(name, doc, local);
+        const item = pythonDependency(name, doc, poetryDependencyIsLocal(assignment.value));
         if (item) out.push(item);
       }
     }
