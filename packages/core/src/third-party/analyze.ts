@@ -276,16 +276,6 @@ export async function analyzeThirdPartyRisksWithSnapshot(
         evidence: [evidence],
       }, entry.relPath);
     }
-    for (const evidence of header?.evidence.filter((item) => item.ruleId === 'source-header-author' || item.ruleId === 'source-header-copyright') ?? []) {
-      addFinding(findings, {
-        key: `attribution-declaration:${evidence.ruleId}:${entry.relPath}:${evidence.attributionSubject ?? ''}`,
-        ruleId: evidence.ruleId, kind: 'attribution-declaration', confidence: 'medium',
-        title: '源码包含作者或版权主体声明',
-        basis: '署名主体可能属于当前项目，也可能提示外部代码，需结合申请人信息核验。',
-        suggestion: '核对署名主体与著作权人；不一致时谨慎纳入。', recommendation: 'verify-attribution',
-        evidence: [evidence],
-      }, entry.relPath);
-    }
   }
 
   const finalized = [...findings.values()].map(finalizeFinding)

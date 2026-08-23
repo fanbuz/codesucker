@@ -172,5 +172,5 @@ jobs:
             --verify-tag \
             --title "CodeSucker $GITHUB_REF_NAME" \
             --generate-notes \
-            --notes $'### 安装与风险提示\n\n当前 macOS 安装包尚未进行 Apple Developer ID 签名与公证。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。\n\n第三方代码风险提示完全在本机运行，只提供启发式证据与筛选建议，不自动判定代码归属，也不构成法律意见。' \
+            --notes $'### 安装与处理边界\n\n当前 macOS 安装包尚未进行 Apple Developer ID 签名与公证。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。\n\nCodeSucker 自身的源码扫描、第三方代码线索分析、清洗、分页、校验和导出全部在本机运行，不调用任何本地或云端 LLM，也不向模型服务发送源码。第三方代码线索只提供启发式证据与筛选建议，不自动判定代码归属，也不构成法律意见。更新检测仅查询 GitHub Release 公开版本元数据。' \
             "${release_options[@]}"

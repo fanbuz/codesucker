@@ -12,6 +12,7 @@ const TOGGLES: Array<{ key: keyof CleanToggles; label: string; sub?: string }> =
 export default function Step3Clean() {
   const s = useStore();
   const p = s.processData;
+  const attributionSummary = p?.attributionSummary;
   const progress = s.jobProgress?.jobKind === 'process' ? s.jobProgress : null;
 
   useEffect(() => { runProcess(); }, [s.clean]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -31,6 +32,11 @@ export default function Step3Clean() {
             <input className="cs-input" value={s.owner} placeholder="如：某某科技有限公司（用于署名冲突扫描）"
               onChange={(e) => s.set({ owner: e.target.value })} />
             <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 5 }}>代码中出现与此不一致的 @author / Copyright 会在校验时提示</div>
+            {!s.owner.trim() && attributionSummary && attributionSummary.evidenceCount > 0 && (
+              <div className="step3-attribution-notice" role="status">
+                检测到 {attributionSummary.evidenceCount} 处署名或版权主体声明，涉及 {attributionSummary.affectedFileCount} 个最终分页文件；填写著作权人后才能核验一致性。
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -80,8 +86,10 @@ export default function Step3Clean() {
         <div className="step3-controls__footer">
           <button className="btn-primary" disabled={!s.swName.trim() || s.processing}
             onClick={async () => {
-              if (!s.processData) await runProcess();
-              s.set({ step: 4, maxUnlockedStep: unlockStep(s.maxUnlockedStep, 4), page: 1 });
+              const data = await runProcess();
+              if (!data) return;
+              const latest = useStore.getState();
+              latest.set({ step: 4, maxUnlockedStep: unlockStep(latest.maxUnlockedStep, 4), page: 1 });
             }}>
             {s.processing
               ? progress?.stage === 'cleaning' && progress.total > 0

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import { ModalDialog } from '../components/ModalDialog';
 import {
   canResetScanExcludeRules, getScanExcludeRuleErrors, normalizeScanExcludeRule, normalizeScanExcludeRules,
   sameScanExcludeRules, validateScanExcludeRule,
@@ -25,7 +26,6 @@ export default function Settings() {
   const [newRule, setNewRule] = useState('');
   const [newRuleError, setNewRuleError] = useState<string | null>(null);
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
-  const releaseNotesDialogRef = useRef<HTMLDivElement>(null);
   const ruleErrors = useMemo(() => getScanExcludeRuleErrors(rules), [rules]);
   const rulesInvalid = ruleErrors.some(Boolean);
   const rulesDirty = !sameScanExcludeRules(normalizeScanExcludeRules(rules), savedRules);
@@ -79,53 +79,6 @@ export default function Settings() {
   };
 
   useEffect(() => { void loadRules(); }, []);
-
-  useEffect(() => {
-    if (!releaseNotesOpen || !hasUpdate) return;
-
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const dialog = releaseNotesDialogRef.current;
-    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-    const focusDialog = window.requestAnimationFrame(() => {
-      dialog?.querySelector<HTMLElement>(focusableSelector)?.focus();
-    });
-    const handleDialogKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setReleaseNotesOpen(false);
-        return;
-      }
-      if (event.key !== 'Tab' || !dialog) return;
-
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
-      if (focusable.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!dialog.contains(document.activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleDialogKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusDialog);
-      document.removeEventListener('keydown', handleDialogKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [hasUpdate, releaseNotesOpen]);
 
   const handleAddRule = (event: FormEvent) => {
     event.preventDefault();
@@ -365,12 +318,10 @@ export default function Settings() {
         </div>
       </div>
 
-      {releaseNotesOpen && hasUpdate && (
-        <div className="settings-dialog-backdrop" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setReleaseNotesOpen(false);
-        }}>
-          <div ref={releaseNotesDialogRef} className="settings-dialog" role="dialog" aria-modal="true"
-            aria-labelledby="release-notes-title" tabIndex={-1}>
+      <ModalDialog open={releaseNotesOpen && hasUpdate} onClose={() => setReleaseNotesOpen(false)}
+        labelledBy="release-notes-title" className="settings-dialog">
+        {hasUpdate && (
+          <>
             <div className="settings-dialog__header">
               <div>
                 <div className="settings-dialog__eyebrow">RELEASE NOTES</div>
@@ -384,9 +335,9 @@ export default function Settings() {
                 {update.notes.map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}
               </ul>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </ModalDialog>
     </div>
   );
 }

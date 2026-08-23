@@ -199,7 +199,7 @@ export default function Step1Import() {
             {progress?.stage === 'discovering'
               ? '正在发现源代码文件…'
               : progress?.stage === 'analyzing-risks'
-                ? '正在本地分析第三方代码风险…'
+                ? '正在本地分析第三方代码线索…'
                 : '正在并发扫描项目…'}
           </div>
           <div style={{ width: 360, height: 6, borderRadius: 3, background: 'var(--border2)', overflow: 'hidden' }}>

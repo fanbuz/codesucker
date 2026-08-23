@@ -420,6 +420,11 @@ export function registerPipelineIpc() {
             })),
           }, ...result.auditItems]
         : result.auditItems;
+      const selectedRelPaths = new Set(result.selection.selectedRelPaths);
+      const selectedFilesWithAttributions = result.cleaned.filter((file) => (
+        selectedRelPaths.has(file.entry.relPath) && file.attributions.length > 0
+      ));
+      const selectedAttributions = selectedFilesWithAttributions.flatMap((file) => file.attributions);
       return {
         jobId: job.id,
         scanSessionId: request.payload.scanSessionId,
@@ -431,6 +436,11 @@ export function registerPipelineIpc() {
         },
         audit,
         errors: result.errors,
+        attributionSummary: {
+          evidenceCount: selectedAttributions.length,
+          subjectCount: new Set(selectedAttributions.map((evidence) => evidence.subject.trim().toLocaleLowerCase())).size,
+          affectedFileCount: selectedFilesWithAttributions.length,
+        },
         perFile: result.cleaned.map((file) => ({
           relPath: file.entry.relPath,
           name: file.entry.name,
@@ -475,7 +485,7 @@ export function registerPipelineIpc() {
         }, job.signal) as ThirdPartyRiskAnalysis;
       } catch (error) {
         if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
-        throw new Error('无法复核第三方代码风险，请重新扫描项目后再导出');
+        throw new Error('无法复核第三方代码线索，请重新扫描项目后再导出');
       }
       await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
       job.assertCurrent();
@@ -501,7 +511,7 @@ export function registerPipelineIpc() {
           }, job.signal) as ThirdPartyRiskAnalysis;
         } catch (error) {
           if (job.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
-          throw new Error('无法最终复核第三方代码风险，请重新扫描项目后再导出');
+          throw new Error('无法最终复核第三方代码线索，请重新扫描项目后再导出');
         }
         await validateScannedFilesUnchanged(scan.rootSnapshot, request.payload.root, scannedEntries);
         job.assertCurrent();

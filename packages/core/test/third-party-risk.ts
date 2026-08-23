@@ -1297,11 +1297,12 @@ other''']
     '无法映射的 vendor 目录只能给出中置信提示');
   assert.ok(first.findings.some((finding) => finding.kind === 'license-declaration' && finding.affected.relPaths.includes('vendor/left-pad/index.js')));
   assert.ok(first.findings.some((finding) => finding.kind === 'generated-source' && finding.affected.relPaths.includes('src/client.generated.ts')));
-  assert.ok(first.findings.some((finding) => finding.kind === 'attribution-declaration' && finding.affected.relPaths.includes('src/owned.ts')));
-  const multipleAttributions = first.findings.filter((finding) => finding.kind === 'attribution-declaration'
-    && finding.affected.relPaths.includes('src/multiple-authors.ts'));
-  assert.equal(multipleAttributions.length, 2, '同一文件中的不同署名应保持独立 finding');
-  assert.equal(new Set(multipleAttributions.map((finding) => finding.id)).size, 2, '不同署名必须生成不同 finding ID');
+  assert.ok(!first.findings.some((finding) => finding.affected.relPaths.includes('src/owned.ts')),
+    '普通 Copyright 署名不足以单独形成第三方代码线索');
+  assert.ok(!first.findings.some((finding) => finding.affected.relPaths.includes('src/multiple-authors.ts')),
+    '普通 @author 署名应留到著作权人核验流程，不应生成第三方代码线索');
+  assert.equal(first.summary.byKind['attribution-declaration'], 0,
+    'schema 1 兼容键必须保留，但普通署名 finding 数量应为 0');
   assert.ok(!first.findings.some((finding) => finding.affected.relPaths.includes('src/string-only.ts')),
     '字符串中的生成/署名示例不能形成风险发现');
 

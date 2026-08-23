@@ -115,7 +115,7 @@ export default function Step5Export() {
               {hasRisk
                 ? '存在退回风险，导出前建议全部处理'
                 : unresolvedThirdParty > 0 || thirdPartyAnalysisIncomplete
-                  ? '软著格式校验未发现退回风险；仍有第三方代码提示建议核验'
+                  ? '软著格式校验未发现退回风险；仍有第三方代码线索建议核验'
                   : '软著格式校验未发现退回风险，可以生成申报文档'}
             </div>
           </div>
@@ -123,10 +123,10 @@ export default function Step5Export() {
         </div>
         {s.thirdPartyRiskReport && (
           <section className={`step5-third-party-summary${unresolvedThirdParty > 0 || thirdPartyAnalysisIncomplete ? ' has-unresolved' : ''}`}
-            aria-label="第三方代码风险摘要">
+            aria-label="第三方代码线索摘要">
             <div className="step5-third-party-summary__icon">{unresolvedThirdParty > 0 || thirdPartyAnalysisIncomplete ? '⚑' : '✓'}</div>
             <div className="step5-third-party-summary__copy">
-              <strong>第三方代码风险提示</strong>
+              <strong>第三方代码线索</strong>
               <span>
                 {thirdPartyCounts.excluded} 项已排除 · {thirdPartyCounts['kept-by-user']} 项已确认纳入 · {' '}
                 {thirdPartyCounts['partially-excluded']} 项部分排除 · {thirdPartyCounts.pending} 项待处理
@@ -211,7 +211,7 @@ export default function Step5Export() {
           </div>
         </div>
         <div className="step5-third-party-output-note">
-          <strong>随附风险摘要</strong>
+          <strong>随附线索摘要</strong>
           <span>每次导出都会生成“第三方代码风险摘要_软件名.json”，仅含相对路径与结构化证据。</span>
         </div>
         <div style={{ flex: 1 }} />
