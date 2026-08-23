@@ -35,6 +35,7 @@ export interface ProcessData {
   selection: { pages: PageData[]; totalLines: number; pickedLines: number; truncated: boolean; selectedRelPaths: string[]; splitAfterPage: number | null; frontEndFile: string | null; backStartFile: string | null };
   audit: AuditRow[];
   errors: FileTaskError[];
+  attributionSummary: { evidenceCount: number; subjectCount: number; affectedFileCount: number };
   perFile: Array<{ relPath: string; name: string; lines: number; removedComments: number; removedBlanks: number; masked: number }>;
   preview: null | {
     file: string;
@@ -448,9 +449,9 @@ export async function cancelActiveScan(): Promise<void> {
   });
 }
 
-export async function runProcess() {
+export async function runProcess(): Promise<ProcessData | null> {
   const s = useStore.getState();
-  if (!s.root || !s.scanSessionId) return;
+  if (!s.root || !s.scanSessionId) return null;
   const scanSessionId = s.scanSessionId;
   const jobId = createJobId('process');
   s.set({ processing: true, activeJobId: jobId, jobProgress: null });
@@ -463,12 +464,14 @@ export async function runProcess() {
       owner: s.owner || undefined,
       clean: cleanOptions(s.clean),
     }, jobId)) as ProcessData;
-    if (useStore.getState().activeJobId !== jobId || data.scanSessionId !== scanSessionId) return;
+    if (useStore.getState().activeJobId !== jobId || data.scanSessionId !== scanSessionId) return null;
     useStore.getState().set({ processData: data, processing: false, activeJobId: null, jobProgress: null });
     if (data.errors.length > 0) toast(`${data.errors.length} 个文件处理失败，已跳过`);
+    return data;
   } catch (e) {
-    if (useStore.getState().activeJobId !== jobId) return;
+    if (useStore.getState().activeJobId !== jobId) return null;
     useStore.getState().set({ processing: false, activeJobId: null, jobProgress: null });
     if (!isCancellation(e)) toast('处理失败：' + (e instanceof Error ? e.message : String(e)));
+    return null;
   }
 }

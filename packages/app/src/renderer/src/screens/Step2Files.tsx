@@ -12,7 +12,7 @@ import {
   type FileTreeDirectoryNode, type FileTreeFileNode, type SelectionState,
 } from '../file-selection';
 import { ScanIssueReport } from '../components/ScanIssueReport';
-import { ThirdPartyRiskPanel } from '../components/ThirdPartyRiskPanel';
+import { ThirdPartyClueSummaryButton, ThirdPartyRiskDialog } from '../components/ThirdPartyRiskPanel';
 import { excludeThirdPartyFinding, keepThirdPartyFinding } from '../third-party-risk-state';
 import type { ThirdPartyRiskFinding } from '@codesucker/core';
 
@@ -112,6 +112,7 @@ export default function Step2Files() {
   const [statScope, setStatScope] = useState<StatScope>('included');
   const [statMetric, setStatMetric] = useState<StatMetric>('rawLines');
   const [showAllTypes, setShowAllTypes] = useState(false);
+  const [thirdPartyDialogOpen, setThirdPartyDialogOpen] = useState(false);
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set());
   const [fileTreeSearchInput, setFileTreeSearchInput] = useState('');
   const [fileTreeSearchQuery, setFileTreeSearchQuery] = useState('');
@@ -348,11 +349,6 @@ export default function Step2Files() {
             })}
           </div>
         </div>
-        {s.thirdPartyRiskReport && (
-          <ThirdPartyRiskPanel report={s.thirdPartyRiskReport} files={s.files}
-            keptFindingIds={s.keptThirdPartyRiskFindingIds}
-            onExclude={excludeRisk} onKeep={keepRisk} onReveal={(finding) => { void revealRisk(finding); }} />
-        )}
         <div className="step2-order-list">
           {included.map((f, i) => (
             <div key={f.relPath} draggable className="step2-order-row"
@@ -371,14 +367,19 @@ export default function Step2Files() {
 
       {/* 统计 */}
       <aside className="step2-stats-panel">
-        <div className="step2-stats-panel__title">统计</div>
-        <ScanIssueReport issues={s.scanIssues} summary={s.scanSummary} appliedRules={s.appliedScanExcludeRules} />
-        <div className="step2-stat-grid">
-          <StatCard label="总文件" value={String(s.files.length)} />
-          <StatCard label="已纳入" value={String(included.length)} accent />
-        </div>
-        <StatCard label="已纳入原始行数" value={totalRawLines.toLocaleString()} wide />
-        <div className="step2-page-estimate">
+        <div className="step2-stats-scroll">
+          <div className="step2-stats-panel__title">统计</div>
+          <ScanIssueReport issues={s.scanIssues} summary={s.scanSummary} appliedRules={s.appliedScanExcludeRules} />
+          {s.thirdPartyRiskReport && (
+            <ThirdPartyClueSummaryButton report={s.thirdPartyRiskReport} files={s.files}
+              keptFindingIds={s.keptThirdPartyRiskFindingIds} onClick={() => setThirdPartyDialogOpen(true)} />
+          )}
+          <div className="step2-stat-grid">
+            <StatCard label="总文件" value={String(s.files.length)} />
+            <StatCard label="已纳入" value={String(included.length)} accent />
+          </div>
+          <StatCard label="已纳入原始行数" value={totalRawLines.toLocaleString()} wide />
+          <div className="step2-page-estimate">
           <svg width="62" height="62" viewBox="0 0 62 62">
             <circle cx="31" cy="31" r="26" fill="none" stroke="var(--border)" strokeWidth="6" />
             <circle cx="31" cy="31" r="26" fill="none" stroke={pageOk ? 'var(--green)' : 'var(--orange)'} strokeWidth="6" strokeLinecap="round"
@@ -392,8 +393,8 @@ export default function Step2Files() {
               {estPages >= 60 ? '满足 60 页 ✓' : `不足 60 页，将全量提交`}
             </div>
           </div>
-        </div>
-        <div className="step2-type-card">
+          </div>
+          <div className="step2-type-card">
           <div className="step2-type-card__heading">
             <div className="step2-type-card__heading-copy">
               <div style={{ fontSize: 11.5, fontWeight: 600 }}>文件类型构成</div>
@@ -469,6 +470,7 @@ export default function Step2Files() {
             )}
           </div>
 
+          </div>
         </div>
         <div className="step2-stats-footer">
           <button className="btn-primary" disabled={included.length === 0}
@@ -476,6 +478,11 @@ export default function Step2Files() {
           {included.length === 0 && <div className="step2-stats-footer__hint">至少选择一个文件</div>}
         </div>
       </aside>
+      {s.thirdPartyRiskReport && (
+        <ThirdPartyRiskDialog open={thirdPartyDialogOpen} onClose={() => setThirdPartyDialogOpen(false)}
+          report={s.thirdPartyRiskReport} files={s.files} keptFindingIds={s.keptThirdPartyRiskFindingIds}
+          onExclude={excludeRisk} onKeep={keepRisk} onReveal={(finding) => { void revealRisk(finding); }} />
+      )}
     </div>
   );
 }

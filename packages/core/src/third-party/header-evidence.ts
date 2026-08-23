@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises';
 import iconv from 'iconv-lite';
-import { extractAttributions } from '../clean.ts';
 import { scanSource } from '../language-syntax.ts';
 import type { FileEntry } from '../types.ts';
 import type { ThirdPartyAnalysisDiagnostic, ThirdPartyEvidence } from './types.ts';
@@ -79,14 +78,6 @@ export async function inspectSourceHeader(entry: FileEntry, signal?: AbortSignal
         detail: '源码注释包含生成工具提示。',
       });
     }
-  }
-  for (const attribution of extractAttributions(text, entry.relPath, entry.ext)) {
-    evidence.push({
-      ruleId: `source-header-${attribution.kind}`, source: 'source-header',
-      location: { file: attribution.file, line: attribution.line },
-      detail: attribution.kind === 'author' ? '源码注释包含作者署名。' : '源码注释包含版权主体声明。',
-      attributionSubject: attribution.subject,
-    });
   }
   return { evidence, diagnostics: [], generated };
 }

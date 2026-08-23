@@ -1,6 +1,8 @@
 import type { ThirdPartyRiskFinding, ThirdPartyRiskReport } from '@codesucker/core';
 
 export type ThirdPartyFindingStatus = 'excluded' | 'partially-excluded' | 'kept-by-user' | 'pending';
+export type ThirdPartyFindingFilter = 'all' | 'unresolved' | ThirdPartyFindingStatus;
+export type ThirdPartyClueSummaryState = 'empty' | 'resolved' | 'unresolved' | 'incomplete';
 
 export interface SelectableRiskFile {
   relPath: string;
@@ -25,6 +27,9 @@ export interface ThirdPartyFindingPage<T> {
 export interface ThirdPartyStatusSummary {
   byFindingId: ReadonlyMap<string, ThirdPartyFindingStatus>;
   counts: Record<ThirdPartyFindingStatus, number>;
+  unresolvedCount: number;
+  unresolvedAffectedFileCount: number;
+  state: ThirdPartyClueSummaryState;
 }
 
 export function thirdPartyFindingPage<T>(
@@ -119,10 +124,44 @@ export function thirdPartyStatusSummary(
     pending: 0,
   };
   const byFindingId = new Map<string, ThirdPartyFindingStatus>();
+  const unresolvedAffectedRelPaths = new Set<string>();
   for (const finding of report.findings) {
     const status = thirdPartyFindingStatusFromSets(finding, included, kept);
     byFindingId.set(finding.id, status);
     counts[status]++;
+    if (status === 'pending' || status === 'partially-excluded') {
+      for (const relPath of finding.affected.relPaths) {
+        if (included.has(relPath)) unresolvedAffectedRelPaths.add(relPath);
+      }
+    }
   }
-  return { byFindingId, counts };
+  const unresolvedCount = counts.pending + counts['partially-excluded'];
+  const state: ThirdPartyClueSummaryState = report.diagnostics.length > 0
+    ? 'incomplete'
+    : report.findings.length === 0
+      ? 'empty'
+      : unresolvedCount > 0
+        ? 'unresolved'
+        : 'resolved';
+  return {
+    byFindingId,
+    counts,
+    unresolvedCount,
+    unresolvedAffectedFileCount: unresolvedAffectedRelPaths.size,
+    state,
+  };
+}
+
+export function filterThirdPartyFindings(
+  findings: readonly ThirdPartyRiskFinding[],
+  byFindingId: ReadonlyMap<string, ThirdPartyFindingStatus>,
+  filter: ThirdPartyFindingFilter,
+): ThirdPartyRiskFinding[] {
+  if (filter === 'all') return [...findings];
+  return findings.filter((finding) => {
+    const status = byFindingId.get(finding.id) ?? 'pending';
+    return filter === 'unresolved'
+      ? status === 'pending' || status === 'partially-excluded'
+      : status === filter;
+  });
 }

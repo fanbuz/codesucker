@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import type { ThirdPartyRiskFinding, ThirdPartyRiskReport } from '@codesucker/core';
 import {
-  excludeThirdPartyFinding, keepThirdPartyFinding, restoreKeptFindingIds,
+  excludeThirdPartyFinding, filterThirdPartyFindings, keepThirdPartyFinding, restoreKeptFindingIds,
   thirdPartyFindingPage, thirdPartyFindingStatus, thirdPartyStatusCounts, thirdPartyStatusSummary,
 } from '../src/renderer/src/third-party-risk-state.ts';
 
@@ -111,6 +111,56 @@ assert.deepEqual(thirdPartyStatusCounts(statusReport, statusFiles, ['kept']), {
   'kept-by-user': 1,
   pending: 1,
 });
+const statusSummary = thirdPartyStatusSummary(statusReport, statusFiles, ['kept']);
+assert.equal(statusSummary.state, 'unresolved');
+assert.equal(statusSummary.unresolvedCount, 2);
+assert.equal(statusSummary.unresolvedAffectedFileCount, 2, '只统计待处理线索中仍被纳入的去重文件');
+assert.deepEqual(
+  filterThirdPartyFindings(statusReport.findings, statusSummary.byFindingId, 'unresolved').map((item) => item.id),
+  ['partial', 'pending'],
+  '状态筛选必须发生在分页前',
+);
+assert.deepEqual(
+  filterThirdPartyFindings(statusReport.findings, statusSummary.byFindingId, 'kept-by-user').map((item) => item.id),
+  ['kept'],
+);
+assert.deepEqual(
+  filterThirdPartyFindings(statusReport.findings, statusSummary.byFindingId, 'all').map((item) => item.id),
+  ['excluded', 'partial', 'kept', 'pending'],
+);
+
+const emptySummary = thirdPartyStatusSummary(report([]), [], []);
+assert.equal(emptySummary.state, 'empty');
+const incompleteSummary = thirdPartyStatusSummary({
+  ...report([]),
+  diagnostics: [{
+    code: 'analysis-failed',
+    message: '分析未完成',
+    suggestion: '请手工核验',
+  }],
+}, [], []);
+assert.equal(incompleteSummary.state, 'incomplete', '存在诊断时不得把 0 条线索展示成安全结果');
+const resolvedSummary = thirdPartyStatusSummary(
+  report([finding('done', ['done.ts'])]),
+  [{ relPath: 'done.ts', included: true }],
+  ['done'],
+);
+assert.equal(resolvedSummary.state, 'resolved');
+
+const overlappingReport = report([
+  finding('overlap-a', ['shared.ts', 'only-a.ts']),
+  finding('overlap-b', ['shared.ts', 'only-b.ts']),
+]);
+assert.equal(thirdPartyStatusSummary(overlappingReport, [
+  { relPath: 'shared.ts', included: true },
+  { relPath: 'only-a.ts', included: true },
+  { relPath: 'only-b.ts', included: true },
+], []).unresolvedAffectedFileCount, 3, '多个线索重复影响同一文件时必须去重');
+assert.equal(thirdPartyStatusSummary(overlappingReport, [
+  { relPath: 'shared.ts', included: false },
+  { relPath: 'only-a.ts', included: true },
+  { relPath: 'only-b.ts', included: false },
+], []).unresolvedAffectedFileCount, 1, '文件勾选变化后影响数量必须实时收敛');
 
 const manyFindings = Array.from({ length: 10_000 }, (_, index) => `finding-${index}`);
 const firstPage = thirdPartyFindingPage(manyFindings, 0);
@@ -121,6 +171,13 @@ const lastPage = thirdPartyFindingPage(manyFindings, 999);
 assert.equal(lastPage.pageIndex, 99, '越界页码应收敛到最后一页');
 assert.deepEqual(lastPage.items, manyFindings.slice(9_900));
 assert.equal(thirdPartyFindingPage([], Number.NaN).items.length, 0);
+const filteredBeforePaging = filterThirdPartyFindings(
+  statusReport.findings,
+  statusSummary.byFindingId,
+  'unresolved',
+);
+assert.deepEqual(thirdPartyFindingPage(filteredBeforePaging, 99, 1).items.map((item) => item.id), ['pending'],
+  '筛选后页码越界必须收敛到筛选结果的最后一页');
 
 const largeStatusReport = report(Array.from({ length: 10_000 }, (_, index) => finding(`large-${index}`, [`file-${index}.ts`])));
 const largeStatusSummary = thirdPartyStatusSummary(

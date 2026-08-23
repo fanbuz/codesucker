@@ -2,6 +2,7 @@ export type ThirdPartyRiskKind =
   | 'dependency-source'
   | 'vendored-source'
   | 'license-declaration'
+  /** @deprecated 仅为 schema 1 向后兼容保留；普通署名不再单独形成第三方代码线索。 */
   | 'attribution-declaration'
   | 'generated-source';
 
@@ -10,6 +11,7 @@ export type ThirdPartyConfidence = 'high' | 'medium' | 'low';
 export type ThirdPartyRecommendation =
   | 'exclude'
   | 'verify-license'
+  /** @deprecated 仅为 schema 1 向后兼容保留。 */
   | 'verify-attribution'
   | 'verify-generation';
 

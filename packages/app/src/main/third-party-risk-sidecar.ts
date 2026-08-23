@@ -102,7 +102,7 @@ export function emptyThirdPartyRiskReport(analyzedSourceFiles: number, message?:
     findings: [],
     diagnostics: message ? [{
       code: 'analysis-failed',
-      message: `第三方代码风险分析未完成：${message}`,
+      message: `第三方代码线索分析未完成：${message}`,
       suggestion: '本次不会自动排除文件，请在导出前手工核验第三方代码来源。',
     }] : [],
     summary: {
@@ -281,7 +281,7 @@ const SAFE_DIAGNOSTIC_TEXT: Record<ThirdPartyAnalysisDiagnostic['code'], { messa
     suggestion: '请缩小扫描范围，或手工核验未分析的代码。',
   },
   'analysis-failed': {
-    message: '本地第三方代码风险分析未完成。',
+    message: '本地第三方代码线索分析未完成。',
     suggestion: '本次不会自动排除文件，请在导出前手工核验第三方代码来源。',
   },
 };
@@ -345,7 +345,7 @@ export function buildThirdPartyRiskSidecar(
     },
     findings,
     diagnostics: report.diagnostics.map(safeDiagnostic),
-    notice: '本报告为完全本地的第三方代码风险提示，不构成著作权归属、许可证合规或法律结论。',
+    notice: '本报告为完全本地的第三方代码线索，不构成著作权归属、许可证合规或法律结论。',
   };
 }
 
