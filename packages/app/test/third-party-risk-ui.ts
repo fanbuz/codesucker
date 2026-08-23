@@ -33,6 +33,12 @@ assert.match(modalSource, /role="dialog" aria-modal="true"/, '详情面板必须
 assert.match(modalSource, /event\.key === 'Escape'/, '模态面板必须支持 Esc 关闭');
 assert.match(modalSource, /event\.key !== 'Tab'/, '模态面板必须约束 Tab 焦点');
 assert.match(modalSource, /previouslyFocused\?\.focus\(\)/, '关闭面板后必须恢复入口焦点');
+assert.match(modalSource, /document\.body\.style\.overflow = 'hidden'/, '模态面板打开时必须锁定背景滚动');
+assert.match(
+  modalSource,
+  /document\.body\.style\.overflow = previousBodyOverflow/,
+  '模态面板关闭时必须恢复原有背景滚动样式',
+);
 
 assert.match(themeCss, /\.step2-stats-scroll\{[^}]*overflow-y:auto/, '小屏统计区必须独立纵向滚动');
 assert.match(themeCss, /\.modal-dialog-backdrop\{[^}]*z-index:100/, '模态遮罩层级必须固定');

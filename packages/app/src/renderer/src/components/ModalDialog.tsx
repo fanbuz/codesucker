@@ -32,6 +32,8 @@ export function ModalDialog({
     if (!open) return;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const focusDialog = window.requestAnimationFrame(() => {
       dialog?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
     });
@@ -66,6 +68,7 @@ export function ModalDialog({
     return () => {
       window.cancelAnimationFrame(focusDialog);
       document.removeEventListener('keydown', handleDialogKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
       previouslyFocused?.focus();
     };
   }, [open]);
