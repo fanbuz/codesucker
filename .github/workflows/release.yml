@@ -1,21 +1,9 @@
 name: Package and Release
+run-name: ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || format('Test packages {0}', github.ref_name) }}
 
 on:
+  # 日常 PR 由 ci.yml 验证；需要安装包时显式手动触发。
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/release.yml'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'design/icon/**'
-      - 'licenses/**'
-      - 'packages/app/**'
-      - 'packages/core/**'
-      - 'scripts/gen-icons.mjs'
-      - 'scripts/gen-third-party-notices.mjs'
-      - 'scripts/check-release-tag.mjs'
-      - 'CHANGELOG.md'
-      - 'THIRD_PARTY_NOTICES.txt'
   push:
     tags: ['v*']
 
@@ -23,8 +11,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: package-${{ github.ref }}
-  cancel-in-progress: false
+  # 手动测试包与正式发布相互隔离；同一 ref 的手动重复运行只保留最新一次。
+  group: package-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 jobs:
   verify:
@@ -41,39 +30,20 @@ jobs:
           node-version: 22.12.0
           cache: npm
 
+      - name: Check tag, product version, and changelog
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: npm run release:check -- "$GITHUB_REF_NAME"
+
       - name: Install dependencies
         run: npm ci
 
       - name: Check versions, test, and build
         run: npm run verify
 
-      - name: Check tag, product version, and changelog
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: npm run release:check -- "$GITHUB_REF_NAME"
-
-  license:
-    name: License compliance
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22.12.0
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check third-party licenses
-        run: npm run licenses:check
-
   package:
     name: Package ${{ matrix.label }}
-    needs: [verify, license]
+    # verify 已包含许可证检查，避免为同一提交重复安装依赖和校验。
+    needs: verify
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
@@ -135,12 +105,13 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.path }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 3 || 7 }}
 
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [verify, license, package]
+    # 即使手动选择版本 tag，也只生成测试包，不能创建 Release。
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [verify, package]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
