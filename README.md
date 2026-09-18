@@ -205,6 +205,8 @@ npm run verify                           # 发布前完整校验
 
 正式发布以 `v<SemVer>` Git tag 和 GitHub Release 为准，仅修改源码中的版本字段不代表已经发布。完整规则见 [VERSIONING.md](VERSIONING.md)，用户可见变化记录在 [CHANGELOG.md](CHANGELOG.md)。
 
+日常 PR 和合入 `main` 只运行 `Verify`，不自动生成三平台安装包。需要验收安装包时，在 Actions 中手动运行 `Package and Release` 并选择待验收分支，测试产物保留 3 天；推送版本标签才会自动执行三平台打包并发布 Release。操作步骤和发布门禁见 [Actions 验证与打包](VERSIONING.md#actions-验证与打包)。
+
 ## 参与贡献
 
 欢迎 Issue 与 PR。提交前请确保 `npm run verify` 通过；提交信息请说明动机而不止是改动内容。
