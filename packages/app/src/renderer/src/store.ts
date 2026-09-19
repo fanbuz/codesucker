@@ -1,3 +1,4 @@
+import { DEFAULT_PROJECT_CLEAN, type ProjectCleanToggles, type ProjectConfigValues } from '../../shared/project-config';
 import { create } from 'zustand';
 import type { ThirdPartyRiskReport } from '@codesucker/core';
 import type { UpdateCheckResult } from '../../shared/update-types';
@@ -56,7 +57,7 @@ export interface RecentProject {
   unavailableReason?: 'missing' | 'inaccessible' | 'not-directory';
 }
 
-export interface CleanToggles { removeComments: boolean; removeBlankLines: boolean; maskSensitive: boolean; wrapLongLines: boolean }
+export type CleanToggles = ProjectCleanToggles;
 export type ScanIntent = 'open' | 'rescan';
 
 interface ScanResult {
@@ -75,22 +76,10 @@ interface ScanResult {
   entryOrder: string[];
   mtimeOrder: string[];
   savedConfigWarning?: string | null;
-  savedConfig: null | {
-    schemaVersion?: number; appVersion?: string; rulesVersion?: string;
-    title?: string; owner?: string; sortMode?: 'entry' | 'mtime' | 'manual';
-    order?: string[]; excludedRelPaths?: string[];
-    clean?: CleanToggles;
-    fmtDocx?: boolean; fmtTxt?: boolean; outDir?: string;
-    thirdPartyRisk?: { rulesVersion?: string; keptFindingIds?: string[] };
-  };
+  savedConfig: ProjectConfigValues | null;
 }
 
-const DEFAULT_CLEAN: CleanToggles = {
-  removeComments: true,
-  removeBlankLines: true,
-  maskSensitive: true,
-  wrapLongLines: true,
-};
+const DEFAULT_CLEAN = DEFAULT_PROJECT_CLEAN;
 
 interface State {
   theme: 'light' | 'dark';
