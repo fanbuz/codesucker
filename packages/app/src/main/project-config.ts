@@ -17,7 +17,7 @@ export interface ProjectConfigReadResult {
 
 /** 稳定错误码供调用方区分拒绝原因；具体文件系统异常保留为 cause。 */
 export class ProjectConfigError extends Error {
-  constructor(public readonly code: 'unsafe-file' | 'future-schema' | 'save-failed', message: string, cause?: unknown) {
+  constructor(public readonly code: 'unsafe-file' | 'future-schema' | 'save-failed' | 'durability-uncertain', message: string, cause?: unknown) {
     super(message, { cause });
     this.name = 'ProjectConfigError';
   }
@@ -120,7 +120,7 @@ export function loadProjectConfig(root: string, report: ThirdPartyRiskReport, kn
 function assertReplaceable(file: string): void {
   try {
     const existing: unknown = JSON.parse(readConfigFile(file));
-    if (isRecord(existing) && typeof existing.schemaVersion === 'number' && existing.schemaVersion > CONFIG_SCHEMA_VERSION) {
+    if (isRecord(existing) && typeof existing.schemaVersion === 'number' && Number.isInteger(existing.schemaVersion) && existing.schemaVersion > CONFIG_SCHEMA_VERSION) {
       throw new ProjectConfigError('future-schema', '项目配置来自更新版本，请升级 CodeSucker 后再保存');
     }
   } catch (error) {
@@ -144,8 +144,14 @@ export function saveProjectConfig(
   }, null, 2)}\n`;
   const temporary = path.join(root, `${CONFIG_NAME}.${randomUUID()}.tmp`);
   let fd: number | undefined;
+  let directoryFd: number | undefined;
   let owned = false;
+  let committed = false;
   try {
+    // Windows 不支持通过普通目录描述符执行 fsync；POSIX 同步 rename 的目录项。
+    if (process.platform !== 'win32') {
+      directoryFd = fs.openSync(root, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY ?? 0));
+    }
     fd = fs.openSync(temporary, 'wx', 0o600);
     owned = true;
     fs.writeFileSync(fd, contents, 'utf8');
@@ -156,11 +162,20 @@ export function saveProjectConfig(
     assertReplaceable(target);
     fs.renameSync(temporary, target);
     owned = false;
+    committed = true;
+    if (directoryFd !== undefined) fs.fsyncSync(directoryFd);
   } catch (error) {
+    if (committed) {
+      throw new ProjectConfigError('durability-uncertain', '项目配置已替换，但无法确认断电后的持久性，请检查存储设备并重新保存', error);
+    }
     throw new ProjectConfigError('save-failed', '项目配置保存失败，原配置未被替换，请检查目录权限后重试', error);
   } finally {
     try {
-      if (fd !== undefined) fs.closeSync(fd);
+      try {
+        if (fd !== undefined) fs.closeSync(fd);
+      } finally {
+        if (directoryFd !== undefined) fs.closeSync(directoryFd);
+      }
     } finally {
       if (owned) {
         try { fs.unlinkSync(temporary); } catch (error) {

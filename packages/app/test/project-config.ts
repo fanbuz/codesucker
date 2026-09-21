@@ -117,6 +117,12 @@ async function main() {
     assert.equal(validState.outDir, legal.outDir, '工程外导出目录仍合法');
     assert.equal(validState.files.find((file) => file.relPath === 'src/main.ts')?.included, false);
 
+    for (const schemaVersion of [1.5, 999.5, 0, -1, '2']) {
+      fs.writeFileSync(target, JSON.stringify({ schemaVersion, title: 'damaged' }));
+      assert.equal(load().status, 'invalid');
+      save(legal);
+      assert.deepEqual(load().config, legal, '非法 schema 必须允许用户重新保存修复');
+    }
     fs.writeFileSync(target, '{"schemaVersion":');
     assert.equal(load().status, 'invalid');
     save(legal);
@@ -134,6 +140,21 @@ async function main() {
       } finally { mocked.mock.restore(); }
       assert.deepEqual(fs.readFileSync(target), original, `${fault} 失败须保留原文件字节`);
       assert.deepEqual(tempFiles(), [], `${fault} 失败须清理临时文件`);
+    }
+    if (process.platform !== 'win32') {
+      const originalSync = fs.fsyncSync;
+      const directoryFailure = mock.method(fs, 'fsyncSync', (fd: number) => {
+        if (fs.fstatSync(fd).isDirectory()) throw new Error('injected directory sync failure');
+        return originalSync(fd);
+      });
+      try {
+        assert.throws(() => save({ ...legal, title: 'already committed' }), (error) => (
+          error instanceof ProjectConfigError && error.code === 'durability-uncertain'
+        ));
+      } finally { directoryFailure.mock.restore(); }
+      assert.equal(load().config?.title, 'already committed', '替换后目录同步失败，不得谎称原文件未变');
+      assert.deepEqual(tempFiles(), []);
+      save(legal);
     }
     const future = JSON.stringify({ schemaVersion: 999, newData: 'preserve' });
     fs.writeFileSync(target, future);
