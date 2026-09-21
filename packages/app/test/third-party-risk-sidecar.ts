@@ -1,3 +1,4 @@
+import { sanitizeProjectConfigValues } from '../src/main/project-config.ts';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -9,7 +10,7 @@ import {
   assertThirdPartyManifestDiscoveryUnchanged, assertThirdPartyManifestSnapshotUnchanged,
   assertThirdPartyRiskReportUnchanged, assertThirdPartyRiskScanBaselineUnchanged,
   buildThirdPartyRiskSidecar,
-  emptyThirdPartyRiskReport, sanitizeProjectConfigValues,
+  emptyThirdPartyRiskReport,
   trustedThirdPartyEvidenceRelPath, writeThirdPartyRiskSidecar,
 } from '../src/main/third-party-risk-sidecar.ts';
 

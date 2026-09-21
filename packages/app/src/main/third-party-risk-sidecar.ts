@@ -178,54 +178,6 @@ export function sanitizeThirdPartyRiskPreference(
   return { rulesVersion: report.rulesVersion, keptFindingIds };
 }
 
-function uniqueKnownPaths(input: unknown, knownRelPaths: ReadonlySet<string>): string[] | undefined {
-  if (!Array.isArray(input)) return undefined;
-  return [...new Set(input.filter((item): item is string => (
-    typeof item === 'string' && knownRelPaths.has(item)
-  )))];
-}
-
-/**
- * 配置 IPC 的可信边界：只保留当前 schema 已知字段，并把文件路径约束到当前扫描快照。
- * renderer 不能借由保存配置上传完整风险报告或额外私有字段。
- */
-export function sanitizeProjectConfigValues(
-  report: ThirdPartyRiskReport,
-  input: unknown,
-  knownRelPaths: ReadonlySet<string>,
-): Record<string, unknown> {
-  const values = isRecord(input) ? input : {};
-  const cleanInput = isRecord(values.clean) ? values.clean : null;
-  const clean = cleanInput
-    && typeof cleanInput.removeComments === 'boolean'
-    && typeof cleanInput.removeBlankLines === 'boolean'
-    && typeof cleanInput.maskSensitive === 'boolean'
-    && typeof cleanInput.wrapLongLines === 'boolean'
-    ? {
-        removeComments: cleanInput.removeComments,
-        removeBlankLines: cleanInput.removeBlankLines,
-        maskSensitive: cleanInput.maskSensitive,
-        wrapLongLines: cleanInput.wrapLongLines,
-      }
-    : null;
-  const order = uniqueKnownPaths(values.order, knownRelPaths);
-  const excludedRelPaths = uniqueKnownPaths(values.excludedRelPaths, knownRelPaths);
-  return {
-    ...(typeof values.title === 'string' ? { title: values.title } : {}),
-    ...(typeof values.owner === 'string' ? { owner: values.owner } : {}),
-    ...(values.sortMode === 'entry' || values.sortMode === 'mtime' || values.sortMode === 'manual'
-      ? { sortMode: values.sortMode }
-      : {}),
-    ...(order ? { order } : {}),
-    ...(excludedRelPaths ? { excludedRelPaths } : {}),
-    ...(clean ? { clean } : {}),
-    ...(typeof values.fmtDocx === 'boolean' ? { fmtDocx: values.fmtDocx } : {}),
-    ...(typeof values.fmtTxt === 'boolean' ? { fmtTxt: values.fmtTxt } : {}),
-    ...(typeof values.outDir === 'string' ? { outDir: values.outDir } : {}),
-    thirdPartyRisk: sanitizeThirdPartyRiskPreference(report, values.thirdPartyRisk),
-  };
-}
-
 export function thirdPartyFindingStatus(
   finding: ThirdPartyRiskFinding,
   includedRelPaths: ReadonlySet<string>,

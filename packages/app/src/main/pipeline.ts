@@ -9,6 +9,7 @@ import type {
   CleanedFile, CleanOptions, FileCandidate, FileEntry, PipelineProgress, ProjectConfig,
   ScanFileOutcome, ThirdPartyManifestIdentity, ThirdPartyRiskAnalysis, ThirdPartyRiskReport,
 } from '@codesucker/core';
+import { loadProjectConfig, saveProjectConfig } from './project-config';
 import { JobController, type JobHandle, type JobKind } from './job-controller';
 import { assertExportableSelection } from './export-guard';
 import {
@@ -35,7 +36,7 @@ import {
   assertThirdPartyManifestDiscoveryUnchanged, assertThirdPartyManifestSnapshotUnchanged,
   assertThirdPartyRiskReportUnchanged, assertThirdPartyRiskScanBaselineUnchanged,
   emptyThirdPartyRiskReport,
-  sanitizeProjectConfigValues, trustedThirdPartyEvidenceRelPath,
+  trustedThirdPartyEvidenceRelPath,
   writeThirdPartyRiskSidecar,
   type ThirdPartyRiskPreference,
 } from './third-party-risk-sidecar';
@@ -143,37 +144,6 @@ function createProgressReporter(job: JobHandle, sender: WebContents, workerCount
     };
     sender.send('project:progress', event);
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function loadProjectConfig(root: string): { config: Record<string, unknown> | null; warning: string | null } {
-  const configFile = path.join(root, '.codesucker.json');
-  if (!fs.existsSync(configFile)) return { config: null, warning: null };
-
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-    if (!isRecord(parsed)) return { config: null, warning: '项目配置格式无效，已忽略 .codesucker.json' };
-
-    const schema = parsed.schemaVersion;
-    if (schema === undefined) {
-      return { config: parsed, warning: `检测到旧版项目配置，将在下次保存时升级到 schema ${CONFIG_SCHEMA_VERSION}` };
-    }
-    if (!Number.isInteger(schema) || (schema as number) < 1) {
-      return { config: null, warning: '项目配置 schemaVersion 无效，已忽略该配置' };
-    }
-    if ((schema as number) > CONFIG_SCHEMA_VERSION) {
-      return {
-        config: null,
-        warning: `项目配置来自更新版本（schema ${schema}），当前仅支持 ${CONFIG_SCHEMA_VERSION}，请升级 CodeSucker`,
-      };
-    }
-    return { config: parsed, warning: null };
-  } catch {
-    return { config: null, warning: '项目配置无法解析，已忽略 .codesucker.json' };
-  }
 }
 
 function touchRecent(patch: RecentProjectPatch) {
@@ -302,7 +272,7 @@ async function scanWithWorkers(
     const entryOrder = sortFiles(result.files, 'entry').map((file) => file.relPath);
     const mtimeOrder = sortFiles(result.files, 'mtime').map((file) => file.relPath);
     if (result.files.length > 0) touchRecent({ name: path.basename(request.root), root: request.root });
-    const saved = loadProjectConfig(request.root);
+    const saved = loadProjectConfig(rootSnapshot.realPath, thirdPartyRisk, new Set(result.files.map((file) => file.relPath)));
     const langCounts: Record<string, number> = {};
     for (const file of result.files) langCounts[file.lang] = (langCounts[file.lang] ?? 0) + 1;
     return {
@@ -627,13 +597,7 @@ export function registerPipelineIpc() {
 
   ipcMain.handle('project:saveConfig', (_event, root: string, scanSessionId: string, config: unknown) => {
     const scan = requireCurrentScan(root, scanSessionId);
-    const persisted = {
-      ...sanitizeProjectConfigValues(scan.thirdPartyRisk, config, new Set(scan.byRel.keys())),
-      schemaVersion: CONFIG_SCHEMA_VERSION,
-      appVersion: app.getVersion(),
-      rulesVersion: RULES_VERSION,
-    };
-    fs.writeFileSync(path.join(root, '.codesucker.json'), `${JSON.stringify(persisted, null, 2)}\n`);
+    saveProjectConfig(scan.rootSnapshot, scan.thirdPartyRisk, config, new Set(scan.byRel.keys()), app.getVersion());
     return true;
   });
 }
