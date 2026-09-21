@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { mock } from 'node:test';
 import { defaultCleanOptions } from '@codesucker/core';
 import {
@@ -54,18 +55,18 @@ async function assertRendererRestores(input: unknown) {
 }
 
 function childSave(extra: string): Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }> {
-  const configUrl = new URL('../src/main/project-config.ts', import.meta.url).href;
-  const rootUrl = new URL('../src/main/project-file.ts', import.meta.url).href;
-  const riskUrl = new URL('../src/main/third-party-risk-sidecar.ts', import.meta.url).href;
-  const source = `import fs from 'node:fs';
-    import { saveProjectConfig } from ${JSON.stringify(configUrl)};
-    import { captureProjectRoot } from ${JSON.stringify(rootUrl)};
-    import { emptyThirdPartyRiskReport } from ${JSON.stringify(riskUrl)};
+  const configUrl = fileURLToPath(new URL('../src/main/project-config.ts', import.meta.url));
+  const rootUrl = fileURLToPath(new URL('../src/main/project-file.ts', import.meta.url));
+  const riskUrl = fileURLToPath(new URL('../src/main/third-party-risk-sidecar.ts', import.meta.url));
+  const source = `const fs = require('node:fs');
+    const { saveProjectConfig } = require(${JSON.stringify(configUrl)});
+    const { captureProjectRoot } = require(${JSON.stringify(rootUrl)});
+    const { emptyThirdPartyRiskReport } = require(${JSON.stringify(riskUrl)});
     const root = ${JSON.stringify(root)};
     const save = (title) => saveProjectConfig(captureProjectRoot(root), emptyThirdPartyRiskReport(2), { title }, new Set(), '0.5.2');
     ${extra}`;
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source]);
+    const child = spawn(process.execPath, ['--require', 'tsx/cjs', '-e', source]);
     let output = '';
     child.stdout.on('data', (data) => { output += data; });
     child.stderr.on('data', (data) => { output += data; });
