@@ -39,7 +39,7 @@ async function main() {
     const service = new UpdateService({
       currentVersion:'0.5.2',platform:'darwin',arch:process.arch,executable,userData,tempDir:root,resourcesPath:path.join(source,'Contents/Resources'),
       publicKey:publicKey.export({type:'spki',format:'pem'}).toString(),packaged:true,pid:old.pid,
-      check:async()=>({status:'available',currentVersion:'0.5.2',latestVersion:version,releaseUrl:'',publishedAt:null,notes:[],checkedAt:'',fromCache:false}),
+      check:async()=>({status:'available',currentVersion:'0.5.2',latestVersion:version,releaseUrl:`https://github.com/fanbuz/codesucker/releases/tag/v${version}`,publishedAt:null,notes:[],checkedAt:'',fromCache:false}),
       fetcher:async url=>url.endsWith('.json') ? new Response(manifest) : url.endsWith('.sig') ? new Response(signature) : new Response(Readable.toWeb(createReadStream(archive)) as ReadableStream),
       onState:state=>states.push(state.phase),lockPipeline:()=>true,unlockPipeline:()=>{},
       quit:async()=>{old.kill('SIGTERM');await exited;},

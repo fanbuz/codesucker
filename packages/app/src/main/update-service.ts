@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { rmSync } from 'node:fs';
 import * as path from 'node:path';
 import type { UpdateCheckResult, UpdateInstallState } from '../shared/update-types';
+import { supportsInAppUpdate } from '../shared/update-types';
 import type { FetchLike } from './update-check';
 import { downloadUpdate, readUpdateText, updateResponse } from './update-download';
 import { releaseDownloadUrl, verifyUpdateManifest } from './update-manifest';
@@ -48,6 +49,7 @@ export class UpdateService {
       const release = await o.check();
       controller.signal.throwIfAborted();
       if (release.status !== 'available') throw new Error(release.status === 'error' ? release.message : '当前没有可用更新');
+      if (!supportsInAppUpdate(release)) throw new Error('此版本需手动安装，请使用官方下载入口');
       const version = release.latestVersion;
       const manifest = await readUpdateText(await updateResponse(releaseDownloadUrl(version, 'update-manifest.json'), o.fetcher, controller.signal), 64 * 1024);
       const signature = await readUpdateText(await updateResponse(releaseDownloadUrl(version, 'update-manifest.sig'), o.fetcher, controller.signal), 1024);

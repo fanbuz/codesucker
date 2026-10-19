@@ -10,6 +10,7 @@ import { downloadUpdate, updateResponse } from '../src/main/update-download.ts';
 import { extractUpdateZip } from '../src/main/update-archive.ts';
 import { UpdateService } from '../src/main/update-service.ts';
 import { JobController } from '../src/main/job-controller.ts';
+import { supportsInAppUpdate } from '../src/shared/update-types.ts';
 
 async function main() {
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
@@ -25,6 +26,9 @@ assert.throws(() => verifyUpdateManifest(Buffer.from(manifest.toString().replace
 const other = generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
 assert.throws(() => verifyUpdateManifest(manifest, signature, other, '0.5.3', '0.5.2', 'win32', 'x64'), /签名/);
 assert.throws(() => releaseDownloadUrl('0.5.3', '../../evil.exe'), /地址/);
+assert.equal(supportsInAppUpdate({latestVersion:'0.5.3',releaseUrl:'https://github.com/fanbuz/codesucker/releases/tag/v0.5.3'}),true);
+assert.equal(supportsInAppUpdate({latestVersion:'0.6.0',releaseUrl:'https://github.com/fanbuz/codesucker/releases/tag/v0.6.0%2Bbuild.1'}),false);
+assert.equal(supportsInAppUpdate({latestVersion:'0.6.0',releaseUrl:'https://github.com/fanbuz/codesucker/releases/tag/V0.6.0'}),false);
 await assert.rejects(updateResponse('http://github.com/file', async () => new Response(), new AbortController().signal), /信任/);
 await assert.rejects(updateResponse(releaseDownloadUrl('0.5.3', asset.name), async () => new Response(null, { status: 302, headers: {location: 'https://evil.example/file'} }), new AbortController().signal), /信任/);
 
@@ -65,7 +69,7 @@ try {
   const service = new UpdateService({
     currentVersion: '0.5.2', platform: 'win32', arch: 'x64', executable,
     userData: root, tempDir: root, resourcesPath: root, packaged: true, publicKey: publicPem,
-    check: async () => ({ status: 'available', currentVersion: '0.5.2', latestVersion: '0.5.3', releaseUrl: '', publishedAt: null, notes: [], checkedAt: '', fromCache: false }),
+    check: async () => ({ status: 'available', currentVersion: '0.5.2', latestVersion: '0.5.3', releaseUrl: 'https://github.com/fanbuz/codesucker/releases/tag/v0.5.3', publishedAt: null, notes: [], checkedAt: '', fromCache: false }),
     fetcher: async url => new Response(url.endsWith('.json') ? manifest : url.endsWith('.sig') ? signature : bytes),
     onState: state => states.push(state.phase), lockPipeline: () => jobs.suspendIfIdle(), unlockPipeline: () => jobs.resume(), quit: async () => {},
   });

@@ -6,7 +6,7 @@ import {
   sameScanExcludeRules, validateScanExcludeRule,
 } from '../scan-exclude-rules';
 import { checkForUpdates, toast, useStore } from '../store';
-import type { UpdateInstallState } from '../../../shared/update-types';
+import { supportsInAppUpdate, type UpdateInstallState } from '../../../shared/update-types';
 
 const LINKS = {
   author: 'https://github.com/fanbuz',
@@ -44,6 +44,7 @@ export default function Settings() {
   const rulesDirty = !sameScanExcludeRules(normalizeScanExcludeRules(rules), savedRules);
   const update = s.updateResult;
   const hasUpdate = update?.status === 'available';
+  const installable = hasUpdate && supportsInAppUpdate(update);
   const updateTitle = downloading ? (installation.phase === 'verifying' ? '正在验证更新包…' : '正在下载更新…')
     : ready ? `v${installation.version} 已准备好安装`
     : installing ? '正在重启并安装更新…'
@@ -63,7 +64,7 @@ export default function Settings() {
     : s.updateChecking
     ? '只查询公开版本元数据，不会上传项目或源码'
     : hasUpdate
-      ? `当前 v${update.currentVersion}${update.publishedAt ? ` · 发布于 ${new Date(update.publishedAt).toLocaleDateString('zh-CN')}` : ''}`
+      ? `当前 v${update.currentVersion}${update.publishedAt ? ` · 发布于 ${new Date(update.publishedAt).toLocaleDateString('zh-CN')}` : ''}${installable ? '' : ' · 此版本需手动下载安装'}`
       : update?.status === 'up-to-date'
         ? `当前 v${update.currentVersion} · GitHub 最新 v${update.latestVersion}`
         : update?.status === 'error'
@@ -73,7 +74,11 @@ export default function Settings() {
   const handleUpdateAction = async () => {
     try {
       if (ready) { await window.cs.installUpdate(); return; }
-      if (hasUpdate) { await window.cs.downloadUpdate(); return; }
+      if (hasUpdate) {
+        if (installable) await window.cs.downloadUpdate();
+        else await window.cs.openExternal(update.releaseUrl);
+        return;
+      }
       await checkForUpdates(true);
     } catch (error) { toast(error instanceof Error ? error.message : '更新失败，请稍后重试'); }
   };
@@ -169,7 +174,7 @@ export default function Settings() {
               ) : null}
             </div>
             <div className="update-card__actions">
-              {hasUpdate && !installing && (
+              {hasUpdate && installable && !installing && (
                 <button type="button" className="btn-ghost" onClick={() => window.cs.openExternal(update.releaseUrl).catch(() => toast('无法打开官方下载页面'))}>手动下载</button>
               )}
               {downloading && (
@@ -183,7 +188,7 @@ export default function Settings() {
               )}
               <button className={hasUpdate ? 'btn-primary update-card__action' : 'btn-ghost update-card__action'}
                 disabled={s.updateChecking || downloading || installing || (ready && !!s.activeJobId)} onClick={handleUpdateAction}>
-                {installing ? '正在安装…' : ready ? '重启并安装' : downloading ? '准备更新中…' : s.updateChecking ? '检查中…' : hasUpdate ? (installation.phase === 'error' ? '重试下载' : '下载更新') : update?.status === 'up-to-date' ? '重新检查' : '检查更新'}
+                {installing ? '正在安装…' : ready ? '重启并安装' : downloading ? '准备更新中…' : s.updateChecking ? '检查中…' : hasUpdate ? (!installable ? '前往下载' : installation.phase === 'error' ? '重试下载' : '下载更新') : update?.status === 'up-to-date' ? '重新检查' : '检查更新'}
               </button>
             </div>
           </section>
