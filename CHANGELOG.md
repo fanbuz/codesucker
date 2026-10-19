@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-19
+
+### Fixed
+
+- macOS 应用包、Helper 与内嵌框架使用完整的 ad hoc 临时签名，修复只保留 Electron 链接器签名导致应用包完整性校验失败的问题；此签名免费，不代表 Developer ID 正式签名或 Apple 公证
+
+### Changed
+
+- macOS x64/arm64 安装包上传前必须通过应用包及内嵌组件的严格签名校验，原生架构增加启动冒烟；README 和 Release 说明明确临时签名与 Gatekeeper 的处理边界
+
 ## [0.5.2] - 2026-09-21
 
 ### Fixed

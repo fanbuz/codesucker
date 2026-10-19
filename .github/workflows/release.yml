@@ -53,11 +53,15 @@ jobs:
           - label: macOS x64
             runner: macos-14
             script: dist:mac:x64
+            app: packages/app/release/mac/CodeSucker.app
+            arch: x86_64
             artifact: codesucker-macos-x64
             path: packages/app/release/CodeSucker-*-mac-x64.dmg
           - label: macOS arm64
             runner: macos-14
             script: dist:mac:arm64
+            app: packages/app/release/mac-arm64/CodeSucker.app
+            arch: arm64
             artifact: codesucker-macos-arm64
             path: packages/app/release/CodeSucker-*-mac-arm64.dmg
           - label: Windows x64
@@ -82,6 +86,36 @@ jobs:
 
       - name: Build installer
         run: npm run ${{ matrix.script }}
+
+      - name: Verify macOS application signature
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APP_PATH: ${{ matrix.app }}
+        run: |
+          codesign --verify --deep --strict --all-architectures --verbose=2 "$APP_PATH"
+          signature=$(codesign --display --verbose=4 "$APP_PATH" 2>&1)
+          printf '%s\n' "$signature"
+          grep -Fxq 'Signature=adhoc' <<< "$signature"
+          grep -Fxq 'Identifier=com.fanbuz.codesucker' <<< "$signature"
+          test -s "$APP_PATH/Contents/_CodeSignature/CodeResources"
+
+      - name: Smoke test native macOS application
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APP_PATH: ${{ matrix.app }}
+          APP_ARCH: ${{ matrix.arch }}
+        run: |
+          if [[ "$(uname -m)" != "$APP_ARCH" ]]; then
+            echo "Skipping startup smoke test for cross-compiled $APP_ARCH application"
+            exit 0
+          fi
+          "$APP_PATH/Contents/MacOS/CodeSucker" --user-data-dir="$RUNNER_TEMP/codesucker-smoke" &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true' EXIT
+          sleep 5
+          kill -0 "$app_pid"
 
       - name: Smoke test Windows application
         if: matrix.label == 'Windows x64'
@@ -143,5 +177,5 @@ jobs:
             --verify-tag \
             --title "CodeSucker $GITHUB_REF_NAME" \
             --generate-notes \
-            --notes $'### 安装与处理边界\n\n当前 macOS 安装包尚未进行 Apple Developer ID 签名与公证。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。\n\nCodeSucker 自身的源码扫描、第三方代码线索分析、清洗、分页、校验和导出全部在本机运行，不调用任何本地或云端 LLM，也不向模型服务发送源码。第三方代码线索只提供启发式证据与筛选建议，不自动判定代码归属，也不构成法律意见。更新检测仅查询 GitHub Release 公开版本元数据。' \
+            --notes $'### 安装与处理边界\n\nmacOS 应用包及内嵌组件已使用 ad hoc 临时签名并通过完整性校验，尚未进行 Apple Developer ID 正式签名与公证。临时签名不能验证开发者身份，也不保证通过 Gatekeeper。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。\n\nCodeSucker 自身的源码扫描、第三方代码线索分析、清洗、分页、校验和导出全部在本机运行，不调用任何本地或云端 LLM，也不向模型服务发送源码。第三方代码线索只提供启发式证据与筛选建议，不自动判定代码归属，也不构成法律意见。更新检测仅查询 GitHub Release 公开版本元数据。' \
             "${release_options[@]}"
