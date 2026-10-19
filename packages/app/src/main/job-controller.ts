@@ -25,9 +25,10 @@ interface ActiveJob {
 export class JobController {
   private active: ActiveJob | null = null;
   private suspended = false;
+  private readonly inFlight = new Map<string, number>();
 
   suspendIfIdle(): boolean {
-    if (this.active || this.suspended) return false;
+    if (this.inFlight.size || this.suspended) return false;
     this.suspended = true;
     return true;
   }
@@ -39,6 +40,7 @@ export class JobController {
     if (!id.trim()) throw new Error('jobId 不能为空');
     this.active?.controller.abort(new JobCancelledError('已由新任务替代'));
     const job: ActiveJob = { id, kind, controller: new AbortController() };
+    this.inFlight.set(id, (this.inFlight.get(id) ?? 0) + 1);
     this.active = job;
 
     return {
@@ -62,6 +64,9 @@ export class JobController {
   }
 
   finish(id: string): void {
+    const remaining = (this.inFlight.get(id) ?? 0) - 1;
+    if (remaining > 0) this.inFlight.set(id, remaining);
+    else this.inFlight.delete(id);
     if (this.active?.id === id) this.active = null;
   }
 

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { rmSync } from 'node:fs';
 import * as path from 'node:path';
 import type { UpdateCheckResult, UpdateInstallState } from '../shared/update-types';
@@ -100,6 +100,7 @@ export class UpdateService {
       if (o.platform === 'darwin') await verifyMacBundle(this.artifact, version, o.arch);
       await rm(path.join(o.userData, 'update-install-error.txt'), { force: true });
       await o.beforeInstall?.();
+      if (o.platform === 'win32') await writeFile(path.join(o.userData,'update-cache.json'), JSON.stringify({version,work:this.work}), {mode:0o600});
       await startUpdateHelper({ ...o, artifact: this.artifact, work: this.work, version, pid: o.pid ?? process.pid });
       await o.quit();
     } catch (error) {

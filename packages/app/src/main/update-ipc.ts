@@ -3,7 +3,7 @@ import { createFallbackFetcher, createUpdateChecker } from './update-check';
 import { UpdateService } from './update-service';
 import { UPDATE_PUBLIC_KEY } from './update-public-key';
 import { lastUpdateFailure } from './update-install';
-import { lockPipelineForUpdate, shutdownPipeline, unlockPipelineForUpdate } from './pipeline';
+import { lockPipelineForUpdate, preparePipelineForUpdate, unlockPipelineForUpdate } from './pipeline';
 
 export function registerUpdateIpc(): void {
   const check = createUpdateChecker({
@@ -22,7 +22,7 @@ export function registerUpdateIpc(): void {
     check: () => check(true), fetcher: (input, init) => net.fetch(input, init),
     onState: state => { for (const window of BrowserWindow.getAllWindows()) window.webContents.send('update:state', state); },
     lockPipeline: lockPipelineForUpdate, unlockPipeline: unlockPipelineForUpdate,
-    beforeInstall: shutdownPipeline, quit: async () => { app.quit(); },
+    beforeInstall: preparePipelineForUpdate, quit: async () => { app.quit(); },
   });
   ipcMain.handle('update:state', async () => {
     const state = service.getState();

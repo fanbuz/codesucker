@@ -83,6 +83,11 @@ try {
   jobs.resume();
   jobs.start('new', 'scan');
   assert.equal(jobs.suspendIfIdle(), false);
+  jobs.cancel('new');
+  assert.equal(jobs.suspendIfIdle(), false, '取消后仍在收尾的任务必须阻止安装');
+  jobs.finish('new');
+  assert.equal(jobs.suspendIfIdle(), true);
+  jobs.resume();
 
   const releaseRoot = path.join(root, 'release-project');
   const releaseAssets = path.join(releaseRoot, 'assets');

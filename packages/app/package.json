@@ -38,10 +38,6 @@
       {
         "from": "resources/mac-update-helper.sh",
         "to": "mac-update-helper.sh"
-      },
-      {
-        "from": "resources/win-update-helper.ps1",
-        "to": "win-update-helper.ps1"
       }
     ],
     "mac": {

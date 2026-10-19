@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { registerPipelineIpc, shutdownPipeline } from './pipeline';
 import { isTrustedExternalUrl } from './external-url';
 import { registerUpdateIpc } from './update-ipc';
-import { acknowledgeMacUpdate } from './update-install';
+import { acknowledgeMacUpdate, cleanupWindowsUpdate } from './update-install';
 import {
   loadWindowState, minimumSizeForBounds, showRestoredWindow,
   WINDOW_STATE_CONFIG_NAME, WindowStateTracker,
@@ -43,6 +43,7 @@ function createWindow() {
     if (process.platform === 'darwin') {
       void acknowledgeMacUpdate(process.execPath, app.getVersion(), process.argv).catch(() => {});
     }
+    if (process.platform === 'win32') void cleanupWindowsUpdate(app.getPath('userData'), app.getPath('temp'), app.getVersion());
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {

@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { closeSync, constants, openSync } from 'node:fs';
-import { access, copyFile, lstat, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, copyFile, lstat, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -39,15 +39,20 @@ export async function startUpdateHelper(options: {
   userData: string; resourcesPath: string; pid: number;
 }): Promise<void> {
   const { platform, executable, artifact, work, version, userData, resourcesPath, pid } = options;
-  const source = platform === 'darwin' ? 'mac-update-helper.sh' : 'win-update-helper.ps1';
+  // NSIS already implements app shutdown, replacement, data retention and relaunch.
+  if (platform === 'win32') {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(artifact, ['--updated', '/S', '--force-run', `/D=${path.dirname(executable)}`], {detached:true,stdio:'ignore',windowsHide:true});
+      child.once('error', reject);
+      child.once('spawn', () => { child.unref(); resolve(); });
+    });
+    return;
+  }
+  const source = 'mac-update-helper.sh';
   const helper = path.join(work, source);
-  if (platform === 'darwin') await copyFile(path.join(resourcesPath, source), helper);
-  else await writeFile(helper, '\ufeff' + await readFile(path.join(resourcesPath, source), 'utf8'), { mode: 0o600 });
-  const command = platform === 'darwin' ? '/bin/sh' : 'powershell.exe';
-  const args = platform === 'darwin'
-    ? [helper, String(pid), macAppPath(executable), artifact, work, version, userData]
-    : ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helper,
-      '-OldPid', String(pid), '-Installer', artifact, '-TargetDir', path.dirname(executable), '-UserData', userData, '-Work', work];
+  await copyFile(path.join(resourcesPath, source), helper);
+  const command = '/bin/sh';
+  const args = [helper, String(pid), macAppPath(executable), artifact, work, version, userData];
   await new Promise<void>((resolve, reject) => {
     const logFile = path.join(work, 'helper.log');
     const log = openSync(logFile, 'a', 0o600);
@@ -75,6 +80,19 @@ export async function startUpdateHelper(options: {
       })().catch(reject);
     });
   });
+}
+
+export async function cleanupWindowsUpdate(userData: string, tempDir: string, version: string): Promise<void> {
+  const marker = path.join(userData, 'update-cache.json');
+  try {
+    const stat = await lstat(marker);
+    if (!stat.isFile() || stat.size > 4096) return;
+    const cached = JSON.parse(await readFile(marker, 'utf8'));
+    if (cached.version !== version || typeof cached.work !== 'string' || !/^\.codesucker-update-[A-Za-z0-9]+$/.test(path.basename(cached.work))) return;
+    if ((await realpath(path.dirname(cached.work))).toLowerCase() !== (await realpath(tempDir)).toLowerCase()) return;
+    await rm(cached.work, {recursive:true,force:true,maxRetries:5,retryDelay:1000});
+    await rm(marker, {force:true});
+  } catch { /* Installer files may remain locked until NSIS exits; retry on next launch. */ }
 }
 
 /** Only acknowledge a private sibling staging directory created by this updater. */

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -31,16 +32,19 @@ async function main() {
     await wait(4000);
     assert.equal(old.exitCode,null);
     const installer=path.resolve(`packages/app/release/CodeSucker-${version}-win-x64.exe`);
+    const expectedHash=createHash('sha256').update(await readFile('packages/app/release/win-unpacked/CodeSucker.exe')).digest('hex');
     await startUpdateHelper({platform:'win32',executable,artifact:installer,work,version,userData,resourcesPath:path.resolve('packages/app/resources'),pid:old.pid!});
     old.kill();
     let finished=false;
     for(let attempt=0;attempt<240;attempt++) {
       await wait(500);
-      if(!(await readdir(root)).includes('update-work')) {finished=true;break;}
+      try {
+        const hash=createHash('sha256').update(await readFile(executable)).digest('hex');
+        const tasks=await run('tasklist',['/FI','IMAGENAME eq CodeSucker.exe','/FO','CSV','/NH']);
+        if(hash===expectedHash && tasks.stdout.includes('CodeSucker.exe')) {finished=true;break;}
+      } catch { /* Wait while the installer replaces the executable. */ }
     }
     assert.equal(finished,true,'安装助手必须完成安装并重启');
-    const result=await run('powershell.exe',['-NoProfile','-Command',`(Get-Item -LiteralPath '${executable.replace(/'/g,"''")}').VersionInfo.ProductVersion`]);
-    assert.ok(result.stdout.trim().startsWith(version));
     assert.equal((await readFile(path.join(userData,'retained-project.json'))).toString(),'project retained');
     console.log(`✅ Windows NSIS 0.5.2 → ${version} 安装替换、重启及用户数据保留通过`);
   } finally {
