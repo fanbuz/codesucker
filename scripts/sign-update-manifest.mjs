@@ -5,7 +5,13 @@ import { join } from 'node:path';
 const directory = process.argv[2];
 const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const key = process.env.CODESUCKER_UPDATE_SIGNING_KEY;
-if (!directory || !key || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('缺少更新清单签名参数');
+if (!directory) throw new Error('缺少更新清单输出目录');
+// The installed updater follows stable x.y.z releases only; keep all other SemVer releases publishable.
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  console.log('此版本不发布应用内更新清单，继续发布供手动安装的版本');
+  process.exit(0);
+}
+if (!key) throw new Error('缺少更新清单签名密钥');
 // Fail before publishing if a wrong CI key is configured.
 const publicKeySource = readFileSync(new URL('../packages/app/src/main/update-public-key.ts', import.meta.url), 'utf8');
 const expectedKey = JSON.parse(publicKeySource.match(/UPDATE_PUBLIC_KEY = (".*");/)[1]);

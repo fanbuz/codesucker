@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { constants } from 'node:fs';
+import { closeSync, constants, openSync } from 'node:fs';
 import { access, copyFile, lstat, readFile, realpath, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -49,14 +49,17 @@ export async function startUpdateHelper(options: {
     : ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helper,
       '-OldPid', String(pid), '-Installer', artifact, '-TargetDir', path.dirname(executable), '-UserData', userData, '-Work', work];
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    const logFile = path.join(work, 'helper.log');
+    const log = openSync(logFile, 'a', 0o600);
+    const child = spawn(command, args, { detached: true, stdio: ['ignore', log, log], windowsHide: true });
+    closeSync(log);
     let exited = false;
     let settled = false;
     child.once('exit', () => { exited = true; });
     child.once('error', error => { settled = true; reject(error); });
     child.once('spawn', () => {
       void (async () => {
-        for (let attempt = 0; attempt < 50 && !settled; attempt++) {
+        for (let attempt = 0; attempt < 150 && !settled; attempt++) {
           try {
             await access(path.join(work, 'helper-ready'));
             settled = true; child.unref(); resolve(); return;
@@ -64,7 +67,11 @@ export async function startUpdateHelper(options: {
           if (exited) break;
           await new Promise(yes => setTimeout(yes, 100));
         }
-        if (!settled) { settled = true; child.kill(); reject(new Error('更新助手未能启动，应用尚未退出，请重试或手动安装')); }
+        if (!settled) {
+          settled = true; child.kill();
+          const detail = (await readFile(logFile, 'utf8').catch(() => '')).slice(0, 4000);
+          reject(new Error('更新助手未能启动，应用尚未退出，请重试或手动安装', { cause: detail }));
+        }
       })().catch(reject);
     });
   });
