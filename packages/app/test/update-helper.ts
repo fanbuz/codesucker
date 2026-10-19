@@ -9,8 +9,9 @@ async function main() {
 if (process.platform !== 'win32') {
   const root = await mkdtemp(path.join(tmpdir(), 'codesucker-helper-'));
   try {
-    for (const success of [true, false]) {
-      const dir = path.join(root, success ? 'success' : 'rollback');
+    for (const outcome of ['success', 'crash', 'hung']) {
+      const success = outcome === 'success';
+      const dir = path.join(root, outcome);
       const target = path.join(dir, "Installed app's space.app");
       const work = path.join(dir, '.codesucker-update-test');
       const staged = path.join(work, 'new.app');
@@ -24,12 +25,23 @@ if (process.platform !== 'win32') {
       await writeFile(path.join(staged, 'new-marker'), 'new');
       await writeFile(path.join(staged, 'Contents/MacOS/CodeSucker'), success
         ? '#!/bin/sh\nreceipt=${2#--codesucker-update-receipt=}\nprintf 0.5.3 > "$receipt"\nsleep 2\n'
-        : '#!/bin/sh\nexit 1\n', {mode:0o755});
+        : outcome === 'hung' ? '#!/bin/sh\ntrap "" TERM\nexec /bin/sleep 60\n' : '#!/bin/sh\nexit 1\n', {mode:0o755});
       const old = spawn('/bin/sleep', ['30']);
-      const helper = spawn('/bin/sh', [fileURLToPath(new URL('../resources/mac-update-helper.sh', import.meta.url)), String(old.pid), target, staged, work, '0.5.3', data]);
+      let helperFile = fileURLToPath(new URL('../resources/mac-update-helper.sh', import.meta.url));
+      if (outcome === 'hung') {
+        // Keep the real signal/rollback path; shorten only the startup polling interval for this fixture.
+        const source = (await readFile(helperFile,'utf8')).replace('[ "$count" -lt 120 ]', '[ "$count" -lt 4 ]');
+        helperFile = path.join(dir,'helper.sh');
+        await writeFile(helperFile,source);
+      }
+      const helper = spawn('/bin/sh', [helperFile, String(old.pid), target, staged, work, '0.5.3', data], {stdio:'ignore'});
       const finished = new Promise<number | null>((resolve, reject) => { helper.once('exit', resolve); helper.once('error', reject); });
       old.kill();
-      assert.equal(await finished, success ? 0 : 1);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const timeout = new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>{helper.kill('SIGKILL');reject(new Error('更新回滚不能无限等待挂起进程'));},10000);});
+        assert.equal(await Promise.race([finished,timeout]), success ? 0 : 1);
+      } finally {clearTimeout(timer);}
       assert.equal((await readFile(path.join(data, 'project.json'))).toString(), 'retain');
       assert.equal((await readFile(path.join(target, success ? 'new-marker' : 'old-marker'))).toString(), success ? 'new' : 'old');
     }

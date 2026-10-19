@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -45,11 +45,13 @@ async function main() {
       } catch { /* Wait while the installer replaces the executable. */ }
     }
     assert.equal(finished,true,'安装助手必须完成安装并重启');
+    await wait(5000);
+    assert.ok((await run('tasklist',['/FI','IMAGENAME eq CodeSucker.exe','/FO','CSV','/NH'])).stdout.includes('CodeSucker.exe'),'重启后的新版必须持续运行');
     assert.equal((await readFile(path.join(userData,'retained-project.json'))).toString(),'project retained');
     console.log(`✅ Windows NSIS 0.5.2 → ${version} 安装替换、重启及用户数据保留通过`);
   } finally {
     await run('taskkill',['/IM','CodeSucker.exe','/F','/T']).catch(()=>{});
-    await rm(root,{recursive:true,force:true});
+    await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:500});
   }
 }
 void main().catch(error=>{console.error(error);process.exitCode=1;});

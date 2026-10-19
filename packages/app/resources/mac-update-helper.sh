@@ -45,6 +45,12 @@ while kill -0 "$new_pid" 2>/dev/null && [ "$count" -lt 120 ]; do
 done
 
 kill "$new_pid" 2>/dev/null || true
+count=0
+while kill -0 "$new_pid" 2>/dev/null && [ "$count" -lt 20 ]; do
+  count=$((count + 1))
+  sleep 0.1
+done
+kill -9 "$new_pid" 2>/dev/null || true
 wait "$new_pid" 2>/dev/null || true
 mv "$target" "$work/failed.app"
 mv "$backup" "$target"
