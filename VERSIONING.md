@@ -127,7 +127,7 @@ tag 校验会拒绝缺少对应版本日期标题的发布。
 | --- | --- | --- |
 | PR 创建、重新打开、推送修复提交 | `Verify` | 工作流语法检查、版本/许可证检查、测试、构建和 worker 集成验证 |
 | 推送到 `main` | `Verify` | 验证合并后的代码 |
-| 手动运行 | `Package and Release` | 一次完整验证、三平台安装包和 Windows 启动冒烟；不发布 Release |
+| 手动运行 | `Package and Release` | 一次完整验证、三平台安装包、macOS 签名校验及原生架构启动冒烟、Windows 启动冒烟；不发布 Release |
 | 推送 `v*` 标签 | `Package and Release` | 标签校验、一次完整验证、三平台打包、校验和与 GitHub Release |
 
 普通 PR 不生成安装包。单独提交 `@codex` 审核评论不会触发这两个工作流；审核后的修复提交会重新运行 `Verify`。CI 的旧运行会被同一 PR 的新运行取消。
@@ -161,8 +161,10 @@ gh workflow run release.yml --repo fanbuz/codesucker --ref <branch>
 8. 推送 main 与 tag；`Verify` 验证 main，标签只触发 `Package and Release`，先校验 tag、版本和 CHANGELOG 一致再安装依赖和运行完整验证
 9. 验证通过后，`Package and Release` 生成 macOS x64、macOS arm64、Windows x64 安装包与 SHA-256 校验文件，并创建 GitHub Release；预发布标签生成 pre-release
 
-当前发布流程暂不产出 Linux 安装包；macOS 安装包未签名、未公证，必须在 Release 说明和 README 中保留 Gatekeeper 指引。正式签名凭据只能存放在 GitHub Secrets，不得写入仓库或构建日志。
+当前发布流程暂不产出 Linux 安装包。从 v0.5.3 起，macOS 应用包及内嵌组件显式使用 ad hoc 临时签名（`mac.identity: "-"`）；当前 electron-builder 版本配合 `hardenedRuntime: false`，避免没有 Team ID 时的库验证启动失败。上传安装包前运行 `codesign --verify --deep --strict --all-architectures`，并检查应用标识、签名类型与资源封印；原生架构执行启动冒烟，跨架构产物仍必须通过签名校验。
+
+临时签名不需要付费证书，但不能验证开发者身份，也不能代替 Developer ID 正式签名与 Apple 公证；Release 说明和 README 必须保留 Gatekeeper 指引。后续接入正式签名时应重新启用 hardened runtime 并配置相应 entitlements。正式签名凭据只能存放在 GitHub Secrets，不得写入仓库或构建日志。
 
 ## 当前版本
 
-源码当前产品版本为 `0.5.2`。正式发布以 `v0.5.2` tag 和对应 GitHub Release 为准；仅修改源码中的版本字段不代表已经发布。
+源码当前产品版本为 `0.5.3`。正式发布以 `v0.5.3` tag 和对应 GitHub Release 为准；仅修改源码中的版本字段不代表已经发布。

@@ -1,6 +1,6 @@
 {
   "name": "@codesucker/app",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "离线生成符合软件著作权申报规范的源程序文档",
   "author": {
@@ -39,6 +39,8 @@
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "hardenedRuntime": false,
       "target": "dmg",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
