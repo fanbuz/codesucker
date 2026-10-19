@@ -17,3 +17,11 @@ export type UpdateCheckResult =
       message: string;
       fromCache: false;
     };
+
+export interface UpdateInstallState {
+  phase: 'idle' | 'downloading' | 'verifying' | 'ready' | 'installing' | 'error';
+  version?: string;
+  received?: number;
+  total?: number;
+  message?: string;
+}

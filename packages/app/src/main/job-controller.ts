@@ -24,8 +24,18 @@ interface ActiveJob {
 /** 单窗口流水线一次只接受一个活跃任务；新任务会使旧任务结果立即失效。 */
 export class JobController {
   private active: ActiveJob | null = null;
+  private suspended = false;
+
+  suspendIfIdle(): boolean {
+    if (this.active || this.suspended) return false;
+    this.suspended = true;
+    return true;
+  }
+
+  resume(): void { this.suspended = false; }
 
   start(id: string, kind: JobKind): JobHandle {
+    if (this.suspended) throw new Error('正在安装更新，请稍后重试');
     if (!id.trim()) throw new Error('jobId 不能为空');
     this.active?.controller.abort(new JobCancelledError('已由新任务替代'));
     const job: ActiveJob = { id, kind, controller: new AbortController() };

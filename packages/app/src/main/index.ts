@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { registerPipelineIpc, shutdownPipeline } from './pipeline';
 import { isTrustedExternalUrl } from './external-url';
 import { registerUpdateIpc } from './update-ipc';
+import { acknowledgeMacUpdate } from './update-install';
 import {
   loadWindowState, minimumSizeForBounds, showRestoredWindow,
   WINDOW_STATE_CONFIG_NAME, WindowStateTracker,
@@ -12,6 +13,8 @@ import { windowChromeOptions } from './window-chrome';
 let win: BrowserWindow | null = null;
 
 app.setName('CodeSucker');
+const userDataOverride = app.commandLine.getSwitchValue('user-data-dir');
+if (userDataOverride && path.isAbsolute(userDataOverride)) app.setPath('userData', userDataOverride);
 
 function createWindow() {
   const stateFile = path.join(app.getPath('userData'), WINDOW_STATE_CONFIG_NAME);
@@ -37,6 +40,9 @@ function createWindow() {
   new WindowStateTracker(stateFile, createdWindow, screen, restoredState);
   createdWindow.on('ready-to-show', () => {
     showRestoredWindow(createdWindow, restoredState);
+    if (process.platform === 'darwin') {
+      void acknowledgeMacUpdate(process.execPath, app.getVersion(), process.argv).catch(() => {});
+    }
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -46,7 +52,7 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+if (app.requestSingleInstanceLock()) app.whenReady().then(() => {
   registerPipelineIpc();
   registerUpdateIpc();
 
@@ -59,10 +65,12 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  app.on('second-instance', () => { if (win?.isMinimized()) win.restore(); win?.show(); win?.focus(); });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+else app.quit();
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

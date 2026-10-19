@@ -34,6 +34,14 @@
       {
         "from": "../../THIRD_PARTY_NOTICES.txt",
         "to": "THIRD_PARTY_NOTICES.txt"
+      },
+      {
+        "from": "resources/mac-update-helper.sh",
+        "to": "mac-update-helper.sh"
+      },
+      {
+        "from": "resources/win-update-helper.ps1",
+        "to": "win-update-helper.ps1"
       }
     ],
     "mac": {
@@ -41,7 +49,10 @@
       "category": "public.app-category.developer-tools",
       "identity": "-",
       "hardenedRuntime": false,
-      "target": "dmg",
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "win": {
@@ -61,11 +72,11 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
-    "test": "tsx test/job-controller.ts && tsx test/scan-session.ts && tsx test/scan-guard.ts && tsx test/scan-project-state.ts && tsx test/scan-issue-report.ts && tsx test/preview-layout.ts && tsx test/wizard-progress.ts && tsx test/worker-pool.ts && tsx test/export-guard.ts && tsx test/export-transaction.ts && tsx test/export-state.ts && tsx test/project-file.ts && tsx test/project-config.ts && tsx test/drop-path.ts && tsx test/file-type-stats.ts && tsx test/file-selection.ts && tsx test/third-party-risk-state.ts && tsx test/third-party-risk-ui.ts && tsx test/third-party-risk-sidecar.ts && tsx test/scan-exclude-rules.ts && tsx test/scan-excludes-config.ts && tsx test/latest-request-guard.ts && tsx test/recent-project-state.ts && tsx test/recent-projects.ts && tsx test/brand-icons.ts && tsx test/license-compliance.ts && tsx test/window-state.ts && tsx test/window-chrome.ts && tsx test/typography.ts && tsx test/update-check.ts",
+    "test": "tsx test/job-controller.ts && tsx test/scan-session.ts && tsx test/scan-guard.ts && tsx test/scan-project-state.ts && tsx test/scan-issue-report.ts && tsx test/preview-layout.ts && tsx test/wizard-progress.ts && tsx test/worker-pool.ts && tsx test/export-guard.ts && tsx test/export-transaction.ts && tsx test/export-state.ts && tsx test/project-file.ts && tsx test/project-config.ts && tsx test/drop-path.ts && tsx test/file-type-stats.ts && tsx test/file-selection.ts && tsx test/third-party-risk-state.ts && tsx test/third-party-risk-ui.ts && tsx test/third-party-risk-sidecar.ts && tsx test/scan-exclude-rules.ts && tsx test/scan-excludes-config.ts && tsx test/latest-request-guard.ts && tsx test/recent-project-state.ts && tsx test/recent-projects.ts && tsx test/brand-icons.ts && tsx test/license-compliance.ts && tsx test/window-state.ts && tsx test/window-chrome.ts && tsx test/typography.ts && tsx test/update-check.ts && tsx test/update-install.ts && tsx test/update-helper.ts",
     "test:workers": "tsx test/worker-integration.ts",
     "perf": "tsx test/performance.ts",
-    "dist:mac:x64": "npm run build && electron-builder --mac dmg --x64 --publish never",
-    "dist:mac:arm64": "npm run build && electron-builder --mac dmg --arm64 --publish never",
+    "dist:mac:x64": "npm run build && electron-builder --mac dmg zip --x64 --publish never",
+    "dist:mac:arm64": "npm run build && electron-builder --mac dmg zip --arm64 --publish never",
     "dist:win:x64": "npm run build && electron-builder --win nsis --x64 --publish never",
     "start": "electron-vite preview"
   },
@@ -75,12 +86,14 @@
     "fast-glob": "^3.3.2",
     "iconv-lite": "^0.6.3",
     "ignore": "^5.3.1",
+    "yauzl": "^3.4.0",
     "zustand": "^4.5.2"
   },
   "devDependencies": {
     "@codesucker/core": "*",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/yauzl": "^2.10.3",
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "43.2.0",
     "electron-builder": "^26.15.3",

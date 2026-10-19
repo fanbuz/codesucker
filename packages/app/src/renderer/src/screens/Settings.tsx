@@ -6,6 +6,7 @@ import {
   sameScanExcludeRules, validateScanExcludeRule,
 } from '../scan-exclude-rules';
 import { checkForUpdates, toast, useStore } from '../store';
+import type { UpdateInstallState } from '../../../shared/update-types';
 
 const LINKS = {
   author: 'https://github.com/fanbuz',
@@ -26,12 +27,27 @@ export default function Settings() {
   const [newRule, setNewRule] = useState('');
   const [newRuleError, setNewRuleError] = useState<string | null>(null);
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
+  const [installation, setInstallation] = useState<UpdateInstallState>({ phase: 'idle' });
+  useEffect(() => {
+    let active = true;
+    let received = false;
+    const unsubscribe = window.cs.onUpdateState(state => { received = true; if (active) setInstallation(state); });
+    void window.cs.getUpdateState().then(state => { if (active && !received) setInstallation(state); }).catch(() => {});
+    return () => { active = false; unsubscribe(); };
+  }, []);
+  const downloading = installation.phase === 'downloading' || installation.phase === 'verifying';
+  const installing = installation.phase === 'installing';
+  const ready = installation.phase === 'ready';
+  const percent = installation.total ? Math.min(100, Math.floor((installation.received ?? 0) / installation.total * 100)) : 0;
   const ruleErrors = useMemo(() => getScanExcludeRuleErrors(rules), [rules]);
   const rulesInvalid = ruleErrors.some(Boolean);
   const rulesDirty = !sameScanExcludeRules(normalizeScanExcludeRules(rules), savedRules);
   const update = s.updateResult;
   const hasUpdate = update?.status === 'available';
-  const updateTitle = s.updateChecking
+  const updateTitle = downloading ? (installation.phase === 'verifying' ? '正在验证更新包…' : '正在下载更新…')
+    : ready ? `v${installation.version} 已准备好安装`
+    : installing ? '正在重启并安装更新…'
+    : s.updateChecking
     ? '正在检查 GitHub Release…'
     : hasUpdate
       ? `发现新版本 v${update.latestVersion}`
@@ -40,7 +56,11 @@ export default function Settings() {
         : update?.status === 'error'
           ? '暂时无法检查更新'
           : '检查新版本';
-  const updateDetail = s.updateChecking
+  const updateDetail = installation.message ? installation.message
+    : downloading ? (installation.phase === 'verifying' ? '下载完成，正在检查更新包完整性' : installation.total ? `${percent}% · ${((installation.received ?? 0) / 1024 / 1024).toFixed(1)} / ${(installation.total / 1024 / 1024).toFixed(1)} MB` : '正在准备下载…')
+    : ready ? '请先保存当前项目配置，安装时应用会关闭并自动重新打开'
+    : installing ? '请稍候，已保存的项目和导出文件会保留'
+    : s.updateChecking
     ? '只查询公开版本元数据，不会上传项目或源码'
     : hasUpdate
       ? `当前 v${update.currentVersion}${update.publishedAt ? ` · 发布于 ${new Date(update.publishedAt).toLocaleDateString('zh-CN')}` : ''}`
@@ -51,11 +71,11 @@ export default function Settings() {
           : `当前 v${__APP_VERSION__} · 启动时自动检查正式 Release`;
 
   const handleUpdateAction = async () => {
-    if (hasUpdate) {
-      try { await window.cs.openExternal(update.releaseUrl); } catch { toast('无法打开 GitHub Release 页面'); }
-      return;
-    }
-    await checkForUpdates(true);
+    try {
+      if (ready) { await window.cs.installUpdate(); return; }
+      if (hasUpdate) { await window.cs.downloadUpdate(); return; }
+      await checkForUpdates(true);
+    } catch (error) { toast(error instanceof Error ? error.message : '更新失败，请稍后重试'); }
   };
 
   const applyRuleResult = (result: { rules: string[]; source: 'default' | 'user'; warning: string | null }) => {
@@ -144,8 +164,17 @@ export default function Settings() {
                 {hasUpdate && <span className="update-card__badge">NEW</span>}
               </div>
               <div className="update-card__detail">{updateDetail}</div>
+              {downloading && installation.total && installation.phase === 'downloading' ? (
+                <progress className="update-card__progress" max={100} value={percent} aria-label="更新下载进度" />
+              ) : null}
             </div>
             <div className="update-card__actions">
+              {hasUpdate && !installing && (
+                <button type="button" className="btn-ghost" onClick={() => window.cs.openExternal(update.releaseUrl).catch(() => toast('无法打开官方下载页面'))}>手动下载</button>
+              )}
+              {downloading && (
+                <button type="button" className="btn-ghost" onClick={() => void window.cs.cancelUpdate().catch(() => toast('取消下载失败，请稍后重试'))}>取消下载</button>
+              )}
               {hasUpdate && update.notes.length > 0 && (
                 <button type="button" className="btn-ghost update-card__notes-action"
                   aria-haspopup="dialog" onClick={() => setReleaseNotesOpen(true)}>
@@ -153,8 +182,8 @@ export default function Settings() {
                 </button>
               )}
               <button className={hasUpdate ? 'btn-primary update-card__action' : 'btn-ghost update-card__action'}
-                disabled={s.updateChecking} onClick={handleUpdateAction}>
-                {s.updateChecking ? '检查中…' : hasUpdate ? '查看并下载' : update?.status === 'up-to-date' ? '重新检查' : '检查更新'}
+                disabled={s.updateChecking || downloading || installing || (ready && !!s.activeJobId)} onClick={handleUpdateAction}>
+                {installing ? '正在安装…' : ready ? '重启并安装' : downloading ? '准备更新中…' : s.updateChecking ? '检查中…' : hasUpdate ? (installation.phase === 'error' ? '重试下载' : '下载更新') : update?.status === 'up-to-date' ? '重新检查' : '检查更新'}
               </button>
             </div>
           </section>
@@ -260,7 +289,7 @@ export default function Settings() {
                 隐私说明
               </div>
               <div className="settings-card__body">
-                CodeSucker 的扫描、清洗、脱敏、排版与导出全部在本机完成，您的源代码<span>永远不会离开这台电脑</span>。应用启动或您手动检查更新时，只向 GitHub 请求公开的 Release 版本元数据，不会发送项目路径、源码或配置。
+                CodeSucker 的扫描、清洗、脱敏、排版与导出全部在本机完成，您的源代码<span>永远不会离开这台电脑</span>。检查更新时只查询 GitHub 公开版本信息；点击下载更新后会获取更新清单和安装包，不会发送项目路径、源码或配置。
               </div>
             </section>
 

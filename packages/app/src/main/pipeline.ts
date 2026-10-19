@@ -55,6 +55,9 @@ const scanSessions = new ScanSessionGuard<ScanSnapshot>();
 let lastExportFile: string | null = null;
 const jobs = new JobController();
 
+export const lockPipelineForUpdate = () => jobs.suspendIfIdle();
+export const unlockPipelineForUpdate = () => jobs.resume();
+
 interface PipelineResources {
   workerCount: number;
   pipeline: WorkerPool<PipelineWorkerRequest, PipelineWorkerResult>;
