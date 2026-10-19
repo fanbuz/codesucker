@@ -55,6 +55,15 @@ const scanSessions = new ScanSessionGuard<ScanSnapshot>();
 let lastExportFile: string | null = null;
 const jobs = new JobController();
 
+export const lockPipelineForUpdate = () => jobs.suspendIfIdle();
+export const unlockPipelineForUpdate = () => jobs.resume();
+
+export async function preparePipelineForUpdate(): Promise<void> {
+  const current = resources;
+  resources = null;
+  if (current) await Promise.all([current.pipeline.close(), current.render.close()]);
+}
+
 interface PipelineResources {
   workerCount: number;
   pipeline: WorkerPool<PipelineWorkerRequest, PipelineWorkerResult>;
@@ -215,15 +224,15 @@ async function scanWithWorkers(
   sender: WebContents,
 ) {
   const job = jobs.start(request.jobId, 'scan');
-  // begin 必须早于任何异步扫描工作：从这一刻起旧处理、分页与导出会话均失效。
-  const normalizedRoot = path.resolve(request.root);
-  scanSessions.begin(request.scanSessionId, normalizedRoot);
-  lastExportFile = null;
-  const workerResources = getResources();
-  const report = createProgressReporter(job, sender, workerResources.workerCount);
-  // 每次扫描只读取一次规则快照，运行中的设置修改留到下次扫描生效。
-  const excludeRules = loadScanExcludeSnapshot(scanExcludesFile());
   try {
+    // begin 必须早于任何异步扫描工作：从这一刻起旧处理、分页与导出会话均失效。
+    const normalizedRoot = path.resolve(request.root);
+    scanSessions.begin(request.scanSessionId, normalizedRoot);
+    lastExportFile = null;
+    const workerResources = getResources();
+    const report = createProgressReporter(job, sender, workerResources.workerCount);
+    // 每次扫描只读取一次规则快照，运行中的设置修改留到下次扫描生效。
+    const excludeRules = loadScanExcludeSnapshot(scanExcludesFile());
     const rootSnapshot = captureProjectRoot(request.root);
     const result = await discoverAsync(request.root, DEFAULT_EXTENSIONS, excludeRules, {
       concurrency: workerResources.workerCount * 2,
@@ -432,10 +441,10 @@ export function registerPipelineIpc() {
   ) => {
     const job = jobs.start(request.jobId, 'export');
     lastExportFile = null;
-    const workerResources = getResources();
-    const report = createProgressReporter(job, event.sender, workerResources.workerCount);
     let stagingDir: string | null = null;
     try {
+      const workerResources = getResources();
+      const report = createProgressReporter(job, event.sender, workerResources.workerCount);
       if (!request.payload.formats.docx && !request.payload.formats.txt) throw new Error('请至少选择一种输出格式');
       const entries = orderedEntries(request.payload);
       const scan = requireCurrentScan(request.payload.root, request.payload.scanSessionId);

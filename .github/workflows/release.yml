@@ -56,14 +56,18 @@ jobs:
             app: packages/app/release/mac/CodeSucker.app
             arch: x86_64
             artifact: codesucker-macos-x64
-            path: packages/app/release/CodeSucker-*-mac-x64.dmg
+            path: |
+              packages/app/release/CodeSucker-*-mac-x64.dmg
+              packages/app/release/CodeSucker-*-mac-x64.zip
           - label: macOS arm64
             runner: macos-14
             script: dist:mac:arm64
             app: packages/app/release/mac-arm64/CodeSucker.app
             arch: arm64
             artifact: codesucker-macos-arm64
-            path: packages/app/release/CodeSucker-*-mac-arm64.dmg
+            path: |
+              packages/app/release/CodeSucker-*-mac-arm64.dmg
+              packages/app/release/CodeSucker-*-mac-arm64.zip
           - label: Windows x64
             runner: windows-2022
             script: dist:win:x64
@@ -133,6 +137,22 @@ jobs:
             Get-Process CodeSucker -ErrorAction SilentlyContinue | Stop-Process -Force
           }
 
+      - name: Test macOS application replacement and restart
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APP_PATH: ${{ matrix.app }}
+          APP_ARCH: ${{ matrix.arch }}
+        run: |
+          if [[ "$(uname -m)" == "$APP_ARCH" ]]; then
+            npx tsx packages/app/test/update-mac-integration.ts "$APP_PATH"
+          fi
+
+      - name: Test Windows installer update
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: npx tsx packages/app/test/update-win-integration.ts
+
       - name: Upload installer
         uses: actions/upload-artifact@v7
         with:
@@ -151,12 +171,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+
       - name: Download installers
         uses: actions/download-artifact@v8
         with:
           pattern: codesucker-*
           path: release-assets
           merge-multiple: true
+
+      - name: Sign update manifest
+        env:
+          CODESUCKER_UPDATE_SIGNING_KEY: ${{ secrets.CODESUCKER_UPDATE_SIGNING_KEY }}
+        run: node scripts/sign-update-manifest.mjs release-assets
 
       - name: Generate SHA-256 checksums
         working-directory: release-assets
@@ -177,5 +210,5 @@ jobs:
             --verify-tag \
             --title "CodeSucker $GITHUB_REF_NAME" \
             --generate-notes \
-            --notes $'### 安装与处理边界\n\nmacOS 应用包及内嵌组件已使用 ad hoc 临时签名并通过完整性校验，尚未进行 Apple Developer ID 正式签名与公证。临时签名不能验证开发者身份，也不保证通过 Gatekeeper。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。\n\nCodeSucker 自身的源码扫描、第三方代码线索分析、清洗、分页、校验和导出全部在本机运行，不调用任何本地或云端 LLM，也不向模型服务发送源码。第三方代码线索只提供启发式证据与筛选建议，不自动判定代码归属，也不构成法律意见。更新检测仅查询 GitHub Release 公开版本元数据。' \
+            --notes $'### 安装与处理边界\n\nmacOS 应用包及内嵌组件已使用 ad hoc 临时签名并通过完整性校验，尚未进行 Apple Developer ID 正式签名与公证。临时签名不能验证开发者身份，也不保证通过 Gatekeeper。请只从本项目 Release 下载并先核对 SHA-256；如首次打开被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。详细处理方式见 README。\n\nCodeSucker 自身的源码扫描、第三方代码线索分析、清洗、分页、校验和导出全部在本机运行，不调用任何本地或云端 LLM，也不向模型服务发送源码。第三方代码线索只提供启发式证据与筛选建议，不自动判定代码归属，也不构成法律意见。更新检测查询 GitHub Release 公开版本元数据；用户点击下载后获取经过独立签名验证的更新清单和安装包，不发送项目路径、源码或配置。' \
             "${release_options[@]}"

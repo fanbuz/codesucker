@@ -1,4 +1,4 @@
-import type { UpdateCheckResult } from '../../shared/update-types';
+import type { UpdateCheckResult, UpdateInstallState } from '../../shared/update-types';
 
 export {};
 
@@ -46,6 +46,11 @@ declare global {
       removeRecent: (root: string) => Promise<RecentProjectEntry[]>;
       removeRecentMany: (roots: string[]) => Promise<RecentProjectEntry[]>;
       checkForUpdates: (force?: boolean) => Promise<UpdateCheckResult>;
+      getUpdateState: () => Promise<UpdateInstallState>;
+      downloadUpdate: () => Promise<UpdateInstallState>;
+      cancelUpdate: () => Promise<UpdateInstallState>;
+      installUpdate: () => Promise<UpdateInstallState>;
+      onUpdateState: (callback: (state: UpdateInstallState) => void) => () => void;
       getScanExcludes: () => Promise<ScanExcludesState>;
       saveScanExcludes: (rules: string[]) => Promise<ScanExcludesState>;
       resetScanExcludes: () => Promise<ScanExcludesState>;

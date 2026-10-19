@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { UpdateCheckResult } from '../shared/update-types';
+import type { UpdateCheckResult, UpdateInstallState } from '../shared/update-types';
 
 interface ProgressEvent {
   jobId: string;
@@ -26,6 +26,15 @@ const api = {
   removeRecent: (root: string) => ipcRenderer.invoke('recent:remove', root),
   removeRecentMany: (roots: string[]) => ipcRenderer.invoke('recent:removeMany', roots),
   checkForUpdates: (force = false): Promise<UpdateCheckResult> => ipcRenderer.invoke('update:check', force),
+  getUpdateState: (): Promise<UpdateInstallState> => ipcRenderer.invoke('update:state'),
+  downloadUpdate: (): Promise<UpdateInstallState> => ipcRenderer.invoke('update:download'),
+  cancelUpdate: (): Promise<UpdateInstallState> => ipcRenderer.invoke('update:cancel'),
+  installUpdate: (): Promise<UpdateInstallState> => ipcRenderer.invoke('update:install'),
+  onUpdateState: (callback: (state: UpdateInstallState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: UpdateInstallState) => callback(state);
+    ipcRenderer.on('update:state', listener);
+    return () => ipcRenderer.removeListener('update:state', listener);
+  },
   getScanExcludes: () => ipcRenderer.invoke('settings:scanExcludes:get'),
   saveScanExcludes: (rules: string[]) => ipcRenderer.invoke('settings:scanExcludes:save', rules),
   resetScanExcludes: () => ipcRenderer.invoke('settings:scanExcludes:reset'),

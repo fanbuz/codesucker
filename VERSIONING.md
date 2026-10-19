@@ -168,3 +168,13 @@ gh workflow run release.yml --repo fanbuz/codesucker --ref <branch>
 ## 当前版本
 
 源码当前产品版本为 `0.5.3`。正式发布以 `v0.5.3` tag 和对应 GitHub Release 为准；仅修改源码中的版本字段不代表已经发布。
+
+## 应用内更新
+
+v0.5.3 起采用独立更新器：macOS ZIP 包由更新助手在应用退出后替换，保留完整 ad hoc 签名并等待新版窗口就绪确认，启动失败恢复旧应用；Windows 使用 NSIS 安装器升级。下载和安装均需用户主动操作，运行中的流水线任务会阻止安装。
+
+正式发布需同时上传三个安装器、两个 macOS ZIP、`SHA256SUMS.txt`、`update-manifest.json` 和 `update-manifest.sig`。清单包含版本、平台、架构、文件名、大小与 SHA-256，发布任务使用 `CODESUCKER_UPDATE_SIGNING_KEY` Secret 进行 Ed25519 签名；应用仅信任源码内嵌公钥，私钥不得进入源码、制品或日志。更换密钥前须先发布包含新信任根的过渡版本。
+
+应用内安装仅跟随 `x.y.z` 正式版本。预发布及含构建元数据的版本继续正常生成安装包和 Release，但跳过更新清单，使用手动安装。
+
+手动三平台打包包含原生 macOS 真应用替换与重启、失败回滚测试，以及 Windows v0.5.2 → 当前版本 NSIS 升级测试。v0.5.2 及更早版本不具备更新安装能力，需手动安装首个支持版本一次。
